@@ -8,6 +8,7 @@ public sealed class ManagerEngine
 {
     private abstract record ManagerInput;
     private sealed record ReconcileInput : ManagerInput;
+    private sealed record MoveInput(NativeNotification Notification) : ManagerInput;
     private sealed record CommandInput(ManagerCommand Command, CancellationToken Cancellation,
         TaskCompletionSource<CommandResult> Completion) : ManagerInput;
     private sealed record SubscribeInput(IManagerEventSink Sink, IReadOnlyList<string>? Types,
@@ -26,6 +27,7 @@ public sealed class ManagerEngine
     private readonly Channel<ManagerInput> inputs;
     private readonly WorkspaceSet workspaces;
     private readonly Dictionary<Guid, WindowMode> modes = [];
+    private readonly Dictionary<Guid, PixelRect> movingWindows = [];
     private readonly Guid instanceId = Guid.NewGuid();
     private readonly int innerGap;
     private readonly int outerGap;
@@ -141,6 +143,17 @@ public sealed class ManagerEngine
                     subscribers.Remove(unsubscribe.Id);
                     unsubscribe.Completion.TrySetResult(new(true, null, null, revision));
                 }
+                else if (input is MoveInput move && move.Notification.WindowId is { } windowId)
+                {
+                    if (move.Notification.Kind == NativeNotificationKind.MoveStarted)
+                    {
+                        var bounds = move.Notification.Bounds ?? Current?.Desktop.Windows.FirstOrDefault(window => window.Id == windowId)?.Bounds;
+                        if (bounds is not null) movingWindows.TryAdd(windowId, bounds);
+                        await ReconcileAsync(linked.Token);
+                    }
+                    else
+                        await ReconcileAsync(linked.Token, droppedWindowId: windowId);
+                }
                 else await ReconcileAsync(linked.Token);
                 if (Interlocked.Exchange(ref dirty, 0) != 0 && !exiting)
                     await ReconcileAsync(linked.Token);
@@ -188,7 +201,12 @@ public sealed class ManagerEngine
 
     private async Task PumpNotificationsAsync(CancellationToken cancellationToken)
     {
-        await foreach (var _ in platform.Notifications(cancellationToken)) RequestReconcile();
+        await foreach (var notification in platform.Notifications(cancellationToken))
+        {
+            if (notification.Kind is NativeNotificationKind.MoveStarted or NativeNotificationKind.MoveEnded)
+                await inputs.Writer.WriteAsync(new MoveInput(notification), cancellationToken);
+            else RequestReconcile();
+        }
     }
 
     private async Task RescanAsync(CancellationToken cancellationToken)
@@ -206,13 +224,17 @@ public sealed class ManagerEngine
     private void ReconcileTrees(DesktopSnapshot desktop)
     {
         foreach (var id in modes.Keys.Except(desktop.Windows.Select(window => window.Id)).ToArray()) modes.Remove(id);
+        foreach (var id in movingWindows.Keys.Except(desktop.Windows.Select(window => window.Id)).ToArray()) movingWindows.Remove(id);
         workspaces.Reconcile(desktop);
     }
 
-    private async Task<IReadOnlyList<NativeActionFailure>> ReconcileAsync(CancellationToken cancellationToken, Guid? focus = null)
+    private async Task<IReadOnlyList<NativeActionFailure>> ReconcileAsync(CancellationToken cancellationToken, Guid? focus = null,
+        Guid? droppedWindowId = null)
     {
         var desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
         ReconcileTrees(desktop);
+        if (droppedWindowId is { } dropped && movingWindows.Remove(dropped, out var original) && !paused)
+            ReflowDrop(desktop, dropped, original);
         List<NativeActionFailure> failures = [];
         List<WindowPlacement> placements = [];
         if (!paused)
@@ -244,16 +266,53 @@ public sealed class ManagerEngine
             }
         }
         var changes = placements.Where(placement => desktop.Windows.Any(window =>
-            window.Id == placement.WindowId && window.Bounds != placement.Bounds)).ToArray();
-        var visibility = workspaces.Visibility(desktop);
-        if (changes.Length > 0 || focus is not null || visibility.Count > 0)
+            window.Id == placement.WindowId && window.Bounds != placement.Bounds) && !movingWindows.ContainsKey(placement.WindowId)).ToArray();
+        var visibility = workspaces.Visibility(desktop).Where(change => !movingWindows.ContainsKey(change.WindowId)).ToArray();
+        if (changes.Length > 0 || focus is not null || visibility.Length > 0 || droppedWindowId is not null)
         {
-            failures.AddRange((await platform.ApplyAsync(new(changes, focus, visibility), cancellationToken)).Failures);
+            failures.AddRange((await platform.ApplyAsync(new(changes, focus, visibility,
+                droppedWindowId is { } completed ? [completed] : null), cancellationToken)).Failures);
             desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
             ReconcileTrees(desktop);
         }
         Commit(desktop);
         return failures;
+    }
+
+    private void ReflowDrop(DesktopSnapshot desktop, Guid windowId, PixelRect original)
+    {
+        var window = desktop.Windows.FirstOrDefault(window => window.Id == windowId);
+        if (window is null || !window.Visible || window.Minimized || window.Fullscreen ||
+            (window.Bounds.X == original.X && window.Bounds.Y == original.Y)) return;
+        var x = window.Bounds.X + window.Bounds.Width / 2.0;
+        var y = window.Bounds.Y + window.Bounds.Height / 2.0;
+        var monitor = desktop.Monitors.FirstOrDefault(monitor => x >= monitor.Bounds.X && y >= monitor.Bounds.Y &&
+            x < (long)monitor.Bounds.X + monitor.Bounds.Width && y < (long)monitor.Bounds.Y + monitor.Bounds.Height)
+            ?? desktop.Monitors.FirstOrDefault(monitor => monitor.Id == window.MonitorId);
+        if (monitor is null) return;
+        var workspace = workspaces.Snapshot.FirstOrDefault(workspace => workspace.Active && workspace.MonitorId == monitor.Id);
+        if (workspace is null) return;
+        Guid? target = null;
+        if (window.Mode == WindowMode.Tiling)
+        {
+            try
+            {
+                target = workspaces.Trees[workspace.Id].Layout(monitor, innerGap, outerGap).Placements
+                    .OrderBy(placement => DistanceToTile(placement.Bounds, x, y)).ThenBy(placement => placement.WindowId)
+                    .FirstOrDefault()?.WindowId;
+            }
+            catch (InvalidOperationException) { /* The normal layout pass reports unsatisfied constraints. */ }
+        }
+        workspaces.MoveWindow(windowId, workspace.Id);
+        if (target is { } targetId && targetId != windowId)
+            workspaces.Trees[workspace.Id].Swap(windowId, targetId);
+    }
+
+    private static double DistanceToTile(PixelRect bounds, double x, double y)
+    {
+        var dx = Math.Max(Math.Max(bounds.X - x, x - ((long)bounds.X + bounds.Width)), 0);
+        var dy = Math.Max(Math.Max(bounds.Y - y, y - ((long)bounds.Y + bounds.Height)), 0);
+        return dx * dx + dy * dy;
     }
 
     private void Commit(DesktopSnapshot desktop)

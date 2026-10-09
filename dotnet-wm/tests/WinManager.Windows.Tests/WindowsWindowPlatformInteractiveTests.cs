@@ -12,6 +12,40 @@ public sealed class WindowsWindowPlatformInteractiveTests
 {
     [IsolatedInteractiveFact]
     [Trait("Category", "IsolatedInteractive")]
+    public async Task MoveEventsProtectGeometryUntilDropLayoutIsAcknowledged()
+    {
+        await using var fixture = await NativeWindowFixture.StartAsync();
+        await using var observer = new WindowsDesktopObserver(ignoredClassNames: [fixture.IgnoredClass]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await observer.StartAsync(timeout.Token);
+        var first = Find(await observer.CaptureAsync(timeout.Token), fixture);
+        await using var notifications = observer.Notifications(timeout.Token).GetAsyncEnumerator();
+        await fixture.CommandAsync("move-start");
+        await WaitForMoveAsync(notifications, NativeNotificationKind.MoveStarted, first.Id);
+        await fixture.CommandAsync("move");
+        var moved = Find(await observer.CaptureAsync(timeout.Token), fixture);
+        Assert.NotEqual(first.Bounds, moved.Bounds);
+        var stale = new LayoutPlan([new(first.Id, first.Bounds)]);
+        Assert.Empty((await observer.ApplyAsync(stale, timeout.Token)).Failures);
+        Assert.Equal(moved.Bounds, Find(await observer.CaptureAsync(timeout.Token), fixture).Bounds);
+        await fixture.CommandAsync("move-end");
+        await WaitForMoveAsync(notifications, NativeNotificationKind.MoveEnded, first.Id);
+        Assert.Empty((await observer.ApplyAsync(stale, timeout.Token)).Failures);
+        Assert.Equal(moved.Bounds, Find(await observer.CaptureAsync(timeout.Token), fixture).Bounds);
+        Assert.Empty((await observer.ApplyAsync(stale with { CompletedMoves = [first.Id] }, timeout.Token)).Failures);
+        await WaitForBoundsAsync(observer, fixture, first.Bounds, timeout.Token);
+    }
+
+    private static async Task WaitForMoveAsync(IAsyncEnumerator<NativeNotification> notifications,
+        NativeNotificationKind kind, Guid windowId)
+    {
+        while (await notifications.MoveNextAsync())
+            if (notifications.Current.Kind == kind && notifications.Current.WindowId == windowId) return;
+        Assert.Fail("Desktop notifications ended before the expected move event.");
+    }
+
+    [IsolatedInteractiveFact]
+    [Trait("Category", "IsolatedInteractive")]
     public async Task AppliesVisibleGeometryWithoutActivationOrZOrderAndClampsApplicationMinimum()
     {
         await using var fixture = await NativeWindowFixture.StartAsync();

@@ -148,6 +148,12 @@ internal static class TestWindowProgram
                         if (!PInvoke.SetWindowPos(windows["normal"], default, 220, 230, 500, 350,
                             SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER)) throw NativeError();
                         break;
+                    case "move-start":
+                        PInvoke.NotifyWinEvent(PInvoke.EVENT_SYSTEM_MOVESIZESTART, windows["normal"], 0, 0);
+                        break;
+                    case "move-end":
+                        PInvoke.NotifyWinEvent(PInvoke.EVENT_SYSTEM_MOVESIZEEND, windows["normal"], 0, 0);
+                        break;
                     case "minimize": PInvoke.ShowWindow(windows["normal"], SHOW_WINDOW_CMD.SW_MINIMIZE); break;
                     case "maximize": PInvoke.ShowWindow(windows["normal"], SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED); break;
                     case "fullscreen":

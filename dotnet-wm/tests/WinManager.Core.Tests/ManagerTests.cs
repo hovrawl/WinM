@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using WinManager.Contracts;
 using WinManager.Core;
@@ -138,11 +139,12 @@ public sealed class ManagerTests
 
 internal sealed class FakeWindowPlatform : IWindowPlatform
 {
-    private readonly Channel<NativeNotification> notifications = Channel.CreateBounded<NativeNotification>(1);
+    private readonly Channel<NativeNotification> notifications = Channel.CreateUnbounded<NativeNotification>();
     private int activeActions;
     public DesktopSnapshot Desktop { get; set; }
     public bool FailActions { get; set; }
     public bool NotifyOnApply { get; set; }
+    public TaskCompletionSource MoveNotificationRead { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public int MaximumConcurrentActions { get; private set; }
     public List<LayoutPlan> Plans { get; } = [];
     public FakeWindowPlatform()
@@ -154,9 +156,22 @@ internal sealed class FakeWindowPlatform : IWindowPlatform
     }
     public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     public Task<DesktopSnapshot> CaptureAsync(CancellationToken cancellationToken) => Task.FromResult(Desktop);
-    public IAsyncEnumerable<NativeNotification> Notifications(CancellationToken cancellationToken) =>
-        notifications.Reader.ReadAllAsync(cancellationToken);
+    public async IAsyncEnumerable<NativeNotification> Notifications([EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await foreach (var notification in notifications.Reader.ReadAllAsync(cancellationToken))
+        {
+            yield return notification;
+            if (notification.Kind is NativeNotificationKind.MoveStarted or NativeNotificationKind.MoveEnded)
+                MoveNotificationRead.TrySetResult();
+        }
+    }
     public void Notify() => notifications.Writer.TryWrite(new(NativeNotificationKind.Reconcile));
+    public void NotifyMove(Guid windowId, bool started)
+    {
+        MoveNotificationRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        notifications.Writer.TryWrite(new(started ? NativeNotificationKind.MoveStarted : NativeNotificationKind.MoveEnded,
+            windowId, started ? Desktop.Windows.FirstOrDefault(window => window.Id == windowId)?.Bounds : null));
+    }
     public Task<ApplyResult> ApplyAsync(LayoutPlan plan, CancellationToken cancellationToken)
     {
         MaximumConcurrentActions = Math.Max(MaximumConcurrentActions, ++activeActions);

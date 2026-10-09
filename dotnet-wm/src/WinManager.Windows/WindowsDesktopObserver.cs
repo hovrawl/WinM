@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Threading.Channels;
@@ -25,8 +26,11 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     private readonly object gate = new();
     private readonly HashSet<string> ignoredProcesses;
     private readonly HashSet<string> ignoredClasses;
-    private readonly Channel<NativeNotification> notifications = Channel.CreateBounded<NativeNotification>(
-        new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite, AllowSynchronousContinuations = false });
+    private readonly Channel<NativeNotification> notifications = Channel.CreateUnbounded<NativeNotification>(
+        new UnboundedChannelOptions { SingleReader = true, AllowSynchronousContinuations = false });
+    private int reconcilePending;
+    private readonly Dictionary<nint, Guid> movingWindows = [];
+    private readonly HashSet<Guid> pendingDrops = [];
     private readonly Channel<CaptureRequest> captures = Channel.CreateBounded<CaptureRequest>(
         new BoundedChannelOptions(64) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait, AllowSynchronousContinuations = false });
     private readonly Channel<ApplyRequest> applies = Channel.CreateBounded<ApplyRequest>(
@@ -100,8 +104,14 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         }
     }
 
-    public IAsyncEnumerable<NativeNotification> Notifications(CancellationToken cancellationToken) =>
-        notifications.Reader.ReadAllAsync(cancellationToken);
+    public async IAsyncEnumerable<NativeNotification> Notifications([EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await foreach (var notification in notifications.Reader.ReadAllAsync(cancellationToken))
+        {
+            if (notification.Kind == NativeNotificationKind.Reconcile) Interlocked.Exchange(ref reconcilePending, 0);
+            yield return notification;
+        }
+    }
 
     public async Task<DesktopSnapshot> CaptureAsync(CancellationToken cancellationToken)
     {
@@ -127,7 +137,8 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     public Task<ApplyResult> ApplyAsync(LayoutPlan plan, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(plan);
-        return DispatchApplyAsync(new LayoutPlan(plan.Placements.ToArray(), plan.FocusWindowId, plan.Visibility?.ToArray()), false, cancellationToken);
+        return DispatchApplyAsync(new LayoutPlan(plan.Placements.ToArray(), plan.FocusWindowId,
+            plan.Visibility?.ToArray(), plan.CompletedMoves?.ToArray()), false, cancellationToken);
     }
 
     public Task<ApplyResult> RestoreAsync(CancellationToken cancellationToken) =>
@@ -209,6 +220,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             }
             if (window == default) throw NativeError("CreateWindowEx");
             InstallHook(PInvoke.EVENT_SYSTEM_FOREGROUND, PInvoke.EVENT_SYSTEM_FOREGROUND);
+            InstallHook(PInvoke.EVENT_SYSTEM_MOVESIZESTART, PInvoke.EVENT_SYSTEM_MOVESIZEEND);
             InstallHook(PInvoke.EVENT_SYSTEM_MINIMIZESTART, PInvoke.EVENT_SYSTEM_MINIMIZEEND);
             InstallHook(PInvoke.EVENT_OBJECT_CREATE, PInvoke.EVENT_OBJECT_NAMECHANGE);
             InstallHook(PInvoke.EVENT_OBJECT_CLOAKED, PInvoke.EVENT_OBJECT_UNCLOAKED);
@@ -310,6 +322,22 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         if (eventType >= ObjectCreate && (objectId != 0 || childId != 0 || window == default)) return;
         try
         {
+            var handle = (nint)window.Value;
+            if (eventType == PInvoke.EVENT_SYSTEM_MOVESIZESTART && window != default)
+            {
+                var id = observedWindows.Keys.FirstOrDefault(id => identities.TryResolve(id, out var identity) && identity.Handle == handle);
+                if (id != Guid.Empty && movingWindows.TryAdd(handle, id))
+                    notifications.Writer.TryWrite(new(NativeNotificationKind.MoveStarted, id, observedWindows[id].Bounds));
+            }
+            else if (eventType == PInvoke.EVENT_SYSTEM_MOVESIZEEND && movingWindows.Remove(handle, out var id))
+            {
+                pendingDrops.Add(id);
+                notifications.Writer.TryWrite(new(NativeNotificationKind.MoveEnded, id));
+            }
+            else if (eventType == ObjectDestroy)
+            {
+                if (movingWindows.Remove(handle, out var destroyed)) pendingDrops.Remove(destroyed);
+            }
             if (eventType is ObjectCreate or ObjectDestroy)
                 identities.RecordLifecycleChange((nint)window.Value, WindowIdentityMap.ExpandEventTime(eventTime, PInvoke.GetTickCount64()));
             Notify();
@@ -348,7 +376,11 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         return PInvoke.DefWindowProc(window, message, wParam, lParam);
     }
 
-    private void Notify() => notifications.Writer.TryWrite(new NativeNotification(NativeNotificationKind.Reconcile));
+    private void Notify()
+    {
+        if (Interlocked.Exchange(ref reconcilePending, 1) == 0)
+            notifications.Writer.TryWrite(new NativeNotification(NativeNotificationKind.Reconcile));
+    }
 
     private void ProcessCaptures(HWND window)
     {
@@ -486,15 +518,18 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     private unsafe ApplyResult Apply(LayoutPlan plan, CancellationToken cancellationToken)
     {
         CheckRecovery();
+        foreach (var id in plan.CompletedMoves ?? []) pendingDrops.Remove(id);
         var failures = new List<NativeActionFailure>();
         foreach (var visibility in plan.Visibility ?? [])
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (movingWindows.ContainsValue(visibility.WindowId) || pendingDrops.Contains(visibility.WindowId)) continue;
             ApplyVisibility(visibility, failures, cancellationToken);
         }
         foreach (var placement in plan.Placements)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (movingWindows.ContainsValue(placement.WindowId) || pendingDrops.Contains(placement.WindowId)) continue;
             if (!ValidateTarget(placement.WindowId, out var window, out var info, out var failure))
             {
                 failures.Add(failure!);
@@ -534,6 +569,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 failures.Add(failure!);
                 continue;
             }
+            if (movingWindows.ContainsValue(placement.WindowId) || pendingDrops.Contains(placement.WindowId)) continue;
             Marshal.SetLastPInvokeError(0);
             if (!PInvoke.SetWindowPos(window, default, (int)x, (int)y, (int)outerWidth, (int)outerHeight,
                 SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER | SET_WINDOW_POS_FLAGS.SWP_ASYNCWINDOWPOS))

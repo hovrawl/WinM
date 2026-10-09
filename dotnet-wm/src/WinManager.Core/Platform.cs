@@ -2,8 +2,8 @@ using WinManager.Contracts;
 
 namespace WinManager.Core;
 
-public enum NativeNotificationKind { WindowChanged, FocusChanged, DisplayChanged, Reconcile }
-public sealed record NativeNotification(NativeNotificationKind Kind);
+public enum NativeNotificationKind { WindowChanged, FocusChanged, DisplayChanged, Reconcile, MoveStarted, MoveEnded }
+public sealed record NativeNotification(NativeNotificationKind Kind, Guid? WindowId = null, PixelRect? Bounds = null);
 public interface IDesktopObserver : IAsyncDisposable
 {
     Task StartAsync(CancellationToken cancellationToken);
