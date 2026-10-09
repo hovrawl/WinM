@@ -3,6 +3,9 @@
 `net10.0-windows`; references `WinManager.Client`. Explicit per-user startup registration;
 no shell execution, visualization, or engine/Host dependencies.
 
+See [External commands API](../../docs/external-api.md) for all manager commands,
+their arguments and behavior, and third-party integration examples.
+
 From `C:\Dev\NahFarn\WinM\dotnet-wm`, build only the two new production projects:
 
 ```powershell

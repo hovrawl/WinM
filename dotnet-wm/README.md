@@ -67,7 +67,9 @@ run for the same user/session, even with pipe overrides. Exit code `5` means
 another instance owns the session; `2` indicates startup/lifetime failure and
 `6` indicates incomplete shutdown restoration.
 
-See `docs\configuration.md`, `docs\protocol.md`, `docs\validation.md`, and `docs\iteration-2.md`.
+For the full command reference and third-party CLI, .NET SDK, and named-pipe
+integration examples, see [External commands API](docs/external-api.md).
+See also `docs\configuration.md`, `docs\protocol.md`, `docs\validation.md`, and `docs\iteration-2.md`.
 Commands commit logical intent; native operations are best-effort. Snapshots and
 events report observed physical geometry, not assumed successful placement.
 Managing elevated windows is best-effort and can fail without administrator rights.
