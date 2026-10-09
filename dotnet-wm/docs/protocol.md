@@ -37,13 +37,19 @@ ID receives `Guid.Empty` as its response ID. Errors do not mutate manager state.
 | `unsubscribe` | `{"subscriptionId": "<GUID>"}` | None |
 
 Commands support `focus`, `move`, `resize`, `setSplit`, `setMode`, `pause`,
-`redraw`, `exit`, `activateWorkspace`, `moveToWorkspace`, and `moveToMonitor`.
+`redraw`, `exit`, `activateWorkspace`, `moveToWorkspace`, `moveToMonitor`, and `toggleMode`.
 Optional command fields are `windowId`, `direction`, `amount`, `orientation`,
 `mode`, `paused`, `workspaceId`, `workspaceName`, and `monitorId`. Workspace
 commands accept exactly one workspace GUID or case-insensitive configured name;
 named targets are resolved atomically in the manager. Command-specific argument and
 target validation is performed by the manager actor. For example, `pause`
 requires `paused`, and `resize` requires `direction` and a fraction in `(0, 0.8]`.
+`toggleMode` needs no arguments; an optional `windowId` selects the target,
+otherwise it uses the focused observable window. `setMode: tiling` and toggling
+into tiling override fullscreen/popup/tool/owned/no-activate defaults for that
+window's lifetime. Snapshot windows include `isPopup`, `isToolWindow`, `isOwned`,
+`isNoActivate`, `isIgnored`, and nullable `tilingOverride`; default-ignored
+windows remain discoverable but are neither placed nor workspace-hidden.
 
 One subscription is allowed per connection. An unsubscribe ID must belong to
 that connection. Already queued events can precede an unsubscribe response;

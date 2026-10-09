@@ -426,18 +426,18 @@ internal sealed class PipeHost : IAsyncDisposable
     public Task ServerRun { get; }
     public CancellationToken Token => timeout.Token;
 
-    private PipeHost(string? name, int maximumClients, int outputCapacity, int titleLength)
+    private PipeHost(string? name, int maximumClients, int outputCapacity, int titleLength, bool popup)
     {
         Name = name ?? "WinManager.test." + Guid.NewGuid().ToString("N");
-        platform = new TestWindowPlatform(titleLength);
+        platform = new TestWindowPlatform(titleLength, popup);
         Engine = new(platform);
         EngineRun = Engine.RunAsync(Token);
         Server = new(Engine, Name, maximumClients, outputCapacity);
         ServerRun = Server.RunAsync(Token);
     }
-    internal static async Task<PipeHost> StartAsync(string? name = null, int maximumClients = 16, int outputCapacity = 128, int titleLength = 8)
+    internal static async Task<PipeHost> StartAsync(string? name = null, int maximumClients = 16, int outputCapacity = 128, int titleLength = 8, bool popup = false)
     {
-        var host = new PipeHost(name, maximumClients, outputCapacity, titleLength);
+        var host = new PipeHost(name, maximumClients, outputCapacity, titleLength, popup);
         Assert.True((await host.Engine.ExecuteAsync(new(CommandKind.Redraw), host.Token)).Success);
         return host;
     }
@@ -471,11 +471,11 @@ internal sealed class TestWindowPlatform : IWindowPlatform
 {
     private readonly Channel<NativeNotification> notifications = Channel.CreateBounded<NativeNotification>(1);
     private DesktopSnapshot desktop;
-    internal TestWindowPlatform(int titleLength)
+    internal TestWindowPlatform(int titleLength, bool popup = false)
     {
         var monitor = Guid.NewGuid();
         desktop = new([new(monitor, "test", new(0, 0, 1000, 900), new(0, 0, 1000, 850), 96)],
-            [new(Guid.NewGuid(), monitor, new string('x', titleLength), "test", "test", new(0, 0, 200, 200), true, false, false, WindowMode.Tiling)], null);
+            [new(Guid.NewGuid(), monitor, new string('x', titleLength), "test", "test", new(0, 0, 200, 200), true, false, false, WindowMode.Tiling, IsPopup: popup)], null);
     }
     public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     public Task<DesktopSnapshot> CaptureAsync(CancellationToken cancellationToken) => Task.FromResult(desktop);

@@ -66,8 +66,11 @@ internal static class TestWindowProgram
             Create("hidden", visible: false);
             if (args[0] != "--native-layout-fixture")
             {
+                Create("popup", style: WINDOW_STYLE.WS_POPUP);
                 Create("tool", WINDOW_EX_STYLE.WS_EX_TOOLWINDOW);
                 Create("owned", owner: windows["normal"]);
+                Create("noactivate", WINDOW_EX_STYLE.WS_EX_NOACTIVATE);
+                Create("child", owner: windows["normal"], style: WINDOW_STYLE.WS_CHILD);
                 Create("ignored", className: ignoredClass);
             }
             var control = windows["hidden"];
@@ -113,10 +116,11 @@ internal static class TestWindowProgram
         }
     }
 
-    private static unsafe void Create(string name, WINDOW_EX_STYLE extendedStyle = 0, HWND owner = default, bool visible = true, string? className = null)
+    private static unsafe void Create(string name, WINDOW_EX_STYLE extendedStyle = 0, HWND owner = default, bool visible = true,
+        string? className = null, WINDOW_STYLE style = WINDOW_STYLE.WS_OVERLAPPEDWINDOW)
     {
         var window = PInvoke.CreateWindowEx(extendedStyle, className ?? windowClass, prefix + "." + name,
-            WINDOW_STYLE.WS_OVERLAPPEDWINDOW, 100, 100, 400, 300, owner, default, instance!, null);
+            style, 100, 100, 400, 300, owner, default, instance!, null);
         if (window == default) throw NativeError();
         windows[name] = window;
         if (visible) PInvoke.ShowWindow(window, SHOW_WINDOW_CMD.SW_SHOWNOACTIVATE);
@@ -177,6 +181,7 @@ internal static class TestWindowProgram
                         if (!PInvoke.DestroyWindow(windows["normal"])) throw NativeError();
                         windows.Remove("normal");
                         windows.Remove("owned");
+                        windows.Remove("child");
                         break;
                     case "create": Create("normal"); break;
                     case "slow-minimum": slowMinimum = true; break;

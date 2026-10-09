@@ -7,6 +7,35 @@ namespace WinManager.Ipc.Tests;
 
 public sealed class ClientIntegrationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SdkTogglesIndividualWindowsAndExposesSemanticDefaults(bool popup)
+    {
+        await using var host = await PipeHost.StartAsync(popup: popup);
+        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        var initial = Assert.Single((await client.QuerySnapshotAsync(host.Token)).Desktop.Windows);
+        Assert.Equal(popup, initial.IsPopup);
+        Assert.Equal(popup, initial.IsIgnored);
+        Assert.Null(initial.TilingOverride);
+        Assert.Equal(popup ? WindowMode.Floating : WindowMode.Tiling, initial.Mode);
+        await using var subscription = await client.SubscribeAsync([ManagerEventTypes.WindowUpdated], host.Token);
+        await using var events = subscription.ReadEventsAsync(host.Token).GetAsyncEnumerator();
+        Assert.True(await events.MoveNextAsync());
+        Assert.Equal(ManagerEventTypes.Snapshot, events.Current.EventType);
+        Assert.True((await client.ExecuteAsync(new(CommandKind.ToggleMode, initial.Id), host.Token)).Success);
+        Assert.True(await events.MoveNextAsync());
+        Assert.Equal(ManagerEventTypes.WindowUpdated, events.Current.EventType);
+        var changed = Assert.Single(events.Current.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!.Desktop.Windows);
+        Assert.Equal(popup ? WindowMode.Tiling : WindowMode.Floating, changed.Mode);
+        Assert.Equal(popup, changed.TilingOverride);
+        Assert.False(changed.IsIgnored);
+        Assert.True((await client.ExecuteAsync(new(CommandKind.ToggleMode, initial.Id), host.Token)).Success);
+        var restored = Assert.Single((await client.QuerySnapshotAsync(host.Token)).Desktop.Windows);
+        Assert.Equal(initial.Mode, restored.Mode);
+        Assert.Equal(popup, restored.IsIgnored);
+    }
+
     [Fact]
     public async Task SdkDemultiplexesSnapshotCommandsAndEventsAndUnsubscribes()
     {

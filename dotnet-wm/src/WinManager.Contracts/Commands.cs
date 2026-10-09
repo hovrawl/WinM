@@ -2,7 +2,7 @@ namespace WinManager.Contracts;
 
 public enum Direction { Left, Right, Up, Down }
 public enum SplitOrientation { Horizontal, Vertical }
-public enum CommandKind { Focus, Move, Resize, SetSplit, SetMode, Pause, Redraw, Exit, ActivateWorkspace, MoveToWorkspace, MoveToMonitor }
+public enum CommandKind { Focus, Move, Resize, SetSplit, SetMode, Pause, Redraw, Exit, ActivateWorkspace, MoveToWorkspace, MoveToMonitor, ToggleMode }
 public sealed record ManagerCommand(CommandKind Kind, Guid? WindowId = null,
     Direction? Direction = null, double? Amount = null,
     SplitOrientation? Orientation = null, WindowMode? Mode = null, bool? Paused = null,

@@ -8,6 +8,8 @@ GlazeWM checkout is a behavioral reference and is not modified or linked.
 - Native desktop discovery, stable window identities, serialized commands,
   horizontal/vertical split layouts, DPI-scaled gaps, directional focus/movement,
   split resize, floating mode, and minimized/fullscreen exclusions.
+- Semantic fullscreen/popup/tool/owned/no-activate exclusions by default, with
+  per-window `setMode`/`toggleMode` overrides through shortcuts, CLI, and SDK.
 - Free window dragging while managed: drop over a tile to swap positions, or
   onto another monitor to transfer to its active workspace and reflow the layout.
 - Live tiled-window resizing: neighboring tiles reflow as split boundaries move,

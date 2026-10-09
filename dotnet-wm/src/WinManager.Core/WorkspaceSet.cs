@@ -120,7 +120,13 @@ public sealed class WorkspaceSet
         var result = new List<WindowVisibility>();
         foreach (var window in desktop.Windows.OrderBy(w => w.Id))
         {
-            if (window.Minimized || window.Fullscreen || !assignments.TryGetValue(window.Id, out var workspaceId))
+            if (window.IsIgnored)
+            {
+                if (window.ManagerHidden && !window.Minimized && !window.Fullscreen)
+                    result.Add(new(window.Id, true));
+                continue;
+            }
+            if (window.Minimized || !assignments.TryGetValue(window.Id, out var workspaceId))
                 continue;
             if (!active.Contains(workspaceId) && window.Visible)
                 result.Add(new(window.Id, false));

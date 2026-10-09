@@ -12,6 +12,40 @@ public sealed class WindowsWindowPlatformInteractiveTests
 {
     [IsolatedInteractiveFact]
     [Trait("Category", "IsolatedInteractive")]
+    public async Task ExplicitPlacementsAllowObservedPopupToolOwnedAndNoActivateCandidates()
+    {
+        await using var fixture = await NativeWindowFixture.StartAsync();
+        await using var observer = new WindowsDesktopObserver(ignoredClassNames: [fixture.IgnoredClass]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await observer.StartAsync(timeout.Token);
+        var snapshot = await observer.CaptureAsync(timeout.Token);
+        var ownedId = Guid.Empty;
+        foreach (var name in new[] { "popup", "tool", "owned", "noactivate" })
+        {
+            var candidate = Assert.Single(snapshot.Windows, window => window.Title == fixture.Prefix + "." + name);
+            Assert.Equal(fixture.WindowClass, candidate.ClassName);
+            Assert.Equal((uint)fixture.ProcessId, NativeInspection.ProcessId(candidate.Title));
+            Assert.True(candidate.IsIgnored);
+            var state = NativeInspection.WindowState(candidate.Title);
+            var target = new PixelRect(candidate.Bounds.X + 45, candidate.Bounds.Y + 55, 620, 410);
+            Assert.Empty((await observer.ApplyAsync(new LayoutPlan([new(candidate.Id, target)]), timeout.Token)).Failures);
+            while (true)
+            {
+                var current = Assert.Single((await observer.CaptureAsync(timeout.Token)).Windows, window => window.Id == candidate.Id);
+                if (current.Bounds == target) break;
+                await Task.Delay(30, timeout.Token);
+            }
+            Assert.Equal(state, NativeInspection.WindowState(candidate.Title));
+            if (name == "owned") ownedId = candidate.Id;
+        }
+        await fixture.CommandAsync("destroy");
+        // Destroying the fixture owner also destroys its owned window; do not capture before validating the old ID.
+        var stale = await observer.ApplyAsync(new LayoutPlan([new(ownedId, new PixelRect(100, 100, 400, 300))]), timeout.Token);
+        Assert.Equal("stale_window", Assert.Single(stale.Failures).Code);
+    }
+
+    [IsolatedInteractiveFact]
+    [Trait("Category", "IsolatedInteractive")]
     public async Task MoveEventsProtectGeometryUntilDropLayoutIsAcknowledged()
     {
         await using var fixture = await NativeWindowFixture.StartAsync();

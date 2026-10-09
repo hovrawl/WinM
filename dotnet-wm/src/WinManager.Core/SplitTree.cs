@@ -178,7 +178,7 @@ public sealed class SplitTree
         return best;
     }
 
-    private static bool Eligible(WindowInfo window) => window.Visible && !window.Minimized && !window.Fullscreen;
+    private static bool Eligible(WindowInfo window) => window.Visible && !window.Minimized && !window.IsIgnored;
     private static bool HasArea(WindowInfo window) => window.Bounds.Width > 0 && window.Bounds.Height > 0;
     private static SplitOrientation Axis(Direction direction) => direction switch
     {

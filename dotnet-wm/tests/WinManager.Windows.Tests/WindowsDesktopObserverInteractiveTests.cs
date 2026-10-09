@@ -24,7 +24,22 @@ public sealed class WindowsDesktopObserverInteractiveTests
             await observer.StartAsync(timeout.Token);
             Assert.Equal(count + 1, NativeInspection.ObserverWindowCount());
             var first = await observer.CaptureAsync(timeout.Token);
-            var window = Assert.Single(first.Windows, window => window.Title.StartsWith(fixture.Prefix, StringComparison.Ordinal));
+            var candidates = first.Windows.Where(window => window.Title.StartsWith(fixture.Prefix, StringComparison.Ordinal)).ToArray();
+            Assert.Equal(5, candidates.Length);
+            foreach (var name in new[] { "normal", "popup", "tool", "owned", "noactivate" })
+            {
+                var candidate = Assert.Single(candidates, candidate => candidate.Title == fixture.Prefix + "." + name);
+                Assert.Equal(name == "popup", candidate.IsPopup);
+                Assert.Equal(name == "tool", candidate.IsToolWindow);
+                Assert.Equal(name == "owned", candidate.IsOwned);
+                Assert.Equal(name == "noactivate", candidate.IsNoActivate);
+                Assert.Equal(name != "normal", candidate.IsIgnored);
+                Assert.Null(candidate.TilingOverride);
+                Assert.Equal(fixture.WindowClass, candidate.ClassName);
+            }
+            foreach (var name in new[] { "hidden", "child", "ignored", "own-process" })
+                Assert.DoesNotContain(first.Windows, candidate => candidate.Title == fixture.Prefix + "." + name);
+            var window = Assert.Single(candidates, window => window.Title == fixture.Prefix + ".normal");
             Assert.Equal(fixture.Prefix + ".normal", window.Title);
             Assert.Equal(fixture.WindowClass, window.ClassName);
             Assert.NotEqual(Guid.Empty, window.Id);
@@ -43,7 +58,8 @@ public sealed class WindowsDesktopObserverInteractiveTests
             Assert.Equal(NativeInspection.WindowDpi(window.Title), Assert.Single(first.Monitors, monitor => monitor.Id == window.MonitorId).Dpi);
             Assert.DoesNotContain(first.Windows, candidate => candidate.ClassName.StartsWith("WinManager.Observer.", StringComparison.Ordinal));
             var second = await observer.CaptureAsync(timeout.Token);
-            Assert.Equal(window.Id, Assert.Single(second.Windows, candidate => candidate.Title == window.Title).Id);
+            Assert.All(candidates, candidate =>
+                Assert.Equal(candidate.Id, Assert.Single(second.Windows, entry => entry.Title == candidate.Title).Id));
             Assert.Equal(first.Monitors.ToArray(), second.Monitors.ToArray());
 
             await using var ignoreProcess = new WindowsDesktopObserver(ignoredProcessNames: [window.ProcessName.ToUpperInvariant() + ".exe"]);

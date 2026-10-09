@@ -43,6 +43,18 @@ public sealed class HostConfigurationTests
     }
 
     [Fact]
+    public void ToggleModeShortcutRequiresNoModeOrWindowId()
+    {
+        var config = JsonSerializer.Deserialize<ManagerConfiguration>(
+            """{"shortcuts":[{"modifiers":16390,"virtualKey":84,"command":{"kind":"toggleMode"}}]}""", Protocol.JsonOptions)!;
+        config.Validate();
+        var command = Assert.Single(config.Shortcuts).Command;
+        Assert.Equal(CommandKind.ToggleMode, command.Kind);
+        Assert.Null(command.WindowId);
+        Assert.Null(command.Mode);
+    }
+
+    [Fact]
     public void DuplicateShortcutsAndUnknownWorkspaceCommandAreRejected()
     {
         var shortcut = new ShortcutBinding(2, 65, new(CommandKind.Redraw));

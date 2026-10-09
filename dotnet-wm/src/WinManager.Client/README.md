@@ -32,6 +32,15 @@ strings, so existing callers and version 1 JSON are unchanged. Omit the filter o
 pass `null` for all events; `[]` receives only the mandatory initial snapshot.
 Unknown event names are rejected by the server with `invalid_argument`.
 
+Use `new ManagerCommand(CommandKind.ToggleMode, WindowId: window.Id)` to toggle
+an individual window, or `SetMode` with `Mode: WindowMode.Tiling`/`Floating` for
+an explicit state. Omit `WindowId` to target the focused observable window.
+Snapshots expose `IsPopup`, `IsToolWindow`, `IsOwned`, `IsNoActivate`, `IsIgnored`,
+and nullable `TilingOverride`. Fullscreen and overlay windows are left untouched
+by default but remain addressable; explicitly tiling one overrides these defaults.
+Overrides last until the window disappears or the host restarts. See
+[window defaults](../../docs/external-api.md#window-defaults-and-manual-overrides).
+
 Requests can run concurrently; frames are written serially and responses correlate by request ID.
 Operations are `query.snapshot` (`{}`), `command` (`ManagerCommand`), `subscribe` (`SubscribeRequest`),
 and `unsubscribe` (`{ subscriptionId: Guid }`). Subscribe consumes a `SubscriptionResult` response.

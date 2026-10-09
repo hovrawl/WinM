@@ -18,6 +18,7 @@ Example (shortcuts are disabled in the generated defaults):
   "shortcuts": [
     { "modifiers": 16390, "virtualKey": 80, "command": { "kind": "pause", "paused": true } },
     { "modifiers": 16390, "virtualKey": 82, "command": { "kind": "pause", "paused": false } },
+    { "modifiers": 16390, "virtualKey": 84, "command": { "kind": "toggleMode" } },
     { "modifiers": 16390, "virtualKey": 49, "command": { "kind": "activateWorkspace", "workspaceName": "1" } },
     { "modifiers": 16390, "virtualKey": 50, "command": { "kind": "activateWorkspace", "workspaceName": "2" } }
   ],
@@ -41,10 +42,18 @@ Example (shortcuts are disabled in the generated defaults):
   reconnects, retaining workspace identity, window assignments, and split trees.
 - Gaps are DIPs in `[0,256]`, converted per-monitor to physical pixels.
 - Process/class ignores are case-insensitive exact names, not regex rules.
+  Fullscreen, popup (`WS_POPUP`), tool (`WS_EX_TOOLWINDOW`), owned, and no-activate
+  windows are ignored semantically by default, without excluding their entire
+  application class. They remain in snapshots but are neither placed nor hidden.
+  `setMode`/`toggleMode` can explicitly tile an individual observed window; hard
+  process/class exclusions cannot be overridden this way.
 - Shortcut modifier bits: Alt `1`, Control `2`, Shift `4`, Win `8`, NoRepeat
   `16384`. The example uses Control+Shift+NoRepeat. `virtualKey` uses Windows
   virtual-key codes; reserved F12 is rejected. Duplicate keys and invalid command
   arguments fail validation; native registration conflicts stop startup safely.
+  The Control+Shift+T example toggles the focused window between tiled and untiled,
+  including opting a default-ignored window into tiling. Overrides last until the
+  window disappears or the host restarts; they are not saved in configuration.
 - Shortcuts use exactly the same typed handlers as IPC. They are simple single
   bindings, not chords or binding modes. Rapid key bursts may exhaust the native
   signal queue; choose NoRepeat to avoid autorepeat bursts. IPC overload returns
@@ -80,9 +89,11 @@ Invalid work areas or insufficient room for one-pixel tiles and configured gaps
 return `layout_constraints` rather than placing invalid rectangles. Startup and
 subsequent action failures are logged under `%LOCALAPPDATA%\WinManager\Logs`;
 unchanged diagnostics are deduplicated until the diagnostic state changes.
-Floating windows are kept inside destination work
-areas during monitor transfers. Native fullscreen and minimized windows are
-excluded from automatic placement and workspace hiding.
+Ordinary floating windows are kept inside destination work areas during monitor
+transfers. Default-ignored overlays and fullscreen windows are left untouched,
+unless explicitly opted into tiling. Application-minimized windows remain excluded
+from placement and workspace hiding regardless of an override. See the
+[window defaults and override reference](external-api.md#window-defaults-and-manual-overrides).
 
 Before a workspace hide, the helper durably records HWND/process identity and
 original show state and acknowledges it. If the helper cannot start or register,

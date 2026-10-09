@@ -20,6 +20,7 @@ dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' '--he
 dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'snapshot'
 '{"kind":"pause","paused":true}' | dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'command' '-'
 '{"kind":"redraw"}' | dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'command' '-'
+'{"kind":"toggleMode","windowId":"<window-guid>"}' | dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'command' '-'
 dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'watch' '--event-types' 'pause.changed' '--reconnect'
 dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'status'
 dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'snapshot' '--pipe' 'WinManager.Test.Pipe'
@@ -30,6 +31,11 @@ dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'snap
 embedded quotes. Prefer the stdin form above across PowerShell versions: Windows PowerShell strips
 embedded quotes in native positional arguments. JSON stdin is data only and is never executed.
 Unknown JSON members and missing/invalid command kinds are rejected before connecting.
+Replace `<window-guid>` with an ID from `snapshot`. `toggleMode` switches an
+individual window between tiled and untiled; omit `windowId` to use the focused
+observable window. Fullscreen, popup, and tool windows remain untouched by default,
+but this command can explicitly opt them into tiling. Use `setMode` with `mode`
+`tiling` or `floating` when you need a known state rather than a toggle.
 
 ## Interactive startup
 

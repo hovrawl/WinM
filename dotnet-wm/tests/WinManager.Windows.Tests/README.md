@@ -1,10 +1,11 @@
 # Windows platform tests
 
 Desktop-independent tests cover identity replacement and retention, eligibility,
-notification coalescing/overflow, and cancellation before native startup.
+notification coalescing/overflow, cancellation before native startup, and independent
+popup/tool/owner/noactivate classification from style bits and owner presence without native calls.
 
 ```powershell
-dotnet test tests\WinManager.Windows.Tests\WinManager.Windows.Tests.csproj --filter 'Category!=IsolatedInteractive'
+dotnet test tests\WinManager.Windows.Tests\WinManager.Windows.Tests.csproj -c Release --filter 'Category!=IsolatedInteractive'
 ```
 
 ## Isolated interactive validation
@@ -16,12 +17,22 @@ agent or ordinary developer desktop is not an appropriate test environment.
 The observation tests spawn their own test-window process and cover discovery/filtering,
 title/geometry/visibility/minimize/fullscreen changes, focus/display notifications,
 and repeated startup/cancellation/disposal. Tests close their disposable windows.
+Popup, tool, owned, and noactivate top-level windows are observed with separate
+`IsPopup`, `IsToolWindow`, `IsOwned`, and `IsNoActivate` flags, not hard excluded.
+Child, application-hidden, cloaked, shell/transient-class, observer-process, and
+configured ignored windows remain excluded. Discovery checks exact native flag
+classification and stable identities for each candidate type.
 The focus test requires a session where Windows allows the fixture to take focus.
 
 Window-action tests cover visible-frame placement without activation or z-order
 changes, exact requested sizes below application minimum hints, best-effort focus with verified success
 or structured denial, stale identities, invalid dimensions, bounded minimum-size
 queries, and cancellation/disposal of queued requests.
+Explicit placement tests target only the fixture's popup/tool/owned/noactivate
+windows, verify accepted placement without activation or z-order changes, and
+reject the stale owned-window identity after its owner is destroyed. Core decides
+whether these candidates are ignored by default or explicitly enabled; the native
+platform permits captured candidates while preserving action-time safety checks.
 
 `WindowsShortcutInteractiveTests` registers real global hotkeys on each observer's
 native thread. It covers conflicts with partial rollback, repeated replacement,

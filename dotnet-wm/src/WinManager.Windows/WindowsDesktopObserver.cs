@@ -482,12 +482,11 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         var managerHidden = hiddenWindows.Any(pair => issuedHides.Contains(pair.Key) &&
             pair.Value.Handle == (long)(nint)window.Value && RecoveryNative.Matches(pair.Value));
         if ((!PInvoke.IsWindowVisible(window) && !managerHidden) || window == PInvoke.GetShellWindow() || window == PInvoke.GetDesktopWindow() ||
-            PInvoke.GetAncestor(window, GET_ANCESTOR_FLAGS.GA_ROOT) != window ||
-            PInvoke.GetWindow(window, GET_WINDOW_CMD.GW_OWNER) != default) return null;
+            PInvoke.GetAncestor(window, GET_ANCESTOR_FLAGS.GA_ROOT) != window) return null;
         var style = (uint)PInvoke.GetWindowLong(window, WINDOW_LONG_PTR_INDEX.GWL_STYLE);
         var extendedStyle = (uint)PInvoke.GetWindowLong(window, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE);
-        if ((style & (uint)WINDOW_STYLE.WS_CHILD) != 0 ||
-            (extendedStyle & ((uint)WINDOW_EX_STYLE.WS_EX_TOOLWINDOW | (uint)WINDOW_EX_STYLE.WS_EX_NOACTIVATE)) != 0) return null;
+        if ((style & (uint)WINDOW_STYLE.WS_CHILD) != 0) return null;
+        var flags = ClassifyWindowStyles(style, extendedStyle, PInvoke.GetWindow(window, GET_WINDOW_CMD.GW_OWNER) != default);
         var className = ReadClassName(window);
         if (className.Length == 0 || ignoredClasses.Contains(className) || IsShellOrTransientClass(className)) return null;
         uint cloaked = 0;
@@ -512,8 +511,16 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         var fullscreen = !minimized && Covers(bounds, monitorInfo.Bounds);
         var id = identities.GetOrCreate(new WindowIdentity((nint)window.Value, pid, creationTime), PInvoke.GetTickCount64());
         return new WindowInfo(id, monitorInfo.Id, title, processName, className, bounds, PInvoke.IsWindowVisible(window), minimized, fullscreen,
-            WindowMode.Tiling, minimum.Width, minimum.Height, managerHidden);
+            WindowMode.Tiling, minimum.Width, minimum.Height, managerHidden,
+            IsPopup: flags.IsPopup, IsToolWindow: flags.IsToolWindow, IsOwned: flags.IsOwned, IsNoActivate: flags.IsNoActivate);
     }
+
+    internal static (bool IsPopup, bool IsToolWindow, bool IsOwned, bool IsNoActivate) ClassifyWindowStyles(
+        uint style, uint extendedStyle, bool hasOwner) =>
+        ((style & (uint)WINDOW_STYLE.WS_POPUP) != 0,
+            (extendedStyle & (uint)WINDOW_EX_STYLE.WS_EX_TOOLWINDOW) != 0,
+            hasOwner,
+            (extendedStyle & (uint)WINDOW_EX_STYLE.WS_EX_NOACTIVATE) != 0);
 
     private unsafe ApplyResult Apply(LayoutPlan plan, CancellationToken cancellationToken)
     {
@@ -607,7 +614,6 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         }
         if (creationTime != identity.ProcessCreationTime || !identities.TryResolve(id, out var current) || current != identity) return false;
         uint cloaked = 0;
-        var style = (uint)PInvoke.GetWindowLong(window, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE);
         var normalStyle = (uint)PInvoke.GetWindowLong(window, WINDOW_LONG_PTR_INDEX.GWL_STYLE);
         var className = ReadClassName(window);
         var managerHidden = issuedHides.Contains(id) && hiddenWindows.TryGetValue(id, out var hidden) && RecoveryNative.Matches(hidden);
@@ -615,8 +621,6 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             PInvoke.GetAncestor(window, GET_ANCESTOR_FLAGS.GA_ROOT) != window ||
             (normalStyle & (uint)WINDOW_STYLE.WS_CHILD) != 0 ||
             className.Length == 0 || ignoredClasses.Contains(className) || IsShellOrTransientClass(className) ||
-            PInvoke.GetWindow(window, GET_WINDOW_CMD.GW_OWNER) != default ||
-            (style & ((uint)WINDOW_EX_STYLE.WS_EX_TOOLWINDOW | (uint)WINDOW_EX_STYLE.WS_EX_NOACTIVATE)) != 0 ||
             PInvoke.DwmGetWindowAttribute(window, global::Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_CLOAKED,
                 &cloaked, sizeof(uint)).Failed || cloaked != 0)
         {

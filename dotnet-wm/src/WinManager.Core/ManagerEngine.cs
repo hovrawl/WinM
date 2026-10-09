@@ -223,7 +223,8 @@ public sealed class ManagerEngine
     private DesktopSnapshot ApplyModes(DesktopSnapshot desktop) => desktop with
     {
         Windows = desktop.Windows.Select(window => modes.TryGetValue(window.Id, out var mode)
-            ? window with { Mode = mode } : window).ToArray()
+            ? window with { Mode = mode, TilingOverride = mode == WindowMode.Tiling }
+            : window with { Mode = window.IsIgnored ? WindowMode.Floating : window.Mode }).ToArray()
     };
 
     private void ReconcileTrees(DesktopSnapshot desktop)
@@ -262,7 +263,7 @@ public sealed class ManagerEngine
                 }
                 catch (InvalidOperationException error) { failures.Add(new(null, "layout_constraints", error.Message)); }
                 foreach (var window in desktop.Windows.Where(window => workspace.WindowIds.Contains(window.Id) &&
-                    window.Mode == WindowMode.Floating && (window.Visible || window.ManagerHidden) && !window.Minimized && !window.Fullscreen))
+                    window.Mode == WindowMode.Floating && (window.Visible || window.ManagerHidden) && !window.Minimized && !window.IsIgnored))
                 {
                     var area = monitor.WorkArea;
                     var bounds = window.Bounds;
@@ -304,7 +305,7 @@ public sealed class ManagerEngine
     private void ReflowResize(DesktopSnapshot desktop, Guid windowId, PixelRect original)
     {
         var window = desktop.Windows.FirstOrDefault(window => window.Id == windowId);
-        if (window is null || !window.Visible || window.Minimized || window.Fullscreen || window.Mode != WindowMode.Tiling)
+        if (window is null || !window.Visible || window.Minimized || window.IsIgnored || window.Mode != WindowMode.Tiling)
             return;
         var bounds = window.Bounds;
         var widthChanged = bounds.Width != original.Width;
@@ -324,7 +325,7 @@ public sealed class ManagerEngine
     private void ReflowDrop(DesktopSnapshot desktop, Guid windowId, PixelRect original)
     {
         var window = desktop.Windows.FirstOrDefault(window => window.Id == windowId);
-        if (window is null || !window.Visible || window.Minimized || window.Fullscreen ||
+        if (window is null || !window.Visible || window.Minimized || window.IsIgnored ||
             (window.Bounds.X == original.X && window.Bounds.Y == original.Y)) return;
         var x = window.Bounds.X + window.Bounds.Width / 2.0;
         var y = window.Bounds.Y + window.Bounds.Height / 2.0;
@@ -507,6 +508,10 @@ public sealed class ManagerEngine
                 case CommandKind.SetMode:
                     if (command.Mode is not { } requestedMode) return Error("invalid_argument", "Mode requires tiling or floating.");
                     modes[window.Id] = requestedMode;
+                    break;
+                case CommandKind.ToggleMode:
+                    modes[window.Id] = window.Mode == WindowMode.Tiling && !window.IsIgnored
+                        ? WindowMode.Floating : WindowMode.Tiling;
                     break;
                 case CommandKind.MoveToWorkspace:
                 case CommandKind.MoveToMonitor:

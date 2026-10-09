@@ -27,8 +27,11 @@ The response is a complete `ManagerSnapshot`:
 
 - `instanceId`: identifies this manager lifetime; changes after a restart.
 - `stateRevision`: identifies committed state; can remain unchanged for a no-op.
-- `desktop.windows`: managed windows with `id`, `monitorId`, title, process/class
-  names, pixel bounds, visibility, minimized/fullscreen flags, and mode.
+- `desktop.windows`: observable windows with `id`, `monitorId`, title, process/class
+  names, pixel bounds, visibility, minimized/fullscreen flags, and mode. Includes
+  default-ignored overlays so they can be targeted individually; `isPopup`,
+  `isToolWindow`, `isOwned`, `isNoActivate`, `isIgnored`, and `tilingOverride`
+  explain their eligibility (see below).
 - `desktop.focusedWindowId`: the current focused managed window, or `null`.
 - `desktop.monitors`: monitor `id`, device name, bounds, work area, and DPI.
 - `workspaces`: workspace `id`, configured name, monitor ID, active flag, and
@@ -60,7 +63,8 @@ they use the focused managed window; if there is no such window they fail with
 | `move` | `direction` | Swap the target tile with a directional tiling neighbor in its workspace; not a pixel-position move. | `{"kind":"move","direction":"left"}` |
 | `resize` | `direction`, `amount` | Adjust the nearest ancestor split on the direction's axis. | `{"kind":"resize","direction":"right","amount":0.05}` |
 | `setSplit` | `orientation` | Change the target tile's parent split orientation; for a single tile, set the next appended split's orientation. | `{"kind":"setSplit","orientation":"vertical"}` |
-| `setMode` | `mode` | Set the target to `floating` (excluded from tiling) or `tiling` (included when eligible). | `{"kind":"setMode","mode":"floating"}` |
+| `setMode` | `mode` | Set the target to `floating` (excluded from tiling) or explicitly `tiling` (overrides semantic defaults). | `{"kind":"setMode","mode":"floating"}` |
+| `toggleMode` | None | Switch the target between tiled and untiled; default-ignored windows are opted into tiling on the first toggle. | `{"kind":"toggleMode","windowId":"<window-guid>"}` |
 | `pause` | `paused` | Set pause explicitly to `true` or `false`; not a toggle. | `{"kind":"pause","paused":true}` |
 | `redraw` | None | Rescan and reconcile the desktop; applies layouts when not paused. | `{"kind":"redraw"}` |
 | `exit` | None | Request manager shutdown and restoration of manager-owned native changes. | `{"kind":"exit"}` |
@@ -77,20 +81,53 @@ Argument details:
 - `amount`: a finite fraction in `(0, 0.8]`, not pixels or a percentage integer.
   `0.05` changes the split ratio by five percentage points. `left`/`up` decrease
   the first child's share; `right`/`down` increase it, regardless of which child
-  contains the target. Ratios are clamped to `[0.1, 0.9]`; minimum window sizes
-  and DPI-scaled gaps also constrain physical placement. A missing matching
+  contains the target. Ratios are clamped to `[0.1, 0.9]`; DPI-scaled gaps
+  constrain physical placement, but minimum-size hints do not. A missing matching
   split or an adjustment already at the ratio limit returns `not_found`.
 - `paused`: a JSON boolean. Pausing suspends automatic placement and workspace
   visibility application; it is not an API lock. Logical commands can still
   change state while paused, and unpausing reapplies it.
 - Workspaces must already exist in configuration; there is no external command
   to create, delete, or rename them. See [configuration](configuration.md).
-- Minimized, fullscreen, invisible, and floating windows are excluded from
-  normal tiling. Not every managed window is a valid tiling movement target.
+- Minimized, invisible, and floating windows are excluded from tiling. Fullscreen,
+  popup, tool, owned, and no-activate windows are ignored by default, but can be
+  explicitly opted into tiling. Not every observable window is a valid tiling
+  movement target.
 
 There is no command for arbitrary pixel bounds, launching applications, closing
 an individual window, or changing configuration. `exit` stops **WinManager**, not
 the managed applications.
+
+### Window defaults and manual overrides
+
+Defaults use native window semantics, not a blanket application class blacklist.
+For example, the Teams sharing control bar has `WS_POPUP` and is ignored while
+an ordinary Teams window with the same `TeamsWebView` class can still tile.
+`isPopup` reflects `WS_POPUP`; `isToolWindow` reflects `WS_EX_TOOLWINDOW`;
+`isOwned` reflects a native owner; `isNoActivate` reflects `WS_EX_NOACTIVATE`.
+Fullscreen means the visible bounds cover the monitor bounds, not merely its
+work area; ordinary maximized windows are not automatically fullscreen.
+
+Default-ignored windows report `mode: "floating"` and `isIgnored: true`. They
+are observed and assigned an identity/workspace but are not tiled, clamped into
+the work area, transferred by drag/drop, or hidden when switching workspaces.
+This differs from ordinary floating windows, which still follow workspaces.
+Child, shell, cloaked, application-hidden, and configured process/class exclusions
+remain outside discovery and cannot be opted in by command.
+
+`setMode` or `toggleMode` stores a per-window override. `tilingOverride` is
+`null` for automatic defaults, `true` for explicitly tiled, and `false` for
+explicitly untiled. Explicit tiling overrides fullscreen/popup/tool/owned/no-activate
+defaults but never application-minimized or application-hidden state. Opting an
+overlay back out leaves it untouched again. Overrides survive rescans and style
+changes until the window disappears or the host restarts; they are not saved
+per application or class. Classification and mode changes publish `window.updated`.
+
+```csharp
+await client.ExecuteAsync(new ManagerCommand(CommandKind.ToggleMode, WindowId: window.Id), token);
+// Or choose a known state instead of toggling:
+await client.ExecuteAsync(new ManagerCommand(CommandKind.SetMode, WindowId: window.Id, Mode: WindowMode.Floating), token);
+```
 
 ### PowerShell examples
 
@@ -100,6 +137,7 @@ From the repository root after publishing the CLI:
 '{"kind":"focus","direction":"right"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
 '{"kind":"resize","direction":"left","amount":0.05}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
 '{"kind":"setMode","mode":"tiling"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
+'{"kind":"toggleMode","windowId":"<window-guid>"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
 '{"kind":"pause","paused":false}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
 '{"kind":"activateWorkspace","workspaceName":"2"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
 ```
