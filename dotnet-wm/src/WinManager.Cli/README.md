@@ -31,6 +31,23 @@ embedded quotes. Prefer the stdin form above across PowerShell versions: Windows
 embedded quotes in native positional arguments. JSON stdin is data only and is never executed.
 Unknown JSON members and missing/invalid command kinds are rejected before connecting.
 
+## Interactive startup
+
+Start the CLI without arguments to choose **Status observer**, **Send commands**, **Help**, or **Exit**:
+
+```powershell
+dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll'
+```
+
+Enter the menu number and press Enter. Status and command entry prompt for a pipe name;
+leave it blank to use the default Host pipe. Command entry accepts one JSON `ManagerCommand`
+per line (for example, `{"kind":"pause","paused":true}`), prints each result, and lets you
+send another command. A blank command line returns to the menu. Invalid JSON, rejected
+commands, and connection failures report the existing JSON errors without ending the session.
+Help returns to the menu; status returns if the subscription ends or fails. Ctrl+C exits the
+CLI, including while observing status. Choose `0` to exit, or close stdin to exit cleanly.
+The menu also works with redirected input/output. Explicit one-off invocations are unchanged.
+
 ## Live status
 
 Run `status [--pipe NAME] [--reconnect]` while the Host is running. It subscribes to

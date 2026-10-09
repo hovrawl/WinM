@@ -8,6 +8,97 @@ namespace WinManager.Ipc.Tests;
 
 public sealed class CliIntegrationTests
 {
+    [Theory]
+    [InlineData("0\n")]
+    [InlineData("")]
+    public async Task ExecutableWithoutArgumentsShowsMenuAndExitsCleanly(string input)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var cli = CliProcess.Start();
+        await cli.SendAsync(input, timeout.Token);
+        await ReadMenuAsync(cli, timeout.Token);
+        Assert.Equal(0, await cli.ExitAsync(timeout.Token));
+        Assert.Null(await cli.ReadLineAsync(timeout.Token));
+        Assert.Equal("", await cli.Errors.WaitAsync(timeout.Token));
+    }
+
+    [Fact]
+    public async Task InteractiveHelpAndInvalidSelectionReturnToMenu()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using var cli = CliProcess.Start();
+        await cli.SendAsync("invalid\n3\n0\n", timeout.Token);
+        await ReadMenuAsync(cli, timeout.Token);
+        Assert.Equal("Choose 1, 2, 3, or 0.", await cli.ReadLineAsync(timeout.Token));
+        await ReadMenuAsync(cli, timeout.Token);
+        var help = new List<string>();
+        string? line;
+        while ((line = await cli.ReadLineAsync(timeout.Token)) != "Select an option:")
+        {
+            Assert.NotNull(line);
+            help.Add(line);
+        }
+        Assert.Contains("  status [--reconnect] [--pipe NAME]", help);
+        Assert.Contains("  command JSON [--pipe NAME]", help);
+        Assert.Contains("1. Status observer", help);
+        Assert.Equal(0, await cli.ExitAsync(timeout.Token));
+        Assert.Equal("", await cli.Errors.WaitAsync(timeout.Token));
+    }
+
+    [Fact]
+    public async Task InteractiveCommandsRecoverFromInvalidJsonAndSendRepeatedCommands()
+    {
+        await using var host = await PipeHost.StartAsync();
+        await using var cli = CliProcess.Start();
+        await cli.SendAsync($"2\n{host.Name}\n{{\n{{\"kind\":\"pause\"}}\n{{\"kind\":\"pause\",\"paused\":true}}\n{{\"kind\":\"pause\",\"paused\":false}}\n\n0\n", host.Token);
+        await ReadMenuAsync(cli, host.Token);
+        Assert.Equal("Pipe name (blank for default):", await cli.ReadLineAsync(host.Token));
+        for (var i = 0; i < 3; i++)
+            Assert.Equal("Enter command JSON (blank to return to menu):", await cli.ReadLineAsync(host.Token));
+        Assert.True((await cli.ReadAsync<CommandResult>(host.Token)).Success);
+        Assert.Equal("Enter command JSON (blank to return to menu):", await cli.ReadLineAsync(host.Token));
+        Assert.True((await cli.ReadAsync<CommandResult>(host.Token)).Success);
+        Assert.Equal("Enter command JSON (blank to return to menu):", await cli.ReadLineAsync(host.Token));
+        await ReadMenuAsync(cli, host.Token);
+        Assert.Equal(0, await cli.ExitAsync(host.Token));
+        var errors = (await cli.Errors.WaitAsync(host.Token)).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(2, errors.Length);
+        using var usage = JsonDocument.Parse(errors[0]);
+        using var rejection = JsonDocument.Parse(errors[1]);
+        Assert.Equal("usage", usage.RootElement.GetProperty("errorCode").GetString());
+        Assert.Equal("invalid_argument", rejection.RootElement.GetProperty("errorCode").GetString());
+        Assert.False(host.Engine.Current!.Paused);
+    }
+
+    [Fact]
+    public async Task InteractiveStatusSubscribesAndReturnsToMenuAfterDisconnect()
+    {
+        await using var host = await PipeHost.StartAsync();
+        await using var cli = CliProcess.Start();
+        await cli.SendAsync($"1\n{host.Name}\n0\n", host.Token);
+        await ReadMenuAsync(cli, host.Token);
+        Assert.Equal("Pipe name (blank for default):", await cli.ReadLineAsync(host.Token));
+        Assert.Equal("Current Workspace: test", await cli.ReadLineAsync(host.Token));
+        Assert.Equal("Current Window: None", await cli.ReadLineAsync(host.Token));
+        Assert.Equal("Current Config direction: Not exposed by host", await cli.ReadLineAsync(host.Token));
+        Assert.StartsWith("Latest event: snapshot ", await cli.ReadLineAsync(host.Token));
+        await host.Server.DisposeAsync();
+        await ReadMenuAsync(cli, host.Token);
+        Assert.Equal(0, await cli.ExitAsync(host.Token));
+        using var error = JsonDocument.Parse(await cli.Errors.WaitAsync(host.Token));
+        Assert.Equal("connection_error", error.RootElement.GetProperty("errorCode").GetString());
+    }
+
+    private static async Task ReadMenuAsync(CliProcess cli, CancellationToken token)
+    {
+        Assert.Equal("WinManager CLI", await cli.ReadLineAsync(token));
+        Assert.Equal("1. Status observer", await cli.ReadLineAsync(token));
+        Assert.Equal("2. Send commands", await cli.ReadLineAsync(token));
+        Assert.Equal("3. Help", await cli.ReadLineAsync(token));
+        Assert.Equal("0. Exit", await cli.ReadLineAsync(token));
+        Assert.Equal("Select an option:", await cli.ReadLineAsync(token));
+    }
+
     [Fact]
     public async Task ExecutableStatusSubscribesAndUpdatesFocusedWindowAndLatestEvent()
     {

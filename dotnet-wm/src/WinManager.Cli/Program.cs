@@ -13,6 +13,68 @@ public static class Program
         Console.CancelKeyPress += handler;
         try
         {
+            return args.Length == 0
+                ? await RunInteractiveAsync(cancellation)
+                : await ExecuteAsync(args, cancellation);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return 130; }
+        finally { Console.CancelKeyPress -= handler; }
+    }
+
+    private static async Task<int> RunInteractiveAsync(CancellationTokenSource cancellation)
+    {
+        while (true)
+        {
+            cancellation.Token.ThrowIfCancellationRequested();
+            Console.WriteLine("WinManager CLI");
+            Console.WriteLine("1. Status observer");
+            Console.WriteLine("2. Send commands");
+            Console.WriteLine("3. Help");
+            Console.WriteLine("0. Exit");
+            Console.WriteLine("Select an option:");
+            var choice = (await Console.In.ReadLineAsync(cancellation.Token))?.Trim().ToLowerInvariant();
+            if (choice is null or "0" or "exit") return 0;
+            if (choice is "3" or "help")
+            {
+                Console.WriteLine(Help);
+                continue;
+            }
+            if (choice is not ("1" or "status" or "2" or "command"))
+            {
+                Console.WriteLine("Choose 1, 2, 3, or 0.");
+                continue;
+            }
+
+            Console.WriteLine("Pipe name (blank for default):");
+            var pipe = await Console.In.ReadLineAsync(cancellation.Token);
+            if (pipe is null) return 0;
+            string[] pipeArgs = string.IsNullOrWhiteSpace(pipe) ? [] : ["--pipe", pipe.Trim()];
+            if (choice is "1" or "status")
+            {
+                if (await ExecuteAsync(["status", .. pipeArgs], cancellation) == 130) return 130;
+                continue;
+            }
+
+            while (true)
+            {
+                Console.WriteLine("Enter command JSON (blank to return to menu):");
+                var json = await Console.In.ReadLineAsync(cancellation.Token);
+                if (json is null) return 0;
+                if (string.IsNullOrWhiteSpace(json)) break;
+                if (json.Trim() == "-")
+                {
+                    PrintError("usage", "Enter a JSON ManagerCommand object, not the stdin placeholder '-'.");
+                    continue;
+                }
+                if (await ExecuteAsync(["command", json, .. pipeArgs], cancellation) == 130) return 130;
+            }
+        }
+    }
+
+    private static async Task<int> ExecuteAsync(string[] args, CancellationTokenSource cancellation)
+    {
+        try
+        {
             var options = Parse(args);
             if (options.Verb == "help") { Console.WriteLine(Help); return 0; }
             if (options.Verb == "install-startup")
@@ -88,7 +150,6 @@ public static class Program
                 error is WinManagerProtocolException ? "protocol_error" : "connection_error", error.Message);
             return 4;
         }
-        finally { Console.CancelKeyPress -= handler; }
     }
 
     private static readonly JsonSerializerOptions CommandJsonOptions = CreateCommandJsonOptions();
@@ -111,7 +172,6 @@ public static class Program
 
     private static Options Parse(string[] args)
     {
-        if (args.Length == 0) return new Options("help", null, null, null, false);
         if (args.Length == 1 && args[0] is "help" or "--help" or "-h") return new Options("help", null, null, null, false);
         var verb = args[0];
         if (verb is not ("snapshot" or "command" or "watch" or "status" or "install-startup" or "uninstall-startup"))
@@ -171,6 +231,9 @@ public static class Program
           uninstall-startup
           help | --help | -h
 
+        Run without arguments for a menu: status observer, send commands, help, or exit.
+        Interactive commands accept one JSON object per line; a blank line returns to the menu.
+        Ctrl+C exits the CLI, including the status observer. EOF exits the menu cleanly.
         Outputs compact JSON; watch outputs one EventEnvelope per line (full snapshot payload).
         status subscribes to all events and updates four human-readable lines in place.
         Redirected status output appends blocks; configuration direction is not exposed by the host.
