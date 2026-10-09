@@ -71,6 +71,11 @@ Event names:
 - `workspace.activated`, `workspace.deactivated`, `workspace.updated`
 - `layout.changed`, `pause.changed`, `application.exiting`
 
+.NET callers can use the public `ManagerEventTypes` string constants from
+`WinManager.Contracts` in SDK filters and event comparisons instead of handwritten
+names. See the [constant mapping and SDK examples](external-api.md).
+The version 1 wire format remains string-based and unchanged.
+
 Subscription registration runs atomically on the manager actor: an initial
 `snapshot` event is enqueued before any newer events for that subscription,
 regardless of its filter (even an empty filter). The correlated subscribe

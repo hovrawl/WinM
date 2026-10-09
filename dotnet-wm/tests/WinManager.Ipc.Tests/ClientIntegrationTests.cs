@@ -13,16 +13,16 @@ public sealed class ClientIntegrationTests
         await using var host = await PipeHost.StartAsync();
         await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
         var before = await client.QuerySnapshotAsync(host.Token);
-        await using var subscription = await client.SubscribeAsync(["pause.changed"], host.Token);
+        await using var subscription = await client.SubscribeAsync([ManagerEventTypes.PauseChanged], host.Token);
         await using var events = subscription.ReadEventsAsync(host.Token).GetAsyncEnumerator();
         Assert.True(await events.MoveNextAsync());
-        Assert.Equal("snapshot", events.Current.EventType);
+        Assert.Equal(ManagerEventTypes.Snapshot, events.Current.EventType);
         Assert.Equal(before.InstanceId, events.Current.InstanceId);
         var firstSequence = events.Current.Sequence;
         var result = await client.ExecuteAsync(new(CommandKind.Pause, Paused: true), host.Token);
         Assert.True(result.Success);
         Assert.True(await events.MoveNextAsync());
-        Assert.Equal("pause.changed", events.Current.EventType);
+        Assert.Equal(ManagerEventTypes.PauseChanged, events.Current.EventType);
         Assert.True(events.Current.Sequence > firstSequence);
         Assert.Equal(result.StateRevision, events.Current.StateRevision);
         Assert.True(events.Current.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!.Paused);
@@ -31,6 +31,22 @@ public sealed class ClientIntegrationTests
         Assert.False(await events.MoveNextAsync());
         Assert.True((await client.ExecuteAsync(new(CommandKind.Pause, Paused: false), host.Token)).Success);
         Assert.False((await client.QuerySnapshotAsync(host.Token)).Paused);
+    }
+
+    [Fact]
+    public async Task SdkWatchAcceptsEventConstantsAndFiltersEvents()
+    {
+        await using var host = await PipeHost.StartAsync();
+        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        await using var events = WinManagerClient.WatchAsync(
+            eventTypes: [ManagerEventTypes.PauseChanged], pipeName: host.Name,
+            cancellationToken: host.Token).GetAsyncEnumerator();
+        Assert.True(await events.MoveNextAsync());
+        Assert.Equal(ManagerEventTypes.Snapshot, events.Current.EventType);
+        Assert.True((await client.ExecuteAsync(new(CommandKind.Pause, Paused: true), host.Token)).Success);
+        Assert.True(await events.MoveNextAsync());
+        Assert.Equal(ManagerEventTypes.PauseChanged, events.Current.EventType);
+        Assert.True(events.Current.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!.Paused);
     }
 
     [Fact]

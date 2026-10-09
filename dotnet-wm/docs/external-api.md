@@ -197,7 +197,7 @@ if (snapshot.Desktop.FocusedWindowId is { } windowId)
 }
 
 await using var subscription = await client.SubscribeAsync(
-    ["window.updated", "layout.changed", "pause.changed"], stop.Token);
+    [ManagerEventTypes.WindowUpdated, ManagerEventTypes.LayoutChanged, ManagerEventTypes.PauseChanged], stop.Token);
 try
 {
     await foreach (var envelope in subscription.ReadEventsAsync(stop.Token))
@@ -216,10 +216,31 @@ release resources. There is one active subscription and one event consumer per
 connection; requests can run concurrently.
 
 For a reconnecting read-only feed use `WinManagerClient.WatchAsync(eventTypes:
-["layout.changed"], reconnect: true, cancellationToken: stop.Token)`. It reconnects
+[ManagerEventTypes.LayoutChanged], reconnect: true, cancellationToken: stop.Token)`. It reconnects
 on transport errors/connect timeouts, not protocol, permission, remote, or
 consumer-lag errors. See the [SDK README](../src/WinManager.Client/README.md) for
 timeouts, cancellation, queue capacity, and reconnection details.
+
+Use `ManagerEventTypes` from `WinManager.Contracts` instead of handwritten event
+names. Its public `const string` members work with `SubscribeAsync`, `WatchAsync`,
+and `SubscribeRequest`, and can be used to compare `EventEnvelope.EventType` or in
+`switch` case labels:
+
+```csharp
+switch (envelope.EventType)
+{
+    case ManagerEventTypes.Snapshot:
+    case ManagerEventTypes.LayoutChanged:
+        var state = envelope.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!;
+        Console.WriteLine($"Layout at revision {state.StateRevision}");
+        break;
+}
+```
+
+These are named string constants, not an enum; existing string filters and wire
+JSON remain compatible. Omit the filter or pass `null` to receive all events;
+an empty filter (`[]`) receives only the mandatory initial snapshot. Unknown
+names are rejected with `invalid_argument`. The complete constant mapping is below.
 
 ## Direct pipe protocol (non-.NET persistent clients)
 
@@ -264,14 +285,24 @@ queued events. The full wire specification is in [protocol.md](protocol.md).
 
 ## Events, consistency, and failure handling
 
-Available event types:
+Available event types (the .NET constants are in `WinManager.Contracts`):
 
-- `snapshot`
-- `window.managed`, `window.unmanaged`, `window.updated`
-- `focus.changed`
-- `monitor.added`, `monitor.removed`, `monitor.updated`
-- `workspace.activated`, `workspace.deactivated`, `workspace.updated`
-- `layout.changed`, `pause.changed`, `application.exiting`
+| .NET constant | Wire/CLI name |
+| --- | --- |
+| `ManagerEventTypes.Snapshot` | `snapshot` |
+| `ManagerEventTypes.WindowManaged` | `window.managed` |
+| `ManagerEventTypes.WindowUnmanaged` | `window.unmanaged` |
+| `ManagerEventTypes.WindowUpdated` | `window.updated` |
+| `ManagerEventTypes.FocusChanged` | `focus.changed` |
+| `ManagerEventTypes.MonitorAdded` | `monitor.added` |
+| `ManagerEventTypes.MonitorRemoved` | `monitor.removed` |
+| `ManagerEventTypes.MonitorUpdated` | `monitor.updated` |
+| `ManagerEventTypes.WorkspaceActivated` | `workspace.activated` |
+| `ManagerEventTypes.WorkspaceDeactivated` | `workspace.deactivated` |
+| `ManagerEventTypes.WorkspaceUpdated` | `workspace.updated` |
+| `ManagerEventTypes.LayoutChanged` | `layout.changed` |
+| `ManagerEventTypes.PauseChanged` | `pause.changed` |
+| `ManagerEventTypes.ApplicationExiting` | `application.exiting` |
 
 Every event payload is a **complete snapshot**, not a delta. Subscriptions always
 begin with an atomic `snapshot` event even if the filter excludes it. Replace or

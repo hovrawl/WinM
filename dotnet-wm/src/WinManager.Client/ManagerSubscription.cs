@@ -40,7 +40,7 @@ public sealed class ManagerSubscription : IAsyncDisposable
             throw new WinManagerProtocolException("Event payload must be a full snapshot matching its envelope.");
         if (instanceId is null)
         {
-            if (envelope.EventType != "snapshot")
+            if (envelope.EventType != ManagerEventTypes.Snapshot)
                 throw new WinManagerProtocolException("The first subscription event must be a snapshot.");
         }
         else if (envelope.InstanceId != instanceId || envelope.Sequence <= lastSequence || envelope.StateRevision < lastRevision)

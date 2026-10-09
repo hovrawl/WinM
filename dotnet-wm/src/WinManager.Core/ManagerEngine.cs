@@ -19,9 +19,11 @@ public sealed class ManagerEngine
     private long sequence;
     public static IReadOnlySet<string> EventTypes { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
-        "snapshot", "window.managed", "window.unmanaged", "window.updated", "focus.changed",
-        "monitor.added", "monitor.removed", "monitor.updated", "workspace.activated", "workspace.deactivated",
-        "workspace.updated", "layout.changed", "pause.changed", "application.exiting"
+        ManagerEventTypes.Snapshot, ManagerEventTypes.WindowManaged, ManagerEventTypes.WindowUnmanaged,
+        ManagerEventTypes.WindowUpdated, ManagerEventTypes.FocusChanged, ManagerEventTypes.MonitorAdded,
+        ManagerEventTypes.MonitorRemoved, ManagerEventTypes.MonitorUpdated, ManagerEventTypes.WorkspaceActivated,
+        ManagerEventTypes.WorkspaceDeactivated, ManagerEventTypes.WorkspaceUpdated, ManagerEventTypes.LayoutChanged,
+        ManagerEventTypes.PauseChanged, ManagerEventTypes.ApplicationExiting
     };
     private readonly IWindowPlatform platform;
     private readonly Channel<ManagerInput> inputs;
@@ -131,7 +133,7 @@ public sealed class ManagerEngine
                 else if (input is SubscribeInput subscribe)
                 {
                     var id = Guid.NewGuid();
-                    var initial = Envelope("snapshot", Current!);
+                    var initial = Envelope(ManagerEventTypes.Snapshot, Current!);
                     if (PublishTo(subscribe.Sink, initial))
                     {
                         subscribers.Add(id, new(subscribe.Sink, subscribe.Types is null ? null : new(subscribe.Types, StringComparer.Ordinal)));
@@ -185,7 +187,7 @@ public sealed class ManagerEngine
                 {
                     try { Commit(ApplyModes(await platform.CaptureAsync(restoreTimeout.Token))); }
                     catch (Exception) { /* Keep the last committed observation if final capture is unavailable. */ }
-                    Publish("application.exiting", Current!);
+                    Publish(ManagerEventTypes.ApplicationExiting, Current!);
                 }
                 subscribers.Clear();
                 if (Current is null) ready.TrySetException(new InvalidOperationException("Manager failed to initialize."));
@@ -386,34 +388,34 @@ public sealed class ManagerEngine
     {
         var oldWindows = previous?.Desktop.Windows.ToDictionary(window => window.Id) ?? [];
         var newWindows = next.Desktop.Windows.ToDictionary(window => window.Id);
-        foreach (var id in oldWindows.Keys.Except(newWindows.Keys)) Publish("window.unmanaged", next);
+        foreach (var id in oldWindows.Keys.Except(newWindows.Keys)) Publish(ManagerEventTypes.WindowUnmanaged, next);
         foreach (var (id, window) in newWindows)
         {
-            if (!oldWindows.TryGetValue(id, out var old)) Publish("window.managed", next);
-            else if (old != window) Publish("window.updated", next);
+            if (!oldWindows.TryGetValue(id, out var old)) Publish(ManagerEventTypes.WindowManaged, next);
+            else if (old != window) Publish(ManagerEventTypes.WindowUpdated, next);
         }
-        if (previous?.Desktop.FocusedWindowId != next.Desktop.FocusedWindowId) Publish("focus.changed", next);
+        if (previous?.Desktop.FocusedWindowId != next.Desktop.FocusedWindowId) Publish(ManagerEventTypes.FocusChanged, next);
         var oldMonitors = previous?.Desktop.Monitors.ToDictionary(monitor => monitor.Id) ?? [];
         var newMonitors = next.Desktop.Monitors.ToDictionary(monitor => monitor.Id);
-        foreach (var id in oldMonitors.Keys.Except(newMonitors.Keys)) Publish("monitor.removed", next);
+        foreach (var id in oldMonitors.Keys.Except(newMonitors.Keys)) Publish(ManagerEventTypes.MonitorRemoved, next);
         foreach (var (id, monitor) in newMonitors)
         {
-            if (!oldMonitors.TryGetValue(id, out var old)) Publish("monitor.added", next);
-            else if (old != monitor) Publish("monitor.updated", next);
+            if (!oldMonitors.TryGetValue(id, out var old)) Publish(ManagerEventTypes.MonitorAdded, next);
+            else if (old != monitor) Publish(ManagerEventTypes.MonitorUpdated, next);
         }
         var oldWorkspaces = previous?.Workspaces?.ToDictionary(workspace => workspace.Id) ?? [];
         foreach (var workspace in next.Workspaces ?? [])
         {
-            if (!oldWorkspaces.TryGetValue(workspace.Id, out var old)) Publish("workspace.updated", next);
+            if (!oldWorkspaces.TryGetValue(workspace.Id, out var old)) Publish(ManagerEventTypes.WorkspaceUpdated, next);
             else if (old.Name != workspace.Name || old.MonitorId != workspace.MonitorId ||
-                !old.WindowIds.SequenceEqual(workspace.WindowIds)) Publish("workspace.updated", next);
-            if (old?.Active == true && !workspace.Active) Publish("workspace.deactivated", next);
-            if (old?.Active != true && workspace.Active) Publish("workspace.activated", next);
+                !old.WindowIds.SequenceEqual(workspace.WindowIds)) Publish(ManagerEventTypes.WorkspaceUpdated, next);
+            if (old?.Active == true && !workspace.Active) Publish(ManagerEventTypes.WorkspaceDeactivated, next);
+            if (old?.Active != true && workspace.Active) Publish(ManagerEventTypes.WorkspaceActivated, next);
         }
         if (previous is null || JsonSerializer.Serialize(previous.Trees) != JsonSerializer.Serialize(next.Trees) ||
             newWindows.Any(pair => !oldWindows.TryGetValue(pair.Key, out var old) || old.Bounds != pair.Value.Bounds))
-            Publish("layout.changed", next);
-        if (previous?.Paused != next.Paused) Publish("pause.changed", next);
+            Publish(ManagerEventTypes.LayoutChanged, next);
+        if (previous?.Paused != next.Paused) Publish(ManagerEventTypes.PauseChanged, next);
     }
 
     private async Task<CommandResult> HandleAsync(ManagerCommand command, CancellationToken cancellationToken)

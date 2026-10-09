@@ -7,16 +7,30 @@ The default name is `Protocol.DefaultPipeName()` (current user/session); explici
 This is not authentication against another malicious process running as the same user.
 
 ```csharp
+using System.Text.Json;
+using WinManager.Client;
+using WinManager.Contracts;
+
 await using var client = await WinManagerClient.ConnectAsync(cancellationToken: token);
 ManagerSnapshot snapshot = await client.QuerySnapshotAsync(token);
 CommandResult result = await client.ExecuteAsync(new ManagerCommand(CommandKind.Pause, Paused: true), token);
-await using var subscription = await client.SubscribeAsync(["pause.changed"], token);
+await using var subscription = await client.SubscribeAsync([ManagerEventTypes.PauseChanged], token);
 await foreach (EventEnvelope envelope in subscription.ReadEventsAsync(token))
 {
     // Every payload is a full ManagerSnapshot; the first event is always "snapshot".
     var state = envelope.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions);
 }
 ```
+
+Use the public `ManagerEventTypes` string constants in `WinManager.Contracts` for
+subscription filters and event comparisons (including `switch` case labels), e.g.
+`envelope.EventType == ManagerEventTypes.PauseChanged`. They also work with
+`WatchAsync` and `SubscribeRequest`. All 14 constants and their wire names are listed
+in the [external API event reference](../../docs/external-api.md#events-consistency-and-failure-handling).
+These are named constants, not an enum: filters and `EventEnvelope.EventType` remain
+strings, so existing callers and version 1 JSON are unchanged. Omit the filter or
+pass `null` for all events; `[]` receives only the mandatory initial snapshot.
+Unknown event names are rejected by the server with `invalid_argument`.
 
 Requests can run concurrently; frames are written serially and responses correlate by request ID.
 Operations are `query.snapshot` (`{}`), `command` (`ManagerCommand`), `subscribe` (`SubscribeRequest`),
@@ -50,7 +64,7 @@ Use a fresh `ConnectAsync`, or use the static watch generator:
 
 ```csharp
 await foreach (var envelope in WinManagerClient.WatchAsync(
-    eventTypes: ["pause.changed"], reconnect: true, cancellationToken: token))
+    eventTypes: [ManagerEventTypes.PauseChanged], reconnect: true, cancellationToken: token))
 {
     // After every reconnection the first event is a fresh snapshot with the server's InstanceId.
     // Reconcile from this full snapshot; do not assume events during a disconnection were replayed.
