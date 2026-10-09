@@ -160,6 +160,62 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void NativeCornerResizeUpdatesBothNestedAxesWithDpiScaledGaps()
+    {
+        var tree = Tree(Window(1));
+        tree.SetOrientation(Id(1), SplitOrientation.Vertical);
+        tree.Reconcile([Window(1), Window(2), Window(3)]);
+        var monitor = Monitor(1000, 800, 144, -1200, -900);
+        var before = tree.Layout(monitor, 8, 8).Placements.ToDictionary(placement => placement.WindowId);
+        var source = before[Id(3)].Bounds;
+        var desired = source with { X = source.X + 100, Y = source.Y + 80,
+            Width = source.Width - 100, Height = source.Height - 80 };
+        Assert.True(tree.ResizeToBounds(Id(3), desired, monitor, 8, 8));
+        var after = tree.Layout(monitor, 8, 8).Placements.ToDictionary(placement => placement.WindowId);
+        Assert.Equal(desired, after[Id(3)].Bounds);
+        Assert.Equal(before[Id(1)].Bounds.Height + 80, after[Id(1)].Bounds.Height);
+        Assert.Equal(before[Id(2)].Bounds.Width + 100, after[Id(2)].Bounds.Width);
+        Assert.Equal(after[Id(2)].Bounds.Y, desired.Y);
+        Assert.Equal(after[Id(2)].Bounds.X + after[Id(2)].Bounds.Width + 12, desired.X);
+        Assert.False(tree.ResizeToBounds(Id(3), desired, monitor, 8, 8));
+    }
+
+    [Fact]
+    public void NativeResizeOfMiddleTileUpdatesBothBoundariesWithoutAccumulatingRounding()
+    {
+        var tree = Tree(Window(1), Window(2), Window(3));
+        var monitor = Monitor(1001);
+        var before = tree.Layout(monitor, 8, 8).Placements.ToDictionary(placement => placement.WindowId);
+        var source = before[Id(2)].Bounds;
+        var desired = source with { X = source.X + 30, Width = source.Width - 70 };
+        Assert.True(tree.ResizeToBounds(Id(2), desired, monitor, 8, 8));
+        var after = tree.Layout(monitor, 8, 8).Placements.ToDictionary(placement => placement.WindowId);
+        Assert.Equal(desired, after[Id(2)].Bounds);
+        Assert.Equal(before[Id(1)].Bounds.Width + 30, after[Id(1)].Bounds.Width);
+        Assert.Equal(before[Id(3)].Bounds.Width + 40, after[Id(3)].Bounds.Width);
+        Assert.False(tree.ResizeToBounds(Id(2), desired, monitor, 8, 8));
+        Assert.True(tree.ResizeToBounds(Id(2), source, monitor, 8, 8));
+        Assert.Equal(before.Values.OrderBy(placement => placement.WindowId),
+            tree.Layout(monitor, 8, 8).Placements.OrderBy(placement => placement.WindowId));
+    }
+
+    [Fact]
+    public void NativeResizeRespectsMinimumSizesRatioLimitsAndMissingSplits()
+    {
+        var tree = Tree(Window(1, 200), Window(2, 300));
+        var monitor = Monitor();
+        Assert.True(tree.ResizeToBounds(Id(1), new(0, 0, 50, 800), monitor, 0, 0));
+        Assert.Equal(.1, tree.Snapshot!.Ratio);
+        Assert.Equal(200, tree.Layout(monitor, 0, 0).Placements[0].Bounds.Width);
+        Assert.True(tree.ResizeToBounds(Id(1), new(0, 0, 950, 800), monitor, 0, 0));
+        Assert.Equal(.9, tree.Snapshot.Ratio);
+        Assert.Equal(300, tree.Layout(monitor, 0, 0).Placements[1].Bounds.Width);
+        Assert.False(tree.ResizeToBounds(Id(99), new(0, 0, 500, 800), monitor, 0, 0));
+        Assert.False(tree.ResizeToBounds(Id(1), new(0, 0, 0, 800), monitor, 0, 0));
+        Assert.False(Tree(Window(1)).ResizeToBounds(Id(1), new(0, 0, 500, 800), monitor, 0, 0));
+    }
+
+    [Fact]
     public void LayoutUsesWorkAreaAndNotMonitorBounds()
     {
         var monitor = Monitor() with { WorkArea = new(-500, 20, 900, 700) };

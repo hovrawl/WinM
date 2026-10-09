@@ -116,8 +116,13 @@ public sealed class DraggingTests
         await fake.MoveNotificationRead.Task.WaitAsync(stop.Token);
         await engine.ExecuteAsync(new(CommandKind.Redraw), stop.Token);
         if (resize)
+        {
             fake.Desktop = fake.Desktop with { Windows = fake.Desktop.Windows.Select(window => window.Id == source.Id
                 ? window with { Bounds = source.Bounds with { Width = source.Bounds.Width + 100 } } : window).ToArray() };
+            await engine.ExecuteAsync(new(CommandKind.Redraw), stop.Token);
+            fake.Desktop = fake.Desktop with { Windows = fake.Desktop.Windows.Select(window => window.Id == source.Id
+                ? window with { Bounds = source.Bounds } : window).ToArray() };
+        }
         fake.NotifyMove(source.Id, false);
         await fake.MoveNotificationRead.Task.WaitAsync(stop.Token);
         await engine.ExecuteAsync(new(CommandKind.Redraw), stop.Token);

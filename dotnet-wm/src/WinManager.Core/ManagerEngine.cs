@@ -28,6 +28,7 @@ public sealed class ManagerEngine
     private readonly WorkspaceSet workspaces;
     private readonly Dictionary<Guid, WindowMode> modes = [];
     private readonly Dictionary<Guid, PixelRect> movingWindows = [];
+    private readonly HashSet<Guid> resizingWindows = [];
     private readonly Guid instanceId = Guid.NewGuid();
     private readonly int innerGap;
     private readonly int outerGap;
@@ -195,8 +196,8 @@ public sealed class ManagerEngine
 
     private void RequestReconcile()
     {
-        Interlocked.Exchange(ref dirty, 1);
-        inputs.Writer.TryWrite(new ReconcileInput());
+        if (Interlocked.Exchange(ref dirty, 1) == 0)
+            inputs.Writer.TryWrite(new ReconcileInput());
     }
 
     private async Task PumpNotificationsAsync(CancellationToken cancellationToken)
@@ -225,6 +226,7 @@ public sealed class ManagerEngine
     {
         foreach (var id in modes.Keys.Except(desktop.Windows.Select(window => window.Id)).ToArray()) modes.Remove(id);
         foreach (var id in movingWindows.Keys.Except(desktop.Windows.Select(window => window.Id)).ToArray()) movingWindows.Remove(id);
+        resizingWindows.IntersectWith(movingWindows.Keys);
         workspaces.Reconcile(desktop);
     }
 
@@ -233,8 +235,14 @@ public sealed class ManagerEngine
     {
         var desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
         ReconcileTrees(desktop);
-        if (droppedWindowId is { } dropped && movingWindows.Remove(dropped, out var original) && !paused)
-            ReflowDrop(desktop, dropped, original);
+        if (!paused)
+            foreach (var (id, originalBounds) in movingWindows)
+                ReflowResize(desktop, id, originalBounds);
+        if (droppedWindowId is { } dropped && movingWindows.Remove(dropped, out var original))
+        {
+            var resized = resizingWindows.Remove(dropped);
+            if (!paused && !resized) ReflowDrop(desktop, dropped, original);
+        }
         List<NativeActionFailure> failures = [];
         List<WindowPlacement> placements = [];
         if (!paused)
@@ -277,6 +285,26 @@ public sealed class ManagerEngine
         }
         Commit(desktop);
         return failures;
+    }
+
+    private void ReflowResize(DesktopSnapshot desktop, Guid windowId, PixelRect original)
+    {
+        var window = desktop.Windows.FirstOrDefault(window => window.Id == windowId);
+        if (window is null || !window.Visible || window.Minimized || window.Fullscreen || window.Mode != WindowMode.Tiling)
+            return;
+        var bounds = window.Bounds;
+        var widthChanged = bounds.Width != original.Width;
+        var heightChanged = bounds.Height != original.Height;
+        if ((widthChanged || heightChanged) &&
+            (!widthChanged || bounds.X == original.X || (long)bounds.X + bounds.Width == (long)original.X + original.Width) &&
+            (!heightChanged || bounds.Y == original.Y || (long)bounds.Y + bounds.Height == (long)original.Y + original.Height))
+            resizingWindows.Add(windowId);
+        if (!resizingWindows.Contains(windowId)) return;
+        var workspace = workspaces.Snapshot.FirstOrDefault(workspace => workspace.Active && workspace.WindowIds.Contains(windowId));
+        var monitor = desktop.Monitors.FirstOrDefault(monitor => monitor.Id == workspace?.MonitorId);
+        if (workspace is null || monitor is null) return;
+        try { workspaces.Trees[workspace.Id].ResizeToBounds(windowId, window.Bounds, monitor, innerGap, outerGap); }
+        catch (InvalidOperationException) { /* The normal layout pass reports unsatisfied constraints. */ }
     }
 
     private void ReflowDrop(DesktopSnapshot desktop, Guid windowId, PixelRect original)

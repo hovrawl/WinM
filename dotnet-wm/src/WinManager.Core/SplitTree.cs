@@ -68,6 +68,54 @@ public sealed class SplitTree
         return true;
     }
 
+    public bool ResizeToBounds(Guid windowId, PixelRect bounds, MonitorInfo monitor, int innerGap, int outerGap)
+    {
+        if (bounds.Width <= 0 || bounds.Height <= 0) return false;
+        var path = new List<SplitNodeInfo>();
+        if (!FindPath(root, windowId, path)) return false;
+        var changed = false;
+        foreach (var direction in new[] { Direction.Left, Direction.Right, Direction.Up, Direction.Down })
+        {
+            var horizontal = Axis(direction) == SplitOrientation.Horizontal;
+            var firstSide = direction is Direction.Right or Direction.Down;
+            var parent = path.LastOrDefault(node => node.Orientation == Axis(direction) &&
+                Leaves(firstSide ? node.First : node.Second).Any(leaf => leaf.WindowId == windowId));
+            if (parent is null) continue;
+            var placements = Layout(monitor, innerGap, outerGap).Placements.ToDictionary(placement => placement.WindowId);
+            var current = placements[windowId].Bounds;
+            var edge = direction switch
+            {
+                Direction.Left => (long)bounds.X,
+                Direction.Right => (long)bounds.X + bounds.Width,
+                Direction.Up => (long)bounds.Y,
+                _ => (long)bounds.Y + bounds.Height
+            };
+            var currentEdge = direction switch
+            {
+                Direction.Left => (long)current.X,
+                Direction.Right => (long)current.X + current.Width,
+                Direction.Up => (long)current.Y,
+                _ => (long)current.Y + current.Height
+            };
+            if (edge == currentEdge) continue;
+            var tiles = Leaves(parent).Select(leaf => placements[leaf.WindowId!.Value].Bounds).ToArray();
+            var start = tiles.Min(tile => horizontal ? (long)tile.X : tile.Y);
+            var end = tiles.Max(tile => horizontal ? (long)tile.X + tile.Width : (long)tile.Y + tile.Height);
+            var gap = GapPixels(innerGap, monitor.Dpi);
+            var available = end - start - gap;
+            var size = edge - start - (firstSide ? 0 : gap);
+            var ratio = size / (double)available;
+            if (Math.Floor(available * ratio) < size) ratio = Math.BitIncrement(ratio);
+            ratio = Math.Clamp(ratio, .1, .9);
+            if (ratio == parent.Ratio) continue;
+            root = Replace(root!, parent.Id, parent with { Ratio = ratio });
+            changed = true;
+            path.Clear();
+            FindPath(root, windowId, path);
+        }
+        return changed;
+    }
+
     public LayoutPlan Layout(MonitorInfo monitor, int innerGap, int outerGap)
     {
         ArgumentNullException.ThrowIfNull(monitor);
