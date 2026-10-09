@@ -10,6 +10,7 @@ public sealed class SplitTree
     private SplitOrientation nextOrientation = SplitOrientation.Horizontal;
 
     public SplitNodeInfo? Snapshot => root;
+    public IReadOnlyList<Guid> WindowOrder => Leaves(root).Select(node => node.WindowId!.Value).ToArray();
 
     public SplitNodeInfo? FindNode(Guid nodeId) => FindNode(root, nodeId);
 

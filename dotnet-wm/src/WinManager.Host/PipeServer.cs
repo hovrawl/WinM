@@ -226,7 +226,7 @@ public sealed class PipeServer : IAsyncDisposable
                         else Respond(requestId, true, null, null, snapshot.StateRevision, Protocol.Payload(snapshot));
                         break;
                     case "command":
-                        CheckObject(payload, "kind", "windowId", "direction", "amount", "orientation", "mode", "paused", "workspaceId", "monitorId", "workspaceName", "nodeId", "navigation");
+                        CheckObject(payload, "kind", "windowId", "direction", "amount", "orientation", "mode", "paused", "workspaceId", "monitorId", "workspaceName", "nodeId", "navigation", "cycleDirection");
                         if (!payload.TryGetProperty("kind", out _)) throw new ArgumentException("Command kind is required.");
                         var command = payload.Deserialize<ManagerCommand>(Protocol.JsonOptions) ?? throw new ArgumentException("Command is required.");
                         var result = await manager.ExecuteAsync(command, stop.Token);

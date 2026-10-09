@@ -444,7 +444,7 @@ public sealed class ManagerEngine
         if (command.WorkspaceName is { } name)
         {
             if (command.WorkspaceId is not null || string.IsNullOrWhiteSpace(name) ||
-                command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToWorkspace))
+                command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToWorkspace or CommandKind.FocusCycle))
                 return Error("invalid_argument", "Specify exactly one workspace name or ID for a workspace command.");
             var named = workspaces.Snapshot.SingleOrDefault(workspace => string.Equals(workspace.Name, name, StringComparison.OrdinalIgnoreCase));
             if (named is null) return Error("not_found", "Workspace name does not exist.");
@@ -454,10 +454,15 @@ public sealed class ManagerEngine
             command.Direction is { } direction && !Enum.IsDefined(direction) ||
             command.Mode is { } mode && !Enum.IsDefined(mode) ||
             command.Orientation is { } orientation && !Enum.IsDefined(orientation) ||
-            command.Navigation is { } navigation && !Enum.IsDefined(navigation))
+            command.Navigation is { } navigation && !Enum.IsDefined(navigation) ||
+            command.CycleDirection is { } cycleDirection && !Enum.IsDefined(cycleDirection))
             return Error("invalid_argument", "Unknown command or enum value.");
         if (command.Kind != CommandKind.SelectContainer && (command.NodeId is not null || command.Navigation is not null))
             return Error("invalid_argument", "Node ID and navigation are only supported by selectContainer.");
+        if (command.Kind != CommandKind.FocusCycle && command.CycleDirection is not null)
+            return Error("invalid_argument", "Cycle direction is only supported by focusCycle.");
+        if (command.Kind == CommandKind.FocusCycle)
+            return await FocusCycleAsync(command, cancellationToken);
         if (command.Kind == CommandKind.SelectContainer)
         {
             if (command.NodeId is not null && (command.Navigation is not null || command.WindowId is not null))
@@ -593,6 +598,42 @@ public sealed class ManagerEngine
             }
         }
         return Result(await ReconcileAsync(cancellationToken));
+    }
+
+    private async Task<CommandResult> FocusCycleAsync(ManagerCommand command, CancellationToken cancellationToken)
+    {
+        if (command.Direction is not null)
+            return Error("invalid_argument", "Use cycleDirection, not direction, for focusCycle.");
+        var desktop = Current!.Desktop;
+        var anchor = desktop.Windows.FirstOrDefault(window => window.Id == (command.WindowId ?? desktop.FocusedWindowId));
+        if (command.WindowId is not null && anchor is null)
+            return Error("not_found", "Target window is not managed.");
+        var workspaceId = command.WorkspaceId ?? (anchor is not null ? workspaces.WorkspaceFor(anchor.Id) : null);
+        WorkspaceInfo? workspace;
+        if (workspaceId is { } id)
+            workspace = workspaces.Snapshot.FirstOrDefault(workspace => workspace.Id == id && workspace.Active);
+        else
+        {
+            var monitor = desktop.Monitors.OrderBy(monitor => monitor.Bounds.X == 0 && monitor.Bounds.Y == 0 ? 0 : 1)
+                .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase).ThenBy(monitor => monitor.Id).FirstOrDefault();
+            workspace = workspaces.Snapshot.FirstOrDefault(workspace => workspace.Active && workspace.MonitorId == monitor?.Id);
+        }
+        if (workspace is null) return Error("not_found", "No active workspace matches the focus cycle.");
+        if (command.WindowId is not null && !workspace.WindowIds.Contains(command.WindowId.Value))
+            return Error("invalid_argument", "Target window must belong to the requested workspace.");
+        var order = workspaces.Trees[workspace.Id].WindowOrder.Select((id, index) => (id, index))
+            .ToDictionary(pair => pair.id, pair => pair.index);
+        var candidates = desktop.Windows.Where(window => workspace.WindowIds.Contains(window.Id) &&
+                window.Visible && !window.Minimized && !window.IsIgnored && window.Bounds.Width > 0 && window.Bounds.Height > 0 &&
+                (command.Mode is null || window.Mode == command.Mode))
+            .OrderBy(window => order.GetValueOrDefault(window.Id, int.MaxValue)).ThenBy(window => window.Id).ToArray();
+        if (candidates.Length == 0) return Error("not_found", "No windows match the focus cycle filter.");
+        var index = Array.FindIndex(candidates, window => window.Id == anchor?.Id);
+        var target = command.CycleDirection == FocusCycleDirection.Previous
+            ? candidates[index <= 0 ? candidates.Length - 1 : index - 1].Id
+            : candidates[(index + 1) % candidates.Length].Id;
+        if (target == desktop.FocusedWindowId) return new(true, null, null, revision);
+        return Result(await ReconcileAsync(cancellationToken, target));
     }
 
     private CommandResult Result(IReadOnlyList<NativeActionFailure> failures) => failures.Count == 0

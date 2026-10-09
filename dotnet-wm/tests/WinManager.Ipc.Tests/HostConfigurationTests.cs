@@ -55,6 +55,31 @@ public sealed class HostConfigurationTests
     }
 
     [Fact]
+    public void FocusCyclingShortcutsValidateDirectionFiltersAndWorkspaceScope()
+    {
+        var valid = new ManagerCommand[]
+        {
+            new(CommandKind.FocusCycle),
+            new(CommandKind.FocusCycle, Mode: WindowMode.Floating, CycleDirection: FocusCycleDirection.Previous),
+            new(CommandKind.FocusCycle, WorkspaceName: "2"),
+            new(CommandKind.FocusCycle, WorkspaceId: Guid.NewGuid())
+        };
+        foreach (var command in valid)
+            (new ManagerConfiguration { Shortcuts = [new(2, 65, command)] }).Validate();
+        var invalid = new ManagerCommand[]
+        {
+            new(CommandKind.FocusCycle, CycleDirection: (FocusCycleDirection)99),
+            new(CommandKind.FocusCycle, Direction: Direction.Left),
+            new(CommandKind.FocusCycle, Mode: (WindowMode)99),
+            new(CommandKind.FocusCycle, WorkspaceName: "unknown"),
+            new(CommandKind.FocusCycle, WorkspaceId: Guid.Empty),
+            new(CommandKind.Redraw, CycleDirection: FocusCycleDirection.Next)
+        };
+        foreach (var command in invalid)
+            Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration { Shortcuts = [new(2, 65, command)] }).Validate());
+    }
+
+    [Fact]
     public void ContainerNavigationShortcutsAreValidated()
     {
         (new ManagerConfiguration

@@ -38,9 +38,10 @@ ID receives `Guid.Empty` as its response ID. Errors do not mutate manager state.
 
 Commands support `focus`, `move`, `resize`, `setSplit`, `setMode`, `pause`,
 `redraw`, `exit`, `activateWorkspace`, `moveToWorkspace`, `moveToMonitor`, `toggleMode`,
-`selectContainer`, and `clearSelection`.
+`selectContainer`, `clearSelection`, and `focusCycle`.
 Optional command fields are `windowId`, `direction`, `amount`, `orientation`,
-`mode`, `paused`, `workspaceId`, `workspaceName`, `monitorId`, `nodeId`, and `navigation`. Workspace
+`mode`, `paused`, `workspaceId`, `workspaceName`, `monitorId`, `nodeId`, `navigation`,
+and `cycleDirection`. Workspace
 commands accept exactly one workspace GUID or case-insensitive configured name;
 named targets are resolved atomically in the manager. Command-specific argument and
 target validation is performed by the manager actor. For example, `pause`
@@ -60,6 +61,14 @@ logical, not native focus; snapshots expose nullable `selection` containing
 branch when no explicit `windowId` is supplied. See the [command reference](external-api.md#container-selection).
 These are additive version 1 extensions; older hosts reject the new commands
 and fields, so deploy matching contracts/clients and host for these features.
+
+`focusCycle` accepts `cycleDirection: next|previous` (default `next`), optional
+`mode: tiling|floating`, and optional active-workspace name/ID scope. It cycles
+visible eligible tiles in tree order, then floating windows in GUID order, and
+wraps. `windowId` is an optional starting anchor. Without an anchor/focus, it
+starts at the first/last candidate in the primary monitor's active workspace.
+Focus is reported through the existing `focus.changed` event, not a new event.
+See [focus cycling](external-api.md#filtered-focus-cycling) for scope and error behavior.
 
 One subscription is allowed per connection. An unsubscribe ID must belong to
 that connection. Already queued events can precede an unsubscribe response;

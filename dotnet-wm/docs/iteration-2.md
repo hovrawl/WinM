@@ -45,4 +45,8 @@ backlog above remains the scope, not a claim of completed parity.
   events, selection-aware split orientation, typed SDK/CLI support, shortcut
   validation, and automated core/IPC tests. Selection is cleared when focus or
   tree/workspace context changes. Group movement/resizing is not yet implemented.
+- Advanced layouts: **filtered focus cycling complete**. Next/previous wrapping,
+  tiling/floating filters, active-workspace scope, deterministic tree/floating
+  order, observed `focus.changed` events, SDK/CLI and shortcut support, and
+  automated tests for filters, boundaries, exclusions, and native failures.
 - Remaining advanced-layout features and tasks 2–6 are pending.

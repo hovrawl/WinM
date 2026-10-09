@@ -3,12 +3,13 @@ namespace WinManager.Contracts;
 public enum Direction { Left, Right, Up, Down }
 public enum SplitOrientation { Horizontal, Vertical }
 public enum ContainerNavigation { Parent, FirstChild, SecondChild, Sibling, Root }
-public enum CommandKind { Focus, Move, Resize, SetSplit, SetMode, Pause, Redraw, Exit, ActivateWorkspace, MoveToWorkspace, MoveToMonitor, ToggleMode, SelectContainer, ClearSelection }
+public enum FocusCycleDirection { Next, Previous }
+public enum CommandKind { Focus, Move, Resize, SetSplit, SetMode, Pause, Redraw, Exit, ActivateWorkspace, MoveToWorkspace, MoveToMonitor, ToggleMode, SelectContainer, ClearSelection, FocusCycle }
 public sealed record ManagerCommand(CommandKind Kind, Guid? WindowId = null,
     Direction? Direction = null, double? Amount = null,
     SplitOrientation? Orientation = null, WindowMode? Mode = null, bool? Paused = null,
     Guid? WorkspaceId = null, Guid? MonitorId = null, string? WorkspaceName = null,
-    Guid? NodeId = null, ContainerNavigation? Navigation = null);
+    Guid? NodeId = null, ContainerNavigation? Navigation = null, FocusCycleDirection? CycleDirection = null);
 public sealed record CommandResult(bool Success, string? ErrorCode, string? Message, long StateRevision);
 public sealed record SplitNodeInfo(Guid Id, Guid? WindowId, SplitOrientation? Orientation,
     double Ratio, SplitNodeInfo? First, SplitNodeInfo? Second);

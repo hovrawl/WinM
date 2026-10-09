@@ -8,6 +8,33 @@ namespace WinManager.Ipc.Tests;
 public sealed class ClientIntegrationTests
 {
     [Fact]
+    public async Task SdkCyclesFilteredFocusAndReceivesObservedFocusEvents()
+    {
+        await using var host = await PipeHost.StartAsync();
+        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        var initial = await client.QuerySnapshotAsync(host.Token);
+        var windowId = Assert.Single(initial.Desktop.Windows).Id;
+        var workspace = Assert.Single(initial.Workspaces!);
+        await using var subscription = await client.SubscribeAsync([ManagerEventTypes.FocusChanged], host.Token);
+        await using var events = subscription.ReadEventsAsync(host.Token).GetAsyncEnumerator();
+        Assert.True(await events.MoveNextAsync());
+        var result = await client.ExecuteAsync(new(CommandKind.FocusCycle, Mode: WindowMode.Tiling,
+            WorkspaceName: workspace.Name, CycleDirection: FocusCycleDirection.Previous), host.Token);
+        Assert.True(result.Success);
+        Assert.True(await events.MoveNextAsync());
+        Assert.Equal(ManagerEventTypes.FocusChanged, events.Current.EventType);
+        Assert.Equal(result.StateRevision, events.Current.StateRevision);
+        Assert.Equal(windowId, events.Current.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!.Desktop.FocusedWindowId);
+        var emptyFilter = await Assert.ThrowsAsync<WinManagerRemoteException>(() =>
+            client.ExecuteAsync(new(CommandKind.FocusCycle, Mode: WindowMode.Floating), host.Token));
+        Assert.Equal("not_found", emptyFilter.ErrorCode);
+        Assert.Equal(result.StateRevision, (await client.QuerySnapshotAsync(host.Token)).StateRevision);
+        await client.ExecuteAsync(new(CommandKind.SetMode, windowId, Mode: WindowMode.Floating), host.Token);
+        Assert.True((await client.ExecuteAsync(new(CommandKind.FocusCycle, Mode: WindowMode.Floating), host.Token)).Success);
+        Assert.Equal(windowId, (await client.QuerySnapshotAsync(host.Token)).Desktop.FocusedWindowId);
+    }
+
+    [Fact]
     public async Task SdkSelectsContainersAndReceivesSelectionSnapshots()
     {
         await using var host = await PipeHost.StartAsync();

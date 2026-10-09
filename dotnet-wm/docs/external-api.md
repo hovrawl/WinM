@@ -56,12 +56,14 @@ are rejected by the server.
 
 Window-targeted commands accept optional `windowId`. When omitted or `null`,
 they use the focused managed window; if there is no such window they fail with
-`not_found`. In the examples, replace `<window-guid>`, `<workspace-guid>`, and
+`not_found` (except `focusCycle`, which can start without focus). In the examples,
+replace `<window-guid>`, `<workspace-guid>`, and
 `<monitor-guid>` with GUIDs from a snapshot.
 
 | `kind` | Required fields | Behavior | Example command JSON |
 | --- | --- | --- | --- |
 | `focus` | None; optional `direction` | Focus the target window, or its directional neighbor if a direction is supplied. | `{"kind":"focus","windowId":"<window-guid>"}` |
+| `focusCycle` | None; optional `cycleDirection`, `mode`, workspace target, `windowId` | Cycle eligible windows within an active workspace, wrapping at either end. | `{"kind":"focusCycle","cycleDirection":"next","mode":"tiling"}` |
 | `move` | `direction` | Swap the target tile with a directional tiling neighbor in its workspace; not a pixel-position move. | `{"kind":"move","direction":"left"}` |
 | `resize` | `direction`, `amount` | Adjust the nearest ancestor split on the direction's axis. | `{"kind":"resize","direction":"right","amount":0.05}` |
 | `setSplit` | `orientation` | Change the selected split when selection exists and `windowId` is omitted; otherwise change the target tile's parent split (or the next appended split for a single tile). | `{"kind":"setSplit","orientation":"vertical"}` |
@@ -101,6 +103,38 @@ Argument details:
 There is no command for arbitrary pixel bounds, launching applications, closing
 an individual window, or changing configuration. `exit` stops **WinManager**, not
 the managed applications.
+
+### Filtered focus cycling
+
+`focusCycle` defaults to `cycleDirection: "next"`; `"previous"` reverses the
+cycle. Optional `mode: "tiling"` or `"floating"` filters candidates; omitting
+`mode` includes both. Invisible, minimized, default-ignored, and zero-area
+windows are excluded. Tiles follow split-tree leaf order, including manual
+reordering; floating windows follow tiles in stable GUID order.
+
+The starting window is `windowId` or the observed focused window. The workspace
+defaults to that window's assignment; without a managed focused window, it is
+the primary monitor's active workspace (falling back to device-name/GUID order).
+An optional `workspaceId` or case-insensitive `workspaceName` overrides the scope.
+It must be active; this command never activates a workspace. An explicit window
+must belong to that scope. With no matching starting window, next selects the
+first match and previous the last. An empty filter returns `not_found`; cycling
+the already-focused sole match succeeds without native actions or a new revision.
+
+Successful observed focus changes use `focus.changed` and clear container
+selection. Failed native focus returns its error and does not assume focus moved.
+Use `cycleDirection`, not the spatial `direction` field.
+
+```powershell
+'{"kind":"focusCycle","cycleDirection":"previous","mode":"floating"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
+```
+
+```csharp
+await client.ExecuteAsync(new ManagerCommand(CommandKind.FocusCycle,
+    Mode: WindowMode.Tiling, CycleDirection: FocusCycleDirection.Next), cancellationToken);
+```
+
+The same command can be used in a configured shortcut binding.
 
 ### Container selection
 

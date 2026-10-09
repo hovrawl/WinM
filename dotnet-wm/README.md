@@ -31,6 +31,8 @@ No tray, widget, service, browser bridge, or arbitrary shell execution is includ
 
 Container selection adds active-tree navigation, observable logical selection,
 and selected-container split orientation through CLI, SDK, and shortcuts.
+Filtered focus cycling adds next/previous wrapping within active workspaces,
+with optional tiling/floating filters and observed focus events.
 See [iteration two](docs/iteration-2.md) for completed features and the remaining
 ordered backlog; this is not a claim of full functional parity.
 
