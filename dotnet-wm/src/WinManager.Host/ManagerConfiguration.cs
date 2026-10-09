@@ -54,7 +54,8 @@ public sealed record ManagerConfiguration
     {
         if (command is null || !Enum.IsDefined(command.Kind) ||
             command.Direction is { } direction && !Enum.IsDefined(direction) ||
-            command.Mode is { } mode && !Enum.IsDefined(mode) || command.Orientation is { } orientation && !Enum.IsDefined(orientation))
+            command.Mode is { } mode && !Enum.IsDefined(mode) || command.Orientation is { } orientation && !Enum.IsDefined(orientation) ||
+            command.Navigation is { } navigation && !Enum.IsDefined(navigation))
             throw new InvalidDataException("Shortcut command has an unknown enum value.");
         var valid = command.Kind switch
         {
@@ -67,9 +68,12 @@ public sealed record ManagerConfiguration
                 command.WorkspaceId is { } id && id != Guid.Empty || command.WorkspaceName is { } name &&
                 Workspaces.Any(workspace => string.Equals(workspace.Name, name, StringComparison.OrdinalIgnoreCase)),
             CommandKind.MoveToMonitor => command.MonitorId is { } id && id != Guid.Empty,
+            CommandKind.SelectContainer => command.NodeId is null ||
+                command.NodeId != Guid.Empty && command.Navigation is null && command.WindowId is null,
             _ => true
         };
-        if (!valid || command.WorkspaceId is not null && command.WorkspaceName is not null)
+        if (!valid || command.WorkspaceId is not null && command.WorkspaceName is not null ||
+            command.Kind != CommandKind.SelectContainer && (command.NodeId is not null || command.Navigation is not null))
             throw new InvalidDataException("Shortcut command arguments are invalid.");
     }
 

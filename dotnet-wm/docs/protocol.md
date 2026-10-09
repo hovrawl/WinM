@@ -37,9 +37,10 @@ ID receives `Guid.Empty` as its response ID. Errors do not mutate manager state.
 | `unsubscribe` | `{"subscriptionId": "<GUID>"}` | None |
 
 Commands support `focus`, `move`, `resize`, `setSplit`, `setMode`, `pause`,
-`redraw`, `exit`, `activateWorkspace`, `moveToWorkspace`, `moveToMonitor`, and `toggleMode`.
+`redraw`, `exit`, `activateWorkspace`, `moveToWorkspace`, `moveToMonitor`, `toggleMode`,
+`selectContainer`, and `clearSelection`.
 Optional command fields are `windowId`, `direction`, `amount`, `orientation`,
-`mode`, `paused`, `workspaceId`, `workspaceName`, and `monitorId`. Workspace
+`mode`, `paused`, `workspaceId`, `workspaceName`, `monitorId`, `nodeId`, and `navigation`. Workspace
 commands accept exactly one workspace GUID or case-insensitive configured name;
 named targets are resolved atomically in the manager. Command-specific argument and
 target validation is performed by the manager actor. For example, `pause`
@@ -50,6 +51,15 @@ into tiling override fullscreen/popup/tool/owned/no-activate defaults for that
 window's lifetime. Snapshot windows include `isPopup`, `isToolWindow`, `isOwned`,
 `isNoActivate`, `isIgnored`, and nullable `tilingOverride`; default-ignored
 windows remain discoverable but are neither placed nor workspace-hidden.
+
+`selectContainer` selects an active tiling-tree node by `nodeId`, or navigates
+from a selected/focused tile using `parent`, `firstChild`, `secondChild`, `sibling`,
+or `root`. Node targeting and navigation are mutually exclusive. Selection is
+logical, not native focus; snapshots expose nullable `selection` containing
+`workspaceId` and `nodeId`. `clearSelection` clears it. `setSplit` uses a selected
+branch when no explicit `windowId` is supplied. See the [command reference](external-api.md#container-selection).
+These are additive version 1 extensions; older hosts reject the new commands
+and fields, so deploy matching contracts/clients and host for these features.
 
 One subscription is allowed per connection. An unsubscribe ID must belong to
 that connection. Already queued events can precede an unsubscribe response;
@@ -73,6 +83,7 @@ Event names:
 - `snapshot`
 - `window.managed`, `window.unmanaged`, `window.updated`
 - `focus.changed`
+- `selection.changed`
 - `monitor.added`, `monitor.removed`, `monitor.updated`
 - `workspace.activated`, `workspace.deactivated`, `workspace.updated`
 - `layout.changed`, `pause.changed`, `application.exiting`

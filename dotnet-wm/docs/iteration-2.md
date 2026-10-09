@@ -1,6 +1,6 @@
 # Iteration two: ordered follow-up backlog
 
-These are separate future tasks, not implemented MVP functionality. Each task
+These are separate follow-up tasks, not implemented MVP functionality. Each task
 must add its command contracts, events, client support, and automated tests.
 This is functional Windows parity, not GlazeWM wire/config compatibility.
 
@@ -34,3 +34,15 @@ This is functional Windows parity, not GlazeWM wire/config compatibility.
 The status-bar widget is a separate project. Zebar bundling, macOS support, and
 exact GlazeWM CLI/IPC compatibility are excluded. Recheck the cloned inventory
 before claiming this backlog delivers complete functional parity.
+
+## Implementation progress
+
+Features are implemented and committed individually for rollback. The ordered
+backlog above remains the scope, not a claim of completed parity.
+
+- Advanced layouts: **container selection complete**. Active-tree node targeting,
+  parent/child/sibling/root navigation, snapshot selection and `selection.changed`
+  events, selection-aware split orientation, typed SDK/CLI support, shortcut
+  validation, and automated core/IPC tests. Selection is cleared when focus or
+  tree/workspace context changes. Group movement/resizing is not yet implemented.
+- Remaining advanced-layout features and tasks 2–6 are pending.

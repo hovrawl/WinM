@@ -131,6 +131,24 @@ public sealed class CliIntegrationTests
     }
 
     [Fact]
+    public async Task ExecutableSelectsContainersAndWatchesSelectionChanges()
+    {
+        await using var host = await PipeHost.StartAsync();
+        var node = Assert.Single(host.Engine.Current!.Trees).Value!;
+        await using var watch = CliProcess.Start("watch", "--pipe", host.Name, "--event-types", ManagerEventTypes.SelectionChanged);
+        Assert.Equal(ManagerEventTypes.Snapshot, (await watch.ReadAsync<EventEnvelope>(host.Token)).EventType);
+        await using var command = CliProcess.Start("command", "-", "--pipe", host.Name);
+        await command.SendAsync(JsonSerializer.Serialize(new ManagerCommand(CommandKind.SelectContainer, NodeId: node.Id), Protocol.JsonOptions), host.Token);
+        Assert.True((await command.ReadAsync<CommandResult>(host.Token)).Success);
+        Assert.Equal(0, await command.ExitAsync(host.Token));
+        var changed = await watch.ReadAsync<EventEnvelope>(host.Token);
+        Assert.Equal(ManagerEventTypes.SelectionChanged, changed.EventType);
+        Assert.Equal(node.Id, changed.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!.Selection!.NodeId);
+        await host.Server.DisposeAsync();
+        Assert.Equal(4, await watch.ExitAsync(host.Token));
+    }
+
+    [Fact]
     public async Task ExecutableSnapshotWatchStdinCommandUnsubscribeAndShutdown()
     {
         await using var host = await PipeHost.StartAsync();

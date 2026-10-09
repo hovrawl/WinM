@@ -13,6 +13,7 @@ public sealed class ManagerEventTypesTests
     [InlineData(ManagerEventTypes.WindowUnmanaged, "window.unmanaged")]
     [InlineData(ManagerEventTypes.WindowUpdated, "window.updated")]
     [InlineData(ManagerEventTypes.FocusChanged, "focus.changed")]
+    [InlineData(ManagerEventTypes.SelectionChanged, "selection.changed")]
     [InlineData(ManagerEventTypes.MonitorAdded, "monitor.added")]
     [InlineData(ManagerEventTypes.MonitorRemoved, "monitor.removed")]
     [InlineData(ManagerEventTypes.MonitorUpdated, "monitor.updated")]

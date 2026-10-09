@@ -39,6 +39,8 @@ The response is a complete `ManagerSnapshot`:
 - `trees`: split trees keyed by **workspace ID**, not monitor ID. Each node has
   an ID, optional window ID, orientation, ratio, and first/second children.
 - `paused`: whether automatic layout application is paused.
+- `selection`: optional `{workspaceId, nodeId}` logical tiling-container selection;
+  this does not change `desktop.focusedWindowId`.
 
 Use these GUIDs as targets, not native window handles, process IDs, or array
 indexes. Rediscover IDs after a manager restart and when targets disappear.
@@ -62,7 +64,9 @@ they use the focused managed window; if there is no such window they fail with
 | `focus` | None; optional `direction` | Focus the target window, or its directional neighbor if a direction is supplied. | `{"kind":"focus","windowId":"<window-guid>"}` |
 | `move` | `direction` | Swap the target tile with a directional tiling neighbor in its workspace; not a pixel-position move. | `{"kind":"move","direction":"left"}` |
 | `resize` | `direction`, `amount` | Adjust the nearest ancestor split on the direction's axis. | `{"kind":"resize","direction":"right","amount":0.05}` |
-| `setSplit` | `orientation` | Change the target tile's parent split orientation; for a single tile, set the next appended split's orientation. | `{"kind":"setSplit","orientation":"vertical"}` |
+| `setSplit` | `orientation` | Change the selected split when selection exists and `windowId` is omitted; otherwise change the target tile's parent split (or the next appended split for a single tile). | `{"kind":"setSplit","orientation":"vertical"}` |
+| `selectContainer` | None; optional `nodeId`, or `windowId` and `navigation` | Select a node of an active workspace's tiling tree without changing native focus. | `{"kind":"selectContainer","navigation":"parent"}` |
+| `clearSelection` | None | Clear logical container selection; repeated clearing is a no-op. | `{"kind":"clearSelection"}` |
 | `setMode` | `mode` | Set the target to `floating` (excluded from tiling) or explicitly `tiling` (overrides semantic defaults). | `{"kind":"setMode","mode":"floating"}` |
 | `toggleMode` | None | Switch the target between tiled and untiled; default-ignored windows are opted into tiling on the first toggle. | `{"kind":"toggleMode","windowId":"<window-guid>"}` |
 | `pause` | `paused` | Set pause explicitly to `true` or `false`; not a toggle. | `{"kind":"pause","paused":true}` |
@@ -97,6 +101,40 @@ Argument details:
 There is no command for arbitrary pixel bounds, launching applications, closing
 an individual window, or changing configuration. `exit` stops **WinManager**, not
 the managed applications.
+
+### Container selection
+
+`selectContainer` accepts a `nodeId` discovered in `trees`, or starts at the
+`windowId` tile (the focused tile when omitted). `nodeId` cannot be combined
+with `windowId` or `navigation`. Navigation values are `parent`, `firstChild`,
+`secondChild`, `sibling`, and `root`. With navigation and no explicit window,
+the existing selection is the starting node; without navigation, the focused
+tile is selected. Missing nodes, inactive workspaces, untiled windows, and
+navigation beyond the tree boundary return `not_found` without changing selection.
+
+Selection persists across redraws while its node remains in an active workspace.
+An observed focus change, workspace deactivation, or node removal clears it.
+Each selection change emits `selection.changed` with a complete snapshot.
+`setSplit` without `windowId` operates directly on a selected branch; a selected
+leaf returns `not_found`. An explicit `windowId` retains the original parent-split
+behavior. Other window commands do not target the selection.
+
+CLI example: select the focused tile's parent, then orient that container:
+
+```powershell
+'{"kind":"selectContainer","navigation":"parent"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
+'{"kind":"setSplit","orientation":"vertical"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
+```
+
+The .NET SDK supports the same typed contracts through `ExecuteAsync`:
+
+```csharp
+await client.ExecuteAsync(new ManagerCommand(CommandKind.SelectContainer,
+    Navigation: ContainerNavigation.Parent), cancellationToken);
+await client.ExecuteAsync(new ManagerCommand(CommandKind.SetSplit,
+    Orientation: SplitOrientation.Vertical), cancellationToken);
+await client.ExecuteAsync(new ManagerCommand(CommandKind.ClearSelection), cancellationToken);
+```
 
 ### Window defaults and manual overrides
 
@@ -339,6 +377,7 @@ Available event types (the .NET constants are in `WinManager.Contracts`):
 | `ManagerEventTypes.WindowUnmanaged` | `window.unmanaged` |
 | `ManagerEventTypes.WindowUpdated` | `window.updated` |
 | `ManagerEventTypes.FocusChanged` | `focus.changed` |
+| `ManagerEventTypes.SelectionChanged` | `selection.changed` |
 | `ManagerEventTypes.MonitorAdded` | `monitor.added` |
 | `ManagerEventTypes.MonitorRemoved` | `monitor.removed` |
 | `ManagerEventTypes.MonitorUpdated` | `monitor.updated` |

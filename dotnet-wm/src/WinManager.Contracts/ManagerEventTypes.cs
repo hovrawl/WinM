@@ -7,6 +7,7 @@ public static class ManagerEventTypes
     public const string WindowUnmanaged = "window.unmanaged";
     public const string WindowUpdated = "window.updated";
     public const string FocusChanged = "focus.changed";
+    public const string SelectionChanged = "selection.changed";
     public const string MonitorAdded = "monitor.added";
     public const string MonitorRemoved = "monitor.removed";
     public const string MonitorUpdated = "monitor.updated";

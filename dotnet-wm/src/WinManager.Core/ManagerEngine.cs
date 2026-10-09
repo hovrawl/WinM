@@ -23,7 +23,7 @@ public sealed class ManagerEngine
         ManagerEventTypes.WindowUpdated, ManagerEventTypes.FocusChanged, ManagerEventTypes.MonitorAdded,
         ManagerEventTypes.MonitorRemoved, ManagerEventTypes.MonitorUpdated, ManagerEventTypes.WorkspaceActivated,
         ManagerEventTypes.WorkspaceDeactivated, ManagerEventTypes.WorkspaceUpdated, ManagerEventTypes.LayoutChanged,
-        ManagerEventTypes.PauseChanged, ManagerEventTypes.ApplicationExiting
+        ManagerEventTypes.PauseChanged, ManagerEventTypes.ApplicationExiting, ManagerEventTypes.SelectionChanged
     };
     private readonly IWindowPlatform platform;
     private readonly Channel<ManagerInput> inputs;
@@ -37,6 +37,7 @@ public sealed class ManagerEngine
     private int dirty;
     private bool paused;
     private bool exiting;
+    private ContainerSelection? selection;
     private long revision;
     private string? committedSignature;
     private IReadOnlyList<NativeActionFailure> reportedFailures = [];
@@ -360,8 +361,14 @@ public sealed class ManagerEngine
 
     private void Commit(DesktopSnapshot desktop)
     {
+        if (selection is { } selected &&
+            (Current?.Desktop.FocusedWindowId != desktop.FocusedWindowId ||
+             !workspaces.Snapshot.Any(workspace => workspace.Id == selected.WorkspaceId && workspace.Active) ||
+             !workspaces.Trees.TryGetValue(selected.WorkspaceId, out var selectedTree) ||
+             selectedTree.FindNode(selected.NodeId) is null))
+            selection = null;
         var next = new ManagerSnapshot(instanceId, 0, desktop,
-            workspaces.Trees.ToDictionary(pair => pair.Key, pair => pair.Value.Snapshot), paused, workspaces.Snapshot);
+            workspaces.Trees.ToDictionary(pair => pair.Key, pair => pair.Value.Snapshot), paused, workspaces.Snapshot, selection);
         var signature = JsonSerializer.Serialize(next);
         if (signature == committedSignature) return;
         committedSignature = signature;
@@ -408,6 +415,7 @@ public sealed class ManagerEngine
             else if (old != window) Publish(ManagerEventTypes.WindowUpdated, next);
         }
         if (previous?.Desktop.FocusedWindowId != next.Desktop.FocusedWindowId) Publish(ManagerEventTypes.FocusChanged, next);
+        if (previous?.Selection != next.Selection) Publish(ManagerEventTypes.SelectionChanged, next);
         var oldMonitors = previous?.Desktop.Monitors.ToDictionary(monitor => monitor.Id) ?? [];
         var newMonitors = next.Desktop.Monitors.ToDictionary(monitor => monitor.Id);
         foreach (var id in oldMonitors.Keys.Except(newMonitors.Keys)) Publish(ManagerEventTypes.MonitorRemoved, next);
@@ -445,8 +453,56 @@ public sealed class ManagerEngine
         if (!Enum.IsDefined(command.Kind) ||
             command.Direction is { } direction && !Enum.IsDefined(direction) ||
             command.Mode is { } mode && !Enum.IsDefined(mode) ||
-            command.Orientation is { } orientation && !Enum.IsDefined(orientation))
+            command.Orientation is { } orientation && !Enum.IsDefined(orientation) ||
+            command.Navigation is { } navigation && !Enum.IsDefined(navigation))
             return Error("invalid_argument", "Unknown command or enum value.");
+        if (command.Kind != CommandKind.SelectContainer && (command.NodeId is not null || command.Navigation is not null))
+            return Error("invalid_argument", "Node ID and navigation are only supported by selectContainer.");
+        if (command.Kind == CommandKind.SelectContainer)
+        {
+            if (command.NodeId is not null && (command.Navigation is not null || command.WindowId is not null))
+                return Error("invalid_argument", "Specify a node ID or window/navigation target, not both.");
+            ContainerSelection? target = null;
+            if (command.NodeId is { } nodeId)
+            {
+                var workspace = workspaces.Snapshot.FirstOrDefault(workspace => workspace.Active &&
+                    workspaces.Trees[workspace.Id].FindNode(nodeId) is not null);
+                if (workspace is not null) target = new(workspace.Id, nodeId);
+            }
+            else
+            {
+                var origin = command.WindowId is null && command.Navigation is not null ? selection : null;
+                if (origin is null && (command.WindowId ?? Current!.Desktop.FocusedWindowId) is { } windowId &&
+                    workspaces.WorkspaceFor(windowId) is { } workspaceId &&
+                    workspaces.Snapshot.Any(workspace => workspace.Id == workspaceId && workspace.Active) &&
+                    workspaces.Trees[workspaceId].NodeForWindow(windowId) is { } leaf)
+                    origin = new(workspaceId, leaf.Id);
+                if (origin is not null)
+                {
+                    var node = command.Navigation is { } navigate
+                        ? workspaces.Trees[origin.WorkspaceId].Navigate(origin.NodeId, navigate)
+                        : workspaces.Trees[origin.WorkspaceId].FindNode(origin.NodeId);
+                    if (node is not null) target = new(origin.WorkspaceId, node.Id);
+                }
+            }
+            if (target is null) return Error("not_found", "No active tiling container matches the selection.");
+            selection = target;
+            Commit(Current!.Desktop);
+            return new(true, null, null, revision);
+        }
+        if (command.Kind == CommandKind.ClearSelection)
+        {
+            selection = null;
+            Commit(Current!.Desktop);
+            return new(true, null, null, revision);
+        }
+        if (command.Kind == CommandKind.SetSplit && command.WindowId is null && selection is { } selected)
+        {
+            if (command.Orientation is not { } split) return Error("invalid_argument", "Split requires orientation.");
+            if (!workspaces.Trees[selected.WorkspaceId].SetContainerOrientation(selected.NodeId, split))
+                return Error("not_found", "Selected container is not a split.");
+            return Result(await ReconcileAsync(cancellationToken));
+        }
         if (command.Kind == CommandKind.Exit)
         {
             exiting = true;

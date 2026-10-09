@@ -55,6 +55,24 @@ public sealed class HostConfigurationTests
     }
 
     [Fact]
+    public void ContainerNavigationShortcutsAreValidated()
+    {
+        (new ManagerConfiguration
+        {
+            Shortcuts = [new(2, 65, new(CommandKind.SelectContainer, Navigation: ContainerNavigation.Parent))]
+        }).Validate();
+        var invalid = new ManagerCommand[]
+        {
+            new(CommandKind.SelectContainer, Navigation: (ContainerNavigation)99),
+            new(CommandKind.SelectContainer, NodeId: Guid.NewGuid(), Navigation: ContainerNavigation.Parent),
+            new(CommandKind.SelectContainer, NodeId: Guid.Empty),
+            new(CommandKind.Redraw, Navigation: ContainerNavigation.Parent)
+        };
+        foreach (var command in invalid)
+            Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration { Shortcuts = [new(2, 65, command)] }).Validate());
+    }
+
+    [Fact]
     public void DuplicateShortcutsAndUnknownWorkspaceCommandAreRejected()
     {
         var shortcut = new ShortcutBinding(2, 65, new(CommandKind.Redraw));

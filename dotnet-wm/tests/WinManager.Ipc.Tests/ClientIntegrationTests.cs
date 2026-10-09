@@ -7,6 +7,34 @@ namespace WinManager.Ipc.Tests;
 
 public sealed class ClientIntegrationTests
 {
+    [Fact]
+    public async Task SdkSelectsContainersAndReceivesSelectionSnapshots()
+    {
+        await using var host = await PipeHost.StartAsync();
+        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        var initial = await client.QuerySnapshotAsync(host.Token);
+        var node = Assert.Single(initial.Trees).Value!;
+        await using var subscription = await client.SubscribeAsync([ManagerEventTypes.SelectionChanged], host.Token);
+        await using var events = subscription.ReadEventsAsync(host.Token).GetAsyncEnumerator();
+        Assert.True(await events.MoveNextAsync());
+        Assert.Null(events.Current.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!.Selection);
+        var result = await client.ExecuteAsync(new(CommandKind.SelectContainer, NodeId: node.Id), host.Token);
+        Assert.True(result.Success);
+        Assert.True(await events.MoveNextAsync());
+        Assert.Equal(ManagerEventTypes.SelectionChanged, events.Current.EventType);
+        var selected = events.Current.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!;
+        Assert.Equal(node.Id, selected.Selection!.NodeId);
+        Assert.Equal(Assert.Single(initial.Trees).Key, selected.Selection.WorkspaceId);
+        Assert.Equal(result.StateRevision, selected.StateRevision);
+        Assert.Equal(selected.Selection, (await client.QuerySnapshotAsync(host.Token)).Selection);
+        var boundary = await Assert.ThrowsAsync<WinManagerRemoteException>(() =>
+            client.ExecuteAsync(new(CommandKind.SelectContainer, Navigation: ContainerNavigation.Parent), host.Token));
+        Assert.Equal("not_found", boundary.ErrorCode);
+        await client.ExecuteAsync(new(CommandKind.ClearSelection), host.Token);
+        Assert.True(await events.MoveNextAsync());
+        Assert.Null(events.Current.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!.Selection);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

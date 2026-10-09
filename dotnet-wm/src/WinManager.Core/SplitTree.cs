@@ -11,6 +11,50 @@ public sealed class SplitTree
 
     public SplitNodeInfo? Snapshot => root;
 
+    public SplitNodeInfo? FindNode(Guid nodeId) => FindNode(root, nodeId);
+
+    public SplitNodeInfo? NodeForWindow(Guid windowId) => Leaves(root).FirstOrDefault(node => node.WindowId == windowId);
+
+    public SplitNodeInfo? Navigate(Guid nodeId, ContainerNavigation navigation)
+    {
+        if (!Enum.IsDefined(navigation)) throw new ArgumentOutOfRangeException(nameof(navigation));
+        var node = FindNode(nodeId);
+        if (node is null) return null;
+        var parent = Parent(root, nodeId);
+        return navigation switch
+        {
+            ContainerNavigation.Parent => parent,
+            ContainerNavigation.FirstChild => node.First,
+            ContainerNavigation.SecondChild => node.Second,
+            ContainerNavigation.Sibling => parent?.First?.Id == nodeId ? parent.Second : parent?.First,
+            ContainerNavigation.Root => root,
+            _ => null
+        };
+    }
+
+    public bool SetContainerOrientation(Guid nodeId, SplitOrientation orientation)
+    {
+        if (!Enum.IsDefined(orientation)) throw new ArgumentOutOfRangeException(nameof(orientation));
+        var node = FindNode(nodeId);
+        if (node?.Orientation is null) return false;
+        root = Replace(root!, nodeId, node with { Orientation = orientation });
+        root = Balance(root);
+        return true;
+    }
+
+    private static SplitNodeInfo? FindNode(SplitNodeInfo? node, Guid nodeId)
+    {
+        if (node is null || node.Id == nodeId) return node;
+        return FindNode(node.First, nodeId) ?? FindNode(node.Second, nodeId);
+    }
+
+    private static SplitNodeInfo? Parent(SplitNodeInfo? node, Guid nodeId)
+    {
+        if (node is null) return null;
+        if (node.First?.Id == nodeId || node.Second?.Id == nodeId) return node;
+        return Parent(node.First, nodeId) ?? Parent(node.Second, nodeId);
+    }
+
     public void Reconcile(IReadOnlyList<WindowInfo> windows)
     {
         ArgumentNullException.ThrowIfNull(windows);
