@@ -96,6 +96,11 @@ internal sealed class ObservationService(ManagerEngine observation,
         observation.Changed += snapshot => logger.LogInformation(
             "Observed {WindowCount} eligible windows on {MonitorCount} monitors; focus {Focus}",
             snapshot.Desktop.Windows.Count, snapshot.Desktop.Monitors.Count, snapshot.Desktop.FocusedWindowId);
+        observation.ActionsFailed += failures =>
+        {
+            foreach (var failure in failures)
+                logger.LogWarning("Window action diagnostic: {Code} {WindowId} {Message}", failure.Code, failure.WindowId, failure.Message);
+        };
         try { await observation.RunAsync(stoppingToken); }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
         catch (Exception) { status.MarkFailed(); throw; }

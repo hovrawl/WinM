@@ -114,7 +114,7 @@ public sealed class LayoutTests
     {
         var tree = Tree(Window(1), Window(2), Window(3));
         Assert.True(tree.Resize(Id(3), Direction.Right, .15));
-        Assert.Equal(.5, tree.Snapshot!.Ratio);
+        Assert.Equal(1.0 / 3, tree.Snapshot!.Ratio);
         Assert.Equal(.65, tree.Snapshot.Second!.Ratio, 10);
         Assert.True(tree.Resize(Id(3), Direction.Left, .1));
         Assert.Equal(.55, tree.Snapshot.Second.Ratio, 10);
@@ -206,10 +206,10 @@ public sealed class LayoutTests
         var monitor = Monitor();
         Assert.True(tree.ResizeToBounds(Id(1), new(0, 0, 50, 800), monitor, 0, 0));
         Assert.Equal(.1, tree.Snapshot!.Ratio);
-        Assert.Equal(200, tree.Layout(monitor, 0, 0).Placements[0].Bounds.Width);
+        Assert.Equal(100, tree.Layout(monitor, 0, 0).Placements[0].Bounds.Width);
         Assert.True(tree.ResizeToBounds(Id(1), new(0, 0, 950, 800), monitor, 0, 0));
         Assert.Equal(.9, tree.Snapshot.Ratio);
-        Assert.Equal(300, tree.Layout(monitor, 0, 0).Placements[1].Bounds.Width);
+        Assert.Equal(100, tree.Layout(monitor, 0, 0).Placements[1].Bounds.Width);
         Assert.False(tree.ResizeToBounds(Id(99), new(0, 0, 500, 800), monitor, 0, 0));
         Assert.False(tree.ResizeToBounds(Id(1), new(0, 0, 0, 800), monitor, 0, 0));
         Assert.False(Tree(Window(1)).ResizeToBounds(Id(1), new(0, 0, 500, 800), monitor, 0, 0));
@@ -229,11 +229,11 @@ public sealed class LayoutTests
         var tree = Tree(Window(1, 70, 30), Window(2, 20, 30));
         tree.Resize(Id(1), Direction.Left, .4);
         var plan = tree.Layout(Monitor(100, 30), 10, 0);
-        Assert.Equal(70, plan.Placements[0].Bounds.Width);
-        Assert.Equal(20, plan.Placements[1].Bounds.Width);
+        Assert.Equal(9, plan.Placements[0].Bounds.Width);
+        Assert.Equal(81, plan.Placements[1].Bounds.Width);
         Assert.Equal(.1, tree.Snapshot!.Ratio, 10);
         tree.Reconcile([Window(1, 75, 30), Window(2, 20, 30)]);
-        Assert.Throws<InvalidOperationException>(() => tree.Layout(Monitor(100, 30), 10, 0));
+        Assert.Equal(plan.Placements, tree.Layout(Monitor(100, 30), 10, 0).Placements);
     }
 
     [Fact]
@@ -243,9 +243,9 @@ public sealed class LayoutTests
         tree.Swap(Id(1), Id(2));
         var plan = tree.Layout(Monitor(90, 20), 0, 0);
         Assert.Equal(Id(2), plan.Placements[0].WindowId);
-        Assert.Equal(20, plan.Placements[0].Bounds.Width);
+        Assert.Equal(45, plan.Placements[0].Bounds.Width);
         Assert.Equal(Id(1), plan.Placements[1].WindowId);
-        Assert.Equal(70, plan.Placements[1].Bounds.Width);
+        Assert.Equal(45, plan.Placements[1].Bounds.Width);
         Assert.Throws<NotSupportedException>(() =>
             ((IList<WindowPlacement>)plan.Placements).Add(new(Id(99), new(0, 0, 1, 1))));
     }
@@ -257,11 +257,11 @@ public sealed class LayoutTests
         tree.SetOrientation(Id(1), SplitOrientation.Vertical);
         tree.Reconcile([Window(1, 40, 60), Window(2, 70, 30), Window(3, 20, 40)]);
         var plan = tree.Layout(Monitor(95, 105), 5, 0);
-        Assert.Equal(new PixelRect(0, 0, 95, 60), plan.Placements[0].Bounds);
-        Assert.Equal(new PixelRect(0, 65, 70, 40), plan.Placements[1].Bounds);
-        Assert.Equal(new PixelRect(75, 65, 20, 40), plan.Placements[2].Bounds);
-        Assert.Throws<InvalidOperationException>(() => tree.Layout(Monitor(94, 105), 5, 0));
-        Assert.Throws<InvalidOperationException>(() => tree.Layout(Monitor(95, 104), 5, 0));
+        Assert.Equal(new PixelRect(0, 0, 95, 50), plan.Placements[0].Bounds);
+        Assert.Equal(new PixelRect(0, 55, 45, 50), plan.Placements[1].Bounds);
+        Assert.Equal(new PixelRect(50, 55, 45, 50), plan.Placements[2].Bounds);
+        Assert.Equal(3, tree.Layout(Monitor(94, 105), 5, 0).Placements.Count);
+        Assert.Equal(3, tree.Layout(Monitor(95, 104), 5, 0).Placements.Count);
     }
 
     [Theory]
@@ -270,6 +270,60 @@ public sealed class LayoutTests
     public void NegativeGapsAreRejectedEvenForEmptyTrees(int inner, int outer)
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new SplitTree().Layout(Monitor(), inner, outer));
+    }
+
+    [Fact]
+    public void OverflowSkipsNonFittingLeavesButKeepsLaterFittingLeavesAndSavedTree()
+    {
+        var tree = Tree(Window(1, 70), Window(2, 70), Window(3, 20));
+        tree.Resize(Id(1), Direction.Right, .1);
+        var snapshot = tree.Snapshot;
+        var plan = tree.Layout(Monitor(100, 100), 5, 0);
+        Assert.Equal(new[] { Id(1), Id(2), Id(3) }, plan.Placements.Select(p => p.WindowId));
+        Assert.Equal(new PixelRect(0, 0, 41, 100), plan.Placements[0].Bounds);
+        Assert.Equal(new PixelRect(46, 0, 24, 100), plan.Placements[1].Bounds);
+        Assert.Equal(new PixelRect(75, 0, 25, 100), plan.Placements[2].Bounds);
+        Assert.Same(snapshot, tree.Snapshot);
+        Assert.Equal(plan.Placements, tree.Layout(Monitor(100, 100), 5, 0).Placements);
+        Assert.Equal(3, tree.Layout(Monitor(1000, 100), 5, 0).Placements.Count);
+        Assert.Same(snapshot, tree.Snapshot);
+    }
+
+    [Fact]
+    public void OverflowHonorsNestedAxesDpiGapsAndNegativeCoordinates()
+    {
+        var tree = Tree(Window(1, 40, 60));
+        tree.SetOrientation(Id(1), SplitOrientation.Vertical);
+        tree.Reconcile([Window(1, 40, 60), Window(2, 70, 30), Window(3, 20, 40)]);
+        var snapshot = tree.Snapshot;
+        var plan = tree.Layout(Monitor(109, 121, 144, -109, -121), 10, 5);
+        Assert.Equal(new[] { Id(1), Id(2), Id(3) }, plan.Placements.Select(p => p.WindowId));
+        Assert.Equal(new PixelRect(-101, -113, 93, 45), plan.Placements[0].Bounds);
+        Assert.Equal(new PixelRect(-101, -53, 39, 45), plan.Placements[1].Bounds);
+        Assert.Equal(new PixelRect(-47, -53, 39, 45), plan.Placements[2].Bounds);
+        Assert.Same(snapshot, tree.Snapshot);
+    }
+
+    [Fact]
+    public void OverflowCanLeaveAllWindowsUntouchedWhenNoneFit()
+    {
+        var tree = Tree(Window(1, 101), Window(2, 1, 101));
+        var snapshot = tree.Snapshot;
+        var plan = tree.Layout(Monitor(100, 100), 0, 0);
+        Assert.Equal(new PixelRect(0, 0, 50, 100), plan.Placements[0].Bounds);
+        Assert.Equal(new PixelRect(50, 0, 50, 100), plan.Placements[1].Bounds);
+        Assert.Same(snapshot, tree.Snapshot);
+    }
+
+    [Fact]
+    public void OverflowDoesNotAlterLayoutsThatAlreadyFitOrMaskInvalidWorkAreas()
+    {
+        var tree = Tree(Window(1, 70), Window(2, 20));
+        var strict = tree.Layout(Monitor(100, 100), 5, 0);
+        tree.Reconcile([Window(1, 7000), Window(2, 2000)]);
+        Assert.Equal(strict.Placements, tree.Layout(Monitor(100, 100), 5, 0).Placements);
+        Assert.Throws<InvalidOperationException>(() => tree.Layout(Monitor(10, 10), 0, 5));
+        Assert.Throws<InvalidOperationException>(() => tree.Layout(Monitor(x: int.MaxValue), 0, 0));
     }
 
     [Fact]

@@ -60,11 +60,13 @@ public sealed class WindowsWindowPlatformInteractiveTests
         Assert.Empty((await observer.ApplyAsync(new LayoutPlan([new(first.Id, target)]), timeout.Token)).Failures);
         await WaitForBoundsAsync(observer, fixture, target, timeout.Token);
         Assert.Equal(state, NativeInspection.WindowState(first.Title));
-        var clamped = new PixelRect(target.X, target.Y, first.MinimumWidth, first.MinimumHeight);
-        Assert.Empty((await observer.ApplyAsync(new LayoutPlan([new(first.Id, target with { Width = 1, Height = 1 })]), timeout.Token)).Failures);
-        await WaitForBoundsAsync(observer, fixture, clamped, timeout.Token);
+        target = target with { Width = 160, Height = 120 };
+        Assert.True(target.Width < first.MinimumWidth && target.Height < first.MinimumHeight);
+        Assert.Empty((await observer.ApplyAsync(new LayoutPlan([new(first.Id, target)]), timeout.Token)).Failures);
+        await WaitForBoundsAsync(observer, fixture, target, timeout.Token);
+        Assert.Equal(state, NativeInspection.WindowState(first.Title));
         await fixture.CommandAsync("move");
-        Assert.NotEqual(clamped, Find(await observer.CaptureAsync(timeout.Token), fixture).Bounds);
+        Assert.NotEqual(target, Find(await observer.CaptureAsync(timeout.Token), fixture).Bounds);
     }
 
     [IsolatedInteractiveFact]

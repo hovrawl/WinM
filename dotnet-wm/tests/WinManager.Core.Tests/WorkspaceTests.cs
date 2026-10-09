@@ -15,6 +15,49 @@ public sealed class WorkspaceTests
             new(-1920, 0, 800, 600), true, false, false, WindowMode.Tiling);
     private static DesktopSnapshot Desktop(WindowInfo[] windows, params MonitorInfo[] monitors) => new(monitors, windows, null);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UnboundConfiguredWorkspacesStartOnPrimaryMonitorRegardlessOfGuidOrder(bool reverse)
+    {
+        var primary = Monitor(SecondMonitor, "Primary") with { Bounds = new(0, 0, 1920, 1080), WorkArea = new(0, 0, 1920, 1040) };
+        var secondary = Monitor(FirstMonitor, "Secondary");
+        var set = new WorkspaceSet([new("1"), new("2"), new("3")]);
+        set.Reconcile(Desktop([], reverse ? [primary, secondary] : [secondary, primary]));
+
+        Assert.All(set.Snapshot.Where(w => w.Name is "1" or "2" or "3"), w => Assert.Equal(primary.Id, w.MonitorId));
+        Assert.True(set.Snapshot.Single(w => w.Name == "1").Active);
+        Assert.True(set.Snapshot.Single(w => w.Name == "Secondary").Active);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AutomaticWorkspaceReturnsToReconnectedDisplayWithoutDuplicates(bool newMonitorId)
+    {
+        var first = Window();
+        var second = Window(monitor: SecondMonitor);
+        var set = new WorkspaceSet();
+        var desktop = Desktop([first, second], Monitor(FirstMonitor, "Left"), Monitor(SecondMonitor, "Right"));
+        set.Reconcile(desktop);
+        var workspace = set.Snapshot.Single(w => w.MonitorId == SecondMonitor);
+        var tree = set.Trees[workspace.Id];
+        set.Reconcile(desktop with { Monitors = [Monitor(FirstMonitor, "Left")] });
+
+        var reconnected = newMonitorId ? Guid.NewGuid() : SecondMonitor;
+        set.Reconcile(Desktop([first, second with { MonitorId = reconnected }],
+            Monitor(FirstMonitor, "Left"), Monitor(reconnected, "right")));
+
+        Assert.Equal(2, set.Snapshot.Count);
+        var restored = set.Snapshot.Single(w => w.Id == workspace.Id);
+        Assert.Equal(reconnected, restored.MonitorId);
+        Assert.True(restored.Active);
+        Assert.Equal(second.Id, Assert.Single(restored.WindowIds));
+        Assert.Same(tree, set.Trees[workspace.Id]);
+        Assert.Equal(second.Id, tree.Snapshot!.WindowId);
+        Assert.Empty(set.Visibility(desktop));
+    }
+
     [Fact]
     public void DefaultsAssignWindowsToTheirPhysicalMonitorAndCreateWorkspaceKeyedTrees()
     {

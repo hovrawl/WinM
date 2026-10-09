@@ -59,9 +59,28 @@ No shortcut automatically starts a shell or any arbitrary executable.
 # Lifetime and recovery
 
 The hidden native notification window receives display/work-area changes.
-Periodic enumeration closes event/discovery races. Layouts honor observed
-minimum sizes; impossible constraints return `layout_constraints` rather than
-placing invalid rectangles. Floating windows are kept inside destination work
+Periodic enumeration closes event/discovery races. Every eligible tiled window
+in an active workspace receives a tile according to the split tree. Application
+minimum-size hints do not override tile widths or heights or cause windows to be
+skipped. The native placement layer requests the exact layout size, even below
+those hints; an application that independently refuses programmatic resizing
+can still constrain its own actual bounds.
+
+Default horizontal splits form equal-width columns (within one rounding pixel),
+not recursively halved columns. Untouched vertical splits likewise divide
+height equally. Adding/removing windows rebalances untouched splits; explicit
+command or drag-resize proportions are retained for surviving splits. Gaps are
+DPI-scaled and subtracted before distributing space. Split orientations, window
+order, and workspace assignments are preserved, including mixed-axis layouts.
+Per-window startup widths and saving/restoring split proportions across host
+restarts are not currently configuration options; a fresh host starts with equal
+shares unless changed through runtime commands or resizing.
+
+Invalid work areas or insufficient room for one-pixel tiles and configured gaps
+return `layout_constraints` rather than placing invalid rectangles. Startup and
+subsequent action failures are logged under `%LOCALAPPDATA%\WinManager\Logs`;
+unchanged diagnostics are deduplicated until the diagnostic state changes.
+Floating windows are kept inside destination work
 areas during monitor transfers. Native fullscreen and minimized windows are
 excluded from automatic placement and workspace hiding.
 

@@ -19,7 +19,7 @@ and repeated startup/cancellation/disposal. Tests close their disposable windows
 The focus test requires a session where Windows allows the fixture to take focus.
 
 Window-action tests cover visible-frame placement without activation or z-order
-changes, application minimum-size clamping, best-effort focus with verified success
+changes, exact requested sizes below application minimum hints, best-effort focus with verified success
 or structured denial, stale identities, invalid dimensions, bounded minimum-size
 queries, and cancellation/disposal of queued requests.
 
@@ -55,9 +55,10 @@ test-only adapter exposes only exact fixture titles/classes, verifies their PIDs
 and refuses actions for any other GUID. Actual observed native rectangles must
 converge to `SplitTree.Layout`: horizontal partition, vertical partition, resize,
 and swap, including physical-pixel work-area edges and DPI-scaled gaps. A separate
-test sets a real native minimum larger than the work area and requires the engine
-to report `layout_constraints` without moving either window. No unrelated window
-is managed, and no fake physical geometry is used.
+test sets both windows' real native minimum hints larger than the work area and
+requires every window to reach its requested undersized placement with no
+`layout_overflow` warnings. No unrelated window is managed, and no fake physical
+geometry is used.
 
 To see the layouts before the disposable windows close, use the opt-in hold below.
 The hold defaults to zero and is capped at 15 seconds total, divided equally
@@ -77,6 +78,9 @@ Positioning is asynchronous to avoid blocking on a hung target: an empty failure
 list means native requests were accepted, not that a target honored the geometry.
 Capture again to obtain actual geometry. Bounds and minimum sizes describe the
 visible frame in physical pixels; invisible resize borders are accounted for.
+Layout bounds are authoritative: native positioning requests the exact supplied
+visible size without clamping to minimum hints. A target application may still
+choose not to honor the request.
 Minimum tracking queries use a 50 ms timeout with DPI-specific system fallback.
 Visibility actions register durable, acknowledged recovery protection before hiding.
 The helper is also started before initial capture to recover abandoned journals;

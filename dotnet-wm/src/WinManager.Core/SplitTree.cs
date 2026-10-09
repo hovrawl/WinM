@@ -6,6 +6,7 @@ public sealed class SplitTree
 {
     private SplitNodeInfo? root;
     private Dictionary<Guid, WindowInfo> windows = [];
+    private readonly HashSet<Guid> resizedSplits = [];
     private SplitOrientation nextOrientation = SplitOrientation.Horizontal;
 
     public SplitNodeInfo? Snapshot => root;
@@ -16,6 +17,7 @@ public sealed class SplitTree
         var eligible = windows.Where(w => Eligible(w) && w.Mode == WindowMode.Tiling)
             .ToDictionary(w => w.Id);
         root = Prune(root, eligible);
+        resizedSplits.IntersectWith(BranchIds(root));
         var retained = Leaves(root).Select(n => n.WindowId!.Value).ToHashSet();
         foreach (var id in eligible.Keys.Order())
         {
@@ -28,6 +30,7 @@ public sealed class SplitTree
                 nextOrientation = SplitOrientation.Horizontal;
             }
         }
+        root = Balance(root);
         this.windows = eligible;
     }
 
@@ -42,6 +45,7 @@ public sealed class SplitTree
         {
             var parent = path[^1];
             root = Replace(root!, parent.Id, parent with { Orientation = orientation });
+            root = Balance(root);
         }
     }
 
@@ -64,6 +68,7 @@ public sealed class SplitTree
         var delta = direction is Direction.Left or Direction.Up ? -amount : amount;
         var ratio = Math.Clamp(parent.Ratio + delta, .1, .9);
         if (ratio == parent.Ratio) return false;
+        resizedSplits.Add(parent.Id);
         root = Replace(root!, parent.Id, parent with { Ratio = ratio });
         return true;
     }
@@ -108,6 +113,7 @@ public sealed class SplitTree
             if (Math.Floor(available * ratio) < size) ratio = Math.BitIncrement(ratio);
             ratio = Math.Clamp(ratio, .1, .9);
             if (ratio == parent.Ratio) continue;
+            resizedSplits.Add(parent.Id);
             root = Replace(root!, parent.Id, parent with { Ratio = ratio });
             changed = true;
             path.Clear();
@@ -131,7 +137,7 @@ public sealed class SplitTree
         var minimums = new Dictionary<Guid, (long Width, long Height)>();
         var minimum = Measure(root, inner, minimums);
         if (area.Width < minimum.Width || area.Height < minimum.Height)
-            throw new InvalidOperationException("Work area cannot satisfy window minimum sizes and gaps.");
+            throw new InvalidOperationException("Work area cannot satisfy one-pixel tiles and configured gaps.");
         var placements = new List<WindowPlacement>();
         Place(root, area, inner, minimums, placements);
         return new LayoutPlan(placements.AsReadOnly());
@@ -192,6 +198,14 @@ public sealed class SplitTree
         }
     }
 
+    private static IEnumerable<Guid> BranchIds(SplitNodeInfo? node)
+    {
+        if (node is null || node.WindowId is not null) yield break;
+        yield return node.Id;
+        foreach (var id in BranchIds(node.First)) yield return id;
+        foreach (var id in BranchIds(node.Second)) yield return id;
+    }
+
     private static SplitNodeInfo? Prune(SplitNodeInfo? node, Dictionary<Guid, WindowInfo> eligible)
     {
         if (node is null) return null;
@@ -207,6 +221,29 @@ public sealed class SplitTree
         node.WindowId is not null
             ? new SplitNodeInfo(Guid.NewGuid(), null, orientation, .5, node, leaf)
             : node with { Second = Append(node.Second!, leaf, orientation) };
+
+    private SplitNodeInfo? Balance(SplitNodeInfo? node)
+    {
+        if (node is null || node.WindowId is not null) return node;
+        var first = Balance(node.First)!;
+        var second = Balance(node.Second)!;
+        var ratio = node.Ratio;
+        if (!resizedSplits.Contains(node.Id))
+        {
+            var firstSpan = Span(first, node.Orientation!.Value);
+            ratio = firstSpan / (double)(firstSpan + Span(second, node.Orientation.Value));
+        }
+        if (first == node.First && second == node.Second && ratio == node.Ratio) return node;
+        return node with { First = first, Second = second, Ratio = ratio };
+    }
+
+    private static long Span(SplitNodeInfo node, SplitOrientation orientation)
+    {
+        if (node.WindowId is not null) return 1;
+        var first = Span(node.First!, orientation);
+        var second = Span(node.Second!, orientation);
+        return node.Orientation == orientation ? first + second : Math.Max(first, second);
+    }
 
     private static bool FindPath(SplitNodeInfo? node, Guid windowId, List<SplitNodeInfo> path)
     {
@@ -243,15 +280,11 @@ public sealed class SplitTree
         return (int)pixels;
     }
 
-    private (long Width, long Height) Measure(SplitNodeInfo node, int gap,
+    private static (long Width, long Height) Measure(SplitNodeInfo node, int gap,
         Dictionary<Guid, (long Width, long Height)> minimums)
     {
         (long Width, long Height) result;
-        if (node.WindowId is { } id)
-        {
-            var window = windows[id];
-            result = (Math.Max(1, window.MinimumWidth), Math.Max(1, window.MinimumHeight));
-        }
+        if (node.WindowId is not null) result = (1, 1);
         else
         {
             var first = Measure(node.First!, gap, minimums);
@@ -264,7 +297,7 @@ public sealed class SplitTree
         return result;
     }
 
-    private static void Place(SplitNodeInfo node, PixelRect area, int gap,
+    private void Place(SplitNodeInfo node, PixelRect area, int gap,
         Dictionary<Guid, (long Width, long Height)> minimums, List<WindowPlacement> placements)
     {
         if (node.WindowId is { } id)
@@ -276,9 +309,12 @@ public sealed class SplitTree
         var available = (long)(horizontal ? area.Width : area.Height) - gap;
         var firstMinimum = minimums[node.First!.Id];
         var secondMinimum = minimums[node.Second!.Id];
-        var firstSize = Math.Clamp((long)Math.Floor(available * node.Ratio),
-            horizontal ? firstMinimum.Width : firstMinimum.Height,
-            available - (horizontal ? secondMinimum.Width : secondMinimum.Height));
+        var lower = horizontal ? firstMinimum.Width : firstMinimum.Height;
+        var upper = available - (horizontal ? secondMinimum.Width : secondMinimum.Height);
+        var preferred = resizedSplits.Contains(node.Id)
+            ? available * node.Ratio
+            : lower + (upper - lower) * node.Ratio;
+        var firstSize = Math.Clamp((long)Math.Floor(preferred), lower, upper);
         var secondSize = available - firstSize;
         var first = horizontal
             ? Rectangle(area.X, area.Y, firstSize, area.Height)

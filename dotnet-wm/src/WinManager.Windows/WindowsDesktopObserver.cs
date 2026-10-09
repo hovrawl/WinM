@@ -530,7 +530,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (movingWindows.ContainsValue(placement.WindowId) || pendingDrops.Contains(placement.WindowId)) continue;
-            if (!ValidateTarget(placement.WindowId, out var window, out var info, out var failure))
+            if (!ValidateTarget(placement.WindowId, out var window, out _, out var failure))
             {
                 failures.Add(failure!);
                 continue;
@@ -548,14 +548,11 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             var frame = outer;
             PInvoke.DwmGetWindowAttribute(window, global::Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_EXTENDED_FRAME_BOUNDS,
                 &frame, (uint)sizeof(RECT));
-            var minimum = ReadMinimumSize(window, frame);
-            var width = Math.Max(placement.Bounds.Width, Math.Max(info!.MinimumWidth, minimum.Width));
-            var height = Math.Max(placement.Bounds.Height, Math.Max(info.MinimumHeight, minimum.Height));
             // Contract bounds describe the visible frame; SetWindowPos includes invisible borders.
             var x = (long)placement.Bounds.X + outer.left - frame.left;
             var y = (long)placement.Bounds.Y + outer.top - frame.top;
-            var outerWidth = (long)width + outer.right - outer.left - (frame.right - (long)frame.left);
-            var outerHeight = (long)height + outer.bottom - outer.top - (frame.bottom - (long)frame.top);
+            var outerWidth = (long)placement.Bounds.Width + outer.right - outer.left - (frame.right - (long)frame.left);
+            var outerHeight = (long)placement.Bounds.Height + outer.bottom - outer.top - (frame.bottom - (long)frame.top);
             if (x < int.MinValue || x > int.MaxValue || y < int.MinValue || y > int.MaxValue ||
                 outerWidth <= 0 || outerWidth > int.MaxValue || outerHeight <= 0 || outerHeight > int.MaxValue)
             {
@@ -563,7 +560,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 continue;
             }
             cancellationToken.ThrowIfCancellationRequested();
-            // Timeout queries can dispatch hooks reentrantly. Recheck the GUID generation as well as PID/start time.
+            // Recheck the GUID generation as well as PID/start time before issuing the native request.
             if (!ValidateTarget(placement.WindowId, out window, out _, out failure))
             {
                 failures.Add(failure!);

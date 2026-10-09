@@ -39,6 +39,7 @@ public sealed class ManagerEngine
     private bool exiting;
     private long revision;
     private string? committedSignature;
+    private IReadOnlyList<NativeActionFailure> reportedFailures = [];
     private ManagerSnapshot? current;
     private readonly TaskCompletionSource ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -46,6 +47,7 @@ public sealed class ManagerEngine
     public Task Stopped => stopped.Task;
     public ManagerSnapshot? Current => Volatile.Read(ref current);
     public event Action<ManagerSnapshot>? Changed;
+    public event Action<IReadOnlyList<NativeActionFailure>>? ActionsFailed;
     public IReadOnlyList<NativeActionFailure> ShutdownFailures { get; private set; } = [];
 
     public ManagerEngine(IWindowPlatform platform, int innerGap = 8, int outerGap = 8, int capacity = 256,
@@ -253,7 +255,11 @@ public sealed class ManagerEngine
             {
                 var monitor = desktop.Monitors.SingleOrDefault(monitor => monitor.Id == workspace.MonitorId);
                 if (monitor is null) continue;
-                try { placements.AddRange(workspaces.Trees[workspace.Id].Layout(monitor, innerGap, outerGap).Placements); }
+                try
+                {
+                    var plan = workspaces.Trees[workspace.Id].Layout(monitor, innerGap, outerGap);
+                    placements.AddRange(plan.Placements);
+                }
                 catch (InvalidOperationException error) { failures.Add(new(null, "layout_constraints", error.Message)); }
                 foreach (var window in desktop.Windows.Where(window => workspace.WindowIds.Contains(window.Id) &&
                     window.Mode == WindowMode.Floating && (window.Visible || window.ManagerHidden) && !window.Minimized && !window.Fullscreen))
@@ -286,6 +292,12 @@ public sealed class ManagerEngine
             ReconcileTrees(desktop);
         }
         Commit(desktop);
+        var diagnostics = failures.ToArray();
+        if (!reportedFailures.SequenceEqual(diagnostics))
+        {
+            reportedFailures = diagnostics;
+            if (reportedFailures.Count > 0) ActionsFailed?.Invoke(reportedFailures);
+        }
         return failures;
     }
 

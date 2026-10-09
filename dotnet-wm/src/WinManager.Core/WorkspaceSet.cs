@@ -9,7 +9,7 @@ public sealed class WorkspaceSet
     {
         public Guid Id { get; } = Guid.NewGuid();
         public string Name { get; } = name;
-        public string? DeviceName { get; } = deviceName;
+        public string? DeviceName { get; set; } = deviceName;
         public Guid MonitorId { get; set; } = monitorId;
         public bool Active { get; set; }
     }
@@ -52,16 +52,21 @@ public sealed class WorkspaceSet
 
         if (ordered.Length > 0)
         {
+            // Windows places the primary display at the virtual desktop origin.
+            var initialMonitor = ordered.FirstOrDefault(m => m.Bounds.X == 0 && m.Bounds.Y == 0)
+                ?? ordered.OrderBy(m => m.DeviceName, StringComparer.OrdinalIgnoreCase).ThenBy(m => m.Id).First();
             foreach (var workspace in workspaces)
             {
                 var preferred = ordered.FirstOrDefault(m => workspace.DeviceName is not null &&
                     string.Equals(m.DeviceName, workspace.DeviceName, StringComparison.OrdinalIgnoreCase));
                 if (preferred is not null) workspace.MonitorId = preferred.Id;
+                else if (workspace.MonitorId == Guid.Empty) workspace.MonitorId = initialMonitor.Id;
                 else if (!monitors.Contains(workspace.MonitorId)) workspace.MonitorId = ordered[0].Id;
+                workspace.DeviceName ??= ordered.First(m => m.Id == workspace.MonitorId).DeviceName;
             }
             foreach (var monitor in ordered)
                 if (!workspaces.Any(w => w.MonitorId == monitor.Id))
-                    Add(DefaultName(monitor.DeviceName), null, monitor.Id);
+                    Add(DefaultName(monitor.DeviceName), monitor.DeviceName, monitor.Id);
         }
 
         NormalizeActive();

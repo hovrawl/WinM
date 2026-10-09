@@ -11,7 +11,8 @@ GlazeWM checkout is a behavioral reference and is not modified or linked.
 - Free window dragging while managed: drop over a tile to swap positions, or
   onto another monitor to transfer to its active workspace and reflow the layout.
 - Live tiled-window resizing: neighboring tiles reflow as split boundaries move,
-  and the new proportions persist on release, respecting gaps and minimum sizes.
+  and the new proportions persist on release. Default columns share width equally;
+  all eligible windows tile, even when their minimum-size hints exceed available space.
 - Named per-monitor workspaces, monitor transfers/removal handling, safe
   workspace visibility, and an acknowledged crash-recovery helper.
 - Same-user/session named-pipe queries, commands, atomic snapshot/event

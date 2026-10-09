@@ -91,31 +91,54 @@ public sealed class WindowsManagerIntegrationTests(ITestOutputHelper output)
         await using var first = await NativeWindowFixture.StartAsync(layoutOnly: true);
         await using var second = await NativeWindowFixture.StartAsync(layoutOnly: true);
         await first.CommandAsync("impossible-minimum");
+        await second.CommandAsync("impossible-minimum");
         await using var platform = new TestOwnedPlatform(first, second);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         await platform.StartAsync(timeout.Token);
         var initial = await platform.CaptureAsync(timeout.Token);
         var constrained = Assert.Single(initial.Windows, window => window.Title == first.Prefix + ".normal");
         var monitor = Assert.Single(initial.Monitors, monitor => monitor.Id == constrained.MonitorId);
-        Assert.True(constrained.MinimumWidth > monitor.WorkArea.Width);
-        Assert.True(constrained.MinimumHeight > monitor.WorkArea.Height);
+        Assert.Equal(2, initial.Windows.Count);
+        Assert.All(initial.Windows, window =>
+        {
+            Assert.Equal(monitor.Id, window.MonitorId);
+            Assert.True(window.MinimumWidth > monitor.WorkArea.Width);
+            Assert.True(window.MinimumHeight > monitor.WorkArea.Height);
+        });
         var engine = new ManagerEngine(platform, InnerGap, OuterGap);
+        var diagnostic = new ConcurrentQueue<NativeActionFailure>();
+        engine.ActionsFailed += failures =>
+        {
+            foreach (var failure in failures) diagnostic.Enqueue(failure);
+        };
+        var tree = new SplitTree();
+        tree.Reconcile(initial.Windows);
+        var expected = tree.Layout(monitor, InnerGap, OuterGap);
+        Assert.Equal(initial.Windows.Count, expected.Placements.Count);
+        Assert.All(initial.Windows, window =>
+        {
+            var placement = Assert.Single(expected.Placements, placement => placement.WindowId == window.Id);
+            Assert.True(placement.Bounds.Width < window.MinimumWidth);
+            Assert.True(placement.Bounds.Height < window.MinimumHeight);
+        });
         var run = engine.RunAsync(timeout.Token);
         try
         {
             await WaitForCurrentAsync(engine, run, timeout.Token);
             var result = await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token);
-            Assert.False(result.Success);
-            Assert.Equal("layout_constraints", result.ErrorCode);
-            Assert.Contains("minimum", result.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.Equal(0, platform.PlacementCount);
-            var actual = await platform.CaptureAsync(timeout.Token);
+            Assert.True(result.Success);
+            var actual = await WaitForLayoutAsync(engine, run, platform, expected, timeout.Token);
+            Assert.True(platform.PlacementCount >= initial.Windows.Count);
             Assert.Equal(2, actual.Windows.Count);
-            Assert.All(initial.Windows, window => Assert.Equal(window.Bounds,
-                actual.Windows.Single(candidate => candidate.Id == window.Id).Bounds));
+            AssertPartition(actual, monitor, SplitOrientation.Horizontal);
+            Assert.All(actual.Windows, window => Assert.True(window.Visible && !window.ManagerHidden));
+            Assert.DoesNotContain(diagnostic, failure => failure.Code == "layout_overflow");
+            Assert.Empty(diagnostic);
             Assert.Empty(platform.Failures);
         }
         finally { await StopAsync(engine, run, timeout); }
+        Assert.DoesNotContain(diagnostic, failure => failure.Code == "layout_overflow");
+        Assert.Empty(diagnostic);
         Assert.Empty(engine.ShutdownFailures);
     }
 
