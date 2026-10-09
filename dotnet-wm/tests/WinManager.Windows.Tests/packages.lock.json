@@ -122,6 +122,12 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "winmanager.client": {
+        "type": "Project",
+        "dependencies": {
+          "WinManager.Contracts": "[1.0.0, )"
+        }
+      },
       "winmanager.contracts": {
         "type": "Project"
       },

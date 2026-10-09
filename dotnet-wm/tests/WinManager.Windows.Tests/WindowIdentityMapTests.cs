@@ -5,6 +5,34 @@ namespace WinManager.Windows.Tests;
 public sealed class WindowIdentityMapTests
 {
     [Fact]
+    public void ResolutionChecksLifecycleGenerationEvenWithSameHandlePidAndStartTime()
+    {
+        var map = new WindowIdentityMap();
+        var identity = new WindowIdentity(123, 4, 5);
+        var first = map.GetOrCreate(identity, 100);
+        Assert.True(map.TryResolve(first, out var resolved));
+        Assert.Equal(identity, resolved);
+        map.RecordLifecycleChange(123, 101);
+        Assert.False(map.TryResolve(first, out _));
+        var replacement = map.GetOrCreate(identity, 102);
+        Assert.False(map.TryResolve(first, out _));
+        Assert.True(map.TryResolve(replacement, out resolved));
+        Assert.Equal(identity, resolved);
+    }
+
+    [Theory]
+    [InlineData(6, 5)]
+    [InlineData(4, 6)]
+    public void ResolutionRejectsReplacedProcessIdentity(uint pid, ulong created)
+    {
+        var map = new WindowIdentityMap();
+        var first = map.GetOrCreate(new WindowIdentity(123, 4, 5));
+        var replacement = map.GetOrCreate(new WindowIdentity(123, pid, created));
+        Assert.False(map.TryResolve(first, out _));
+        Assert.True(map.TryResolve(replacement, out _));
+    }
+
+    [Fact]
     public void RepeatedIdentityIsStable()
     {
         var map = new WindowIdentityMap();

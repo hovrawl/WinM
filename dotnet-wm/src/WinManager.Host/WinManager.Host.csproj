@@ -6,6 +6,24 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\WinManager.Windows\WinManager.Windows.csproj" />
+    <ProjectReference Include="..\WinManager.Recovery\WinManager.Recovery.csproj" ReferenceOutputAssembly="false" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
   </ItemGroup>
+  <Target Name="CopyRecoveryHelper" AfterTargets="Build" BeforeTargets="GetCopyToPublishDirectoryItems">
+    <MSBuild Projects="..\WinManager.Recovery\WinManager.Recovery.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="RecoveryTarget" />
+    </MSBuild>
+    <PropertyGroup>
+      <RecoveryDirectory>@(RecoveryTarget->'%(RootDir)%(Directory)')</RecoveryDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <RecoveryFiles Include="$(RecoveryDirectory)WinManager.Recovery.*" />
+      <Content Include="@(RecoveryFiles)" Link="%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+    <Copy SourceFiles="@(RecoveryFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyPublishedRecoveryHelper" AfterTargets="Publish" DependsOnTargets="CopyRecoveryHelper">
+    <Error Condition="!Exists('$(RecoveryDirectory)WinManager.Recovery.dll')" Text="Recovery helper assembly is missing." />
+    <Copy SourceFiles="@(RecoveryFiles)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\WinManager.Contracts\WinManager.Contracts.csproj" />
+    <Compile Remove="Validation\**\*.cs" />
+  </ItemGroup>
+</Project>

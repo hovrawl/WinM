@@ -156,28 +156,28 @@ A headless host discovers eligible windows and monitors and receives normalized 
 - Add eligibility filtering, identity-safe HWND mappings, buffered startup reconciliation, and periodic rescanning.
 - Verify discovery and notification handling using fake adapters and disposable native test windows.
 
-### * Step 2: Implement deterministic tiling and window commands
+### ✓ Step 2: Implement deterministic tiling and window commands
 The core serializes inputs and computes/applies basic split layouts with focus, movement, and resizing.
 - Implement the manager input channel, state tree, pending layout plans, bounded admission, and native failure reconciliation.
 - Add horizontal/vertical splits, configurable gaps, directional focus/move, split resize, and basic floating/tiling transitions.
 - Respect work areas, mixed DPI, minimum sizes, minimized/fullscreen exclusions, and feedback-loop handling.
 - Cover layout invariants and geometry/focus failures with core tests and native smoke tests.
 
-###   Step 3: Implement workspaces with safe visibility recovery
+### ✓ Step 3: Implement workspaces with safe visibility recovery
 Windows can move between per-monitor workspaces without becoming stranded after a host crash.
 - Add workspace assignment, switching, window transfers, monitor removal migration, and display-change relayout.
 - Implement the `Recovery` helper, identity-checked restore records, registration acknowledgment before hiding, and host-process lifetime monitoring.
 - Distinguish manager-hidden windows from application-hidden/minimized windows; fail safely if recovery is unavailable.
 - Verify workspace transitions, hotplug simulations, graceful restoration, and forced-host-exit recovery against test-owned windows.
 
-###   Step 4: Expose named-pipe commands, subscriptions, and client tools
+### ✓ Step 4: Expose named-pipe commands, subscriptions, and client tools
 External applications can query state, issue commands, and maintain a race-free event-driven view.
 - Add the same-user/session named-pipe server, bounded length-prefixed JSON framing, validation, correlation, and structured errors.
 - Implement versioned DTOs/events, atomic snapshot-plus-subscription ordering, sequence/revision tracking, and slow-client disconnection.
 - Create `Client` and `Cli` projects for querying, command invocation, filtered event monitoring, and reconnection with fresh snapshots.
 - Document the protocol and test multi-client ordering, malformed frames, disconnects, overload, and end-to-end command/event flows.
 
-###   Step 5: Complete user-session operation and configuration
+### ✓ Step 5: Complete user-session operation and configuration
 The MVP runs reliably at user logon with configurable controls and no visualization UI.
 - Add validated JSON configuration, basic registered shortcuts, pause/redraw/exit controls, rotating logs, and per-session single-instance protection.
 - Implement explicit CLI install/uninstall-startup commands and headless Windows publishing.

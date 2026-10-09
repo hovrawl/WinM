@@ -22,11 +22,20 @@ internal static class TestWindowProgram
     private static string windowClass = "";
     private static string ignoredClass = "";
     private static FreeLibrarySafeHandle? instance;
+    private static bool slowMinimum;
+    private static bool impossibleMinimum;
 
     [STAThread]
     public static unsafe int Main(string[] args)
     {
-        if (args.Length != 2 || args[0] != "--native-window-fixture" ||
+        if (args.Length == 3 && args[0].StartsWith("WinManager.Recovery.", StringComparison.Ordinal) &&
+            Environment.GetEnvironmentVariable("WINMANAGER_TEST_RECOVERY_NO_ACK") == "1" &&
+            Environment.GetEnvironmentVariable("WINMANAGER_ISOLATED_INTERACTIVE") == "1")
+            return RecoveryTestHost.RefuseAcknowledgmentAsync(args[0]).GetAwaiter().GetResult();
+        if (args.Length == 3 && args[0] == "--recovery-test-host" &&
+            Environment.GetEnvironmentVariable("WINMANAGER_ISOLATED_INTERACTIVE") == "1" && Environment.UserInteractive)
+            return RecoveryTestHost.RunAsync(args[1], args[2]).GetAwaiter().GetResult();
+        if (args.Length != 2 || args[0] is not ("--native-window-fixture" or "--native-layout-fixture") ||
             Environment.GetEnvironmentVariable("WINMANAGER_ISOLATED_INTERACTIVE") != "1" || !Environment.UserInteractive)
             return 2;
         prefix = args[1];
@@ -54,10 +63,13 @@ internal static class TestWindowProgram
                 registered.Add(name);
             }
             Create("normal");
-            Create("tool", WINDOW_EX_STYLE.WS_EX_TOOLWINDOW);
-            Create("owned", owner: windows["normal"]);
             Create("hidden", visible: false);
-            Create("ignored", className: ignoredClass);
+            if (args[0] != "--native-layout-fixture")
+            {
+                Create("tool", WINDOW_EX_STYLE.WS_EX_TOOLWINDOW);
+                Create("owned", owner: windows["normal"]);
+                Create("ignored", className: ignoredClass);
+            }
             var control = windows["hidden"];
             var nativeThread = PInvoke.GetCurrentThreadId();
             // Force creation of the message queue before announcing readiness.
@@ -90,6 +102,8 @@ internal static class TestWindowProgram
         }
         finally
         {
+            if (uint.TryParse(Environment.GetEnvironmentVariable("WINMANAGER_TEST_FOREGROUND_PARENT"), out var parentPid))
+                PInvoke.AllowSetForegroundWindow(parentPid);
             foreach (var window in windows.Values.Reverse()) PInvoke.DestroyWindow(window);
             windows.Clear();
             foreach (var name in registered) PInvoke.UnregisterClass(name, instance);
@@ -110,6 +124,15 @@ internal static class TestWindowProgram
 
     private static unsafe LRESULT WindowProcedure(HWND window, uint message, WPARAM wParam, LPARAM lParam)
     {
+        if (message == PInvoke.WM_GETMINMAXINFO)
+        {
+            if (slowMinimum) Thread.Sleep(500);
+            var result = PInvoke.DefWindowProc(window, message, wParam, lParam);
+            var minimum = (MINMAXINFO*)lParam.Value;
+            minimum->ptMinTrackSize.X = Math.Max(minimum->ptMinTrackSize.X, impossibleMinimum ? 1_000_000 : 340);
+            minimum->ptMinTrackSize.Y = Math.Max(minimum->ptMinTrackSize.Y, impossibleMinimum ? 1_000_000 : 240);
+            return result;
+        }
         if (message != CommandMessage) return PInvoke.DefWindowProc(window, message, wParam, lParam);
         try
         {
@@ -126,6 +149,7 @@ internal static class TestWindowProgram
                             SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER)) throw NativeError();
                         break;
                     case "minimize": PInvoke.ShowWindow(windows["normal"], SHOW_WINDOW_CMD.SW_MINIMIZE); break;
+                    case "maximize": PInvoke.ShowWindow(windows["normal"], SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED); break;
                     case "fullscreen":
                         var monitor = PInvoke.MonitorFromWindow(windows["normal"], MONITOR_FROM_FLAGS.MONITOR_DEFAULTTONEAREST);
                         var info = new MONITORINFO { cbSize = (uint)sizeof(MONITORINFO) };
@@ -149,6 +173,8 @@ internal static class TestWindowProgram
                         windows.Remove("owned");
                         break;
                     case "create": Create("normal"); break;
+                    case "slow-minimum": slowMinimum = true; break;
+                    case "impossible-minimum": impossibleMinimum = true; break;
                     case "cloak":
                         int cloak = 1;
                         PInvoke.DwmSetWindowAttribute(windows["normal"], global::Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_CLOAK,

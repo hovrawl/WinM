@@ -54,6 +54,19 @@ internal sealed class WindowIdentityMap
         return now >= age ? now - age : 0;
     }
 
+    public bool TryResolve(Guid id, out WindowIdentity identity)
+    {
+        ReconcileLifecycle();
+        foreach (var entry in identities.Values)
+        {
+            if (entry.Id != id) continue;
+            identity = entry.Identity;
+            return true;
+        }
+        identity = default;
+        return false;
+    }
+
     public void Retain(ISet<nint> handles)
     {
         foreach (var handle in identities.Keys.Where(handle => !handles.Contains(handle)).ToArray())

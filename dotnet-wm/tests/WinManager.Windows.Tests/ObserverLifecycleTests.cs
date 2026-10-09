@@ -7,6 +7,16 @@ namespace WinManager.Windows.Tests;
 public sealed class ObserverLifecycleTests
 {
     [Fact]
+    public async Task ApplyBeforeStartAndAfterDisposalIsRejectedWithoutTouchingTheDesktop()
+    {
+        var observer = new WindowsDesktopObserver();
+        var plan = new WinManager.Core.LayoutPlan([]);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => observer.ApplyAsync(plan, CancellationToken.None));
+        await observer.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => observer.ApplyAsync(plan, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task CaptureBeforeStartIsRejectedWithoutTouchingTheDesktop()
     {
         await using var observer = new WindowsDesktopObserver();

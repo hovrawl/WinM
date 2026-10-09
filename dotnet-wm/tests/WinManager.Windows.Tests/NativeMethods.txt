@@ -29,3 +29,13 @@ MonitorFromWindow
 GetMonitorInfo
 SetWindowLong
 GetDpiForWindow
+WM_GETMINMAXINFO
+MINMAXINFO
+GetForegroundWindow
+GetWindow
+GetWindowRect
+IsWindowVisible
+GetWindowPlacement
+OpenProcess
+GetExitCodeProcess
+AllowSetForegroundWindow

@@ -14,8 +14,9 @@ internal sealed class NativeWindowFixture : IAsyncDisposable
     public string Prefix { get; } = $"WinManager.Test.{Guid.NewGuid():N}";
     public string WindowClass => Prefix + ".Window";
     public string IgnoredClass => Prefix + ".Ignored";
+    public int ProcessId => process.Id;
 
-    public static async Task<NativeWindowFixture> StartAsync()
+    public static async Task<NativeWindowFixture> StartAsync(bool layoutOnly = false)
     {
         if (Environment.GetEnvironmentVariable("WINMANAGER_ISOLATED_INTERACTIVE") != "1")
             throw new InvalidOperationException("Native fixtures require explicit isolated-desktop opt-in.");
@@ -28,11 +29,14 @@ internal sealed class NativeWindowFixture : IAsyncDisposable
             CreateNoWindow = true
         };
         var process = new Process { StartInfo = info };
+        info.Environment["WINMANAGER_TEST_FOREGROUND_PARENT"] = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var fixture = new NativeWindowFixture(process, info);
+        if (layoutOnly) info.ArgumentList[1] = "--native-layout-fixture";
         try
         {
             Assert.True(process.Start());
             fixture.hasStarted = true;
+            NativeInspection.GrantForeground((uint)process.Id);
             fixture.errors = process.StandardError.ReadToEndAsync();
             Assert.Equal("READY", await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15)));
             return fixture;
