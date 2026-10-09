@@ -31,8 +31,14 @@ Example (shortcuts are disabled in the generated defaults):
 
 - Names are unique, case-insensitive, nonblank strings (maximum 64 characters).
   An optional `monitorDeviceName` on a workspace uses the device name from a
-  snapshot, for example `\\.\DISPLAY1`. Missing displays are handled through
-  reconciliation; detached monitor bindings migrate to surviving displays.
+  snapshot, for example `\\.\DISPLAY1`. Workspaces without an explicit binding
+  initially use the Windows primary display (at desktop origin `0,0`), not random
+  monitor IDs. Each other display gets an active workspace named after its device,
+  so `status` showing `1` on one monitor and `\\.\DISPLAY3` on another is normal;
+  both active workspaces are tiled independently.
+  Missing displays are handled through reconciliation; detached monitor bindings
+  migrate to surviving displays and return to their original device when it
+  reconnects, retaining workspace identity, window assignments, and split trees.
 - Gaps are DIPs in `[0,256]`, converted per-monitor to physical pixels.
 - Process/class ignores are case-insensitive exact names, not regex rules.
 - Shortcut modifier bits: Alt `1`, Control `2`, Shift `4`, Win `8`, NoRepeat

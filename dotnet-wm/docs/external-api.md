@@ -115,6 +115,7 @@ connection. Add `--pipe NAME` if the Host was started with a custom pipe name.
 | `snapshot` | Optional `--pipe NAME` | One `ManagerSnapshot` JSON object |
 | `command` | JSON argument or `-` for stdin; optional `--pipe NAME` | One `CommandResult` JSON object on success |
 | `watch` | Optional `--event-types TYPE,TYPE`, `--reconnect`, `--pipe NAME` | One `EventEnvelope` JSON object per line |
+| `status` | Optional `--reconnect`, `--pipe NAME` | Four human-readable lines updated in place; redirected output appends blocks |
 | `install-startup` | `--host ABSOLUTE_EXE`; optional `--config ABSOLUTE_JSON` | Registration result JSON |
 | `uninstall-startup` | None | Registration result JSON |
 | `help`, `--help`, `-h` | None | Human-readable usage |
@@ -122,6 +123,12 @@ connection. Add `--pipe NAME` if the Host was started with a custom pipe name.
 Startup verbs are local CLI operations, **not pipe commands**. They modify only
 the per-user `WinManager` logon registry value and do not start the Host. Details
 and path restrictions are in the [CLI README](../src/WinManager.Cli/README.md).
+
+For an interactive overview, use `WinManager.Cli.exe status`. It subscribes to all
+events and displays the focused window's workspace, focused managed window, and latest
+event. Without managed focus it lists all active workspaces. Configuration direction
+is marked unavailable because the host does not expose it. Use `watch`, not `status`,
+for JSON integrations. See the [live status guide](../src/WinManager.Cli/README.md#live-status).
 
 Example Python integration (standard library only):
 

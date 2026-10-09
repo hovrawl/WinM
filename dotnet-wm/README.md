@@ -49,6 +49,7 @@ dotnet publish src\WinManager.Cli\WinManager.Cli.csproj -c Release -r win-x64 --
 & '.\publish\host\WinManager.Host.exe'
 & '.\publish\cli\WinManager.Cli.exe' 'snapshot'
 & '.\publish\cli\WinManager.Cli.exe' 'watch' '--reconnect'
+& '.\publish\cli\WinManager.Cli.exe' 'status'
 '{"kind":"pause","paused":true}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
 '{"kind":"activateWorkspace","workspaceName":"2"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
 '{"kind":"exit"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
@@ -69,6 +70,8 @@ another instance owns the session; `2` indicates startup/lifetime failure and
 
 For the full command reference and third-party CLI, .NET SDK, and named-pipe
 integration examples, see [External commands API](docs/external-api.md).
+For an updating four-line workspace/window/event display, use `status`; see the
+[live status guide](src/WinManager.Cli/README.md#live-status).
 See also `docs\configuration.md`, `docs\protocol.md`, `docs\validation.md`, and `docs\iteration-2.md`.
 Commands commit logical intent; native operations are best-effort. Snapshots and
 events report observed physical geometry, not assumed successful placement.

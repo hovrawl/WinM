@@ -9,6 +9,37 @@ namespace WinManager.Ipc.Tests;
 public sealed class CliIntegrationTests
 {
     [Fact]
+    public async Task ExecutableStatusSubscribesAndUpdatesFocusedWindowAndLatestEvent()
+    {
+        await using var host = await PipeHost.StartAsync();
+        await using var status = CliProcess.Start("status", "--pipe", host.Name);
+        Assert.Equal("Current Workspace: test", await status.ReadLineAsync(host.Token));
+        Assert.Equal("Current Window: None", await status.ReadLineAsync(host.Token));
+        Assert.Equal("Current Config direction: Not exposed by host", await status.ReadLineAsync(host.Token));
+        Assert.StartsWith("Latest event: snapshot ", await status.ReadLineAsync(host.Token));
+
+        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        var window = host.Engine.Current!.Desktop.Windows.Single();
+        Assert.True((await client.ExecuteAsync(new(CommandKind.Focus, WindowId: window.Id), host.Token)).Success);
+        Assert.Equal("Current Workspace: test", await status.ReadLineAsync(host.Token));
+        Assert.Equal($"Current Window: {window.Title} [test] ({window.Id})", await status.ReadLineAsync(host.Token));
+        Assert.Equal("Current Config direction: Not exposed by host", await status.ReadLineAsync(host.Token));
+        Assert.StartsWith("Latest event: focus.changed ", await status.ReadLineAsync(host.Token));
+
+        Assert.True((await client.ExecuteAsync(new(CommandKind.Pause, Paused: true), host.Token)).Success);
+        Assert.Equal("Current Workspace: test", await status.ReadLineAsync(host.Token));
+        Assert.Contains(window.Title, (await status.ReadLineAsync(host.Token))!);
+        Assert.Equal("Current Config direction: Not exposed by host", await status.ReadLineAsync(host.Token));
+        var latest = await status.ReadLineAsync(host.Token);
+        Assert.StartsWith("Latest event: pause.changed ", latest);
+        Assert.Contains("paused", latest!);
+        await host.Server.DisposeAsync();
+        Assert.Equal(4, await status.ExitAsync(host.Token));
+        using var error = JsonDocument.Parse(await status.Errors.WaitAsync(host.Token));
+        Assert.Equal("connection_error", error.RootElement.GetProperty("errorCode").GetString());
+    }
+
+    [Fact]
     public async Task ExecutableSnapshotWatchStdinCommandUnsubscribeAndShutdown()
     {
         await using var host = await PipeHost.StartAsync();

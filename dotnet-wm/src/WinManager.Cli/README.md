@@ -1,7 +1,7 @@
 # WinManager CLI
 
 `net10.0-windows`; references `WinManager.Client`. Explicit per-user startup registration;
-no shell execution, visualization, or engine/Host dependencies.
+no shell execution or engine/Host dependencies. Includes a live terminal status display.
 
 See [External commands API](../../docs/external-api.md) for all manager commands,
 their arguments and behavior, and third-party integration examples.
@@ -21,6 +21,7 @@ dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'snap
 '{"kind":"pause","paused":true}' | dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'command' '-'
 '{"kind":"redraw"}' | dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'command' '-'
 dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'watch' '--event-types' 'pause.changed' '--reconnect'
+dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'status'
 dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'snapshot' '--pipe' 'WinManager.Test.Pipe'
 '{"kind":"pause","paused":false}' | dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'command' '-' '--pipe' 'WinManager.Test.Pipe'
 ```
@@ -29,6 +30,30 @@ dotnet '.\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll' 'snap
 embedded quotes. Prefer the stdin form above across PowerShell versions: Windows PowerShell strips
 embedded quotes in native positional arguments. JSON stdin is data only and is never executed.
 Unknown JSON members and missing/invalid command kinds are rejected before connecting.
+
+## Live status
+
+Run `status [--pipe NAME] [--reconnect]` while the Host is running. It subscribes to
+all SDK events and replaces four lines in place, starting from the atomic initial snapshot:
+
+```text
+Current Workspace: Code
+Current Window: Editor [editor] (window GUID)
+Current Config direction: Not exposed by host
+Latest event: focus.changed (sequence 7, revision 12; running)
+```
+
+The current workspace belongs to the focused managed window. With no managed focus,
+all active workspaces are listed (one per monitor); absent windows/workspaces show `None`.
+The host does not expose a global configuration/next-split direction in its snapshots;
+existing tree orientations are not a substitute, so that field is explicitly unavailable.
+The latest event includes sequence, state revision, and paused/running state.
+
+Lines are clipped to the terminal width and cleared when values get shorter. Redirected
+stdout (or a terminal too small for the buffer) appends plain four-line blocks instead;
+use `watch` for machine-readable JSON. Ctrl+C stops the subscription. `--reconnect`
+uses the SDK transport retry behavior; the last displayed state remains visible during
+retry waits and is replaced by a fresh snapshot after reconnecting. Events are not replayed.
 
 Startup is never installed automatically. To opt in, supply your deployed Host executable and
 optionally an existing JSON configuration file (both paths must be absolute):
@@ -57,7 +82,7 @@ Snapshot and command results are compact JSON on stdout; watch prints newline-de
 the initial snapshot is always delivered first. Errors are JSON on stderr. Reconnect resynchronizes
 with a fresh snapshot and instance ID after transport failures; it does not replay lost transitions
 or retry commands. Slow output consumers cause a fatal bounded-queue error instead of dropped events.
-Ctrl+C cancels connection, requests, and watch, including retry waits.
+Ctrl+C cancels connection, requests, watch, and status, including retry waits.
 
 | Exit code | Meaning |
 | --- | --- |
@@ -68,4 +93,4 @@ Ctrl+C cancels connection, requests, and watch, including retry waits.
 | 130 | Ctrl+C cancellation |
 
 The parent owns server integration and solution wiring. A server must be running for snapshot,
-command, and watch; absent servers time out after five seconds (watch with reconnect retries).
+command, watch, and status; absent servers time out after five seconds (watch/status with reconnect retry).

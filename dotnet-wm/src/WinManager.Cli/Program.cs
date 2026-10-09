@@ -34,6 +34,14 @@ public static class Program
                     Print(envelope);
                 return 0;
             }
+            if (options.Verb == "status")
+            {
+                var display = new StatusDisplay(new ConsoleStatusTerminal());
+                await foreach (var envelope in WinManagerClient.WatchAsync(pipeName: options.Pipe,
+                    reconnect: options.Reconnect, cancellationToken: cancellation.Token))
+                    display.Update(StatusDisplay.Format(envelope));
+                return 0;
+            }
             ManagerCommand? command = null;
             if (options.Verb == "command")
             {
@@ -106,7 +114,7 @@ public static class Program
         if (args.Length == 0) return new Options("help", null, null, null, false);
         if (args.Length == 1 && args[0] is "help" or "--help" or "-h") return new Options("help", null, null, null, false);
         var verb = args[0];
-        if (verb is not ("snapshot" or "command" or "watch" or "install-startup" or "uninstall-startup"))
+        if (verb is not ("snapshot" or "command" or "watch" or "status" or "install-startup" or "uninstall-startup"))
             throw new ArgumentException($"Unknown command '{verb}'. Use --help.");
         string? pipe = null;
         string? json = null;
@@ -124,7 +132,7 @@ public static class Program
                 case "--config" when verb == "install-startup" && config is null:
                     config = TakeValue(args, ref i);
                     break;
-                case "--pipe" when verb is "snapshot" or "command" or "watch" && pipe is null:
+                case "--pipe" when verb is "snapshot" or "command" or "watch" or "status" && pipe is null:
                     pipe = TakeValue(args, ref i);
                     ArgumentException.ThrowIfNullOrWhiteSpace(pipe);
                     break;
@@ -132,7 +140,7 @@ public static class Program
                     types = TakeValue(args, ref i).Split(',', StringSplitOptions.TrimEntries);
                     if (types.Any(string.IsNullOrWhiteSpace)) throw new ArgumentException("Event types must be a nonempty comma-separated list.");
                     break;
-                case "--reconnect" when verb == "watch" && !reconnect:
+                case "--reconnect" when verb is "watch" or "status" && !reconnect:
                     reconnect = true;
                     break;
                 default:
@@ -158,11 +166,14 @@ public static class Program
           snapshot [--pipe NAME]
           command JSON [--pipe NAME]
           watch [--event-types TYPE,TYPE] [--reconnect] [--pipe NAME]
+          status [--reconnect] [--pipe NAME]
           install-startup --host ABSOLUTE_EXE [--config ABSOLUTE_JSON]
           uninstall-startup
           help | --help | -h
 
         Outputs compact JSON; watch outputs one EventEnvelope per line (full snapshot payload).
+        status subscribes to all events and updates four human-readable lines in place.
+        Redirected status output appends blocks; configuration direction is not exposed by the host.
         JSON commands use the ManagerCommand schema, e.g. {"kind":"pause","paused":true}.
         Use command - to read JSON from stdin (portable across PowerShell versions):
           '{"kind":"pause","paused":true}' | dotnet .\src\WinManager.Cli\bin\Debug\net10.0-windows\WinManager.Cli.dll command -
