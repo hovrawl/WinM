@@ -2,5 +2,6 @@
   <ItemGroup>
     <ProjectReference Include="..\WinManager.Contracts\WinManager.Contracts.csproj" />
     <Compile Remove="Validation\**\*.cs" />
+    <Compile Remove="AotValidation\**\*.cs" />
   </ItemGroup>
 </Project>

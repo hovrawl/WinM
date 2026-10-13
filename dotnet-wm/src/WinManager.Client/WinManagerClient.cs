@@ -65,7 +65,7 @@ public sealed class WinManagerClient : IAsyncDisposable
 
     public async Task<ManagerSnapshot> QuerySnapshotAsync(CancellationToken cancellationToken = default)
     {
-        var response = await RequestAsync("query.snapshot", Protocol.Payload(new { }), cancellationToken);
+        var response = await RequestAsync("query.snapshot", Protocol.EmptyPayload, cancellationToken);
         var snapshot = ReadPayload<ManagerSnapshot>(response);
         if (snapshot.InstanceId == Guid.Empty || snapshot.StateRevision != response.StateRevision ||
             snapshot.Desktop is null || snapshot.Trees is null || snapshot.Desktop.Monitors is null || snapshot.Desktop.Windows is null)
@@ -146,7 +146,7 @@ public sealed class WinManagerClient : IAsyncDisposable
             }
             try
             {
-                await RequestAsync("unsubscribe", Protocol.Payload(new { subscriptionId = active.SubscriptionId }), cancellationToken);
+                await RequestAsync("unsubscribe", Protocol.Payload(new UnsubscribeRequest(active.SubscriptionId)), cancellationToken);
                 lock (sync)
                 {
                     subscription = null;
@@ -247,7 +247,7 @@ public sealed class WinManagerClient : IAsyncDisposable
                 !payload.TryGetProperty("stateRevision", out var revision) || revision.ValueKind != JsonValueKind.Number)
                 throw new WinManagerProtocolException("Snapshot is incomplete.");
         }
-        return payload.Deserialize<T>(Protocol.JsonOptions)
+        return payload.Deserialize(Protocol.TypeInfo<T>())
             ?? throw new WinManagerProtocolException($"Missing {typeof(T).Name} payload.");
     }
 
