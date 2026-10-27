@@ -1,3 +1,11 @@
+---
+id: winmanager-protocol
+type: submodule-design
+title: Local IPC protocol and consistency
+status: draft
+parent: winmanager-contracts
+---
+
 ### Local IPC, version 1
 
 The Windows host exposes a duplex byte-mode named pipe. The default name is
@@ -25,7 +33,10 @@ Requests contain `protocolVersion: 1`, `kind: "request"`, a nonempty GUID
 `requestId`, `operation`, and `payload`. Responses contain `protocolVersion`,
 `kind: "response"`, the correlated `requestId`, `success`, `errorCode`, `message`,
 `stateRevision`, and optional `payload`. A malformed request without a usable
-ID receives `Guid.Empty` as its response ID. Errors do not mutate manager state.
+ID receives `Guid.Empty` as its response ID. Validation rejection does not mutate
+manager state. Native-action failures can leave logical intent or partial physical
+effects. An error response does not imply transaction-wide rollback. Query the
+committed snapshot after a failure. `winmanager-core` owns command rollback behavior.
 
 ### Operations
 
