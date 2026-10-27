@@ -15,6 +15,11 @@ Junie plans and the iteration-two parity backlog do not define product scope.
 The sections below describe the existing implementation, not completion of the
 intended UX.
 
+The [spec fit assessment](docs/spec-fit-assessment.md) maps requirements to source
+and test evidence. It records implementation gaps, accepted focused-split
+scenarios, and ordered verification gates. Acceptance targets are not claims
+that the corresponding behavior exists or passes today.
+
 ## Tiling MVP
 
 - Native desktop discovery, stable window identities, serialized commands,
