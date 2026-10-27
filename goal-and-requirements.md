@@ -3,7 +3,7 @@ id: winmanager-goals
 type: goal-and-requirements
 status: draft
 title: WinManager product and UX requirements
-references: [winmanager-protocol]
+references: [winmanager-protocol, winmanager-core]
 ---
 
 # WinManager
@@ -32,7 +32,24 @@ These requirements describe intended behavior, not a claim that every capability
 - Mouse resize changes layout proportions. The arrangement retains deliberate proportions instead of automatic defaults.
 - Automatic placement, direct manipulation, and keyboard commands must produce coherent results. Windows that require ordinary floating behavior remain usable.
 
-Mode names define product concepts, not complete algorithms. Empty-workspace insertion, mode-switch conversion, scrolling navigation, and exact drop regions have no approved design yet.
+Mode names define product concepts, not complete algorithms. Mode-switch conversion, scrolling navigation, and exact drop regions have no approved design yet.
+The focused-split acceptance contract lives in `winmanager-core`. It distinguishes initial discovery from subsequent local insertion.
+
+### Transient tools and decision dialogs
+
+Transient tools and short-lived decision dialogs are first-class desktop windows, not an application-specific exception backlog.
+The default classifier must recognize their role from combined evidence such as ownership, native styles, and dialog behavior.
+Small size alone does not establish a tool. Ambiguous ordinary windows remain eligible for tiling.
+Normal use must not require a separate rule for every application that opens a transient tool.
+
+Recognized tools float at application-chosen geometry and do not split or rebalance the tiled layout.
+They associate with the owner's workspace rather than remain globally unrelated to that owner.
+Tool focus must not replace the remembered eligible tile for subsequent focused insertion.
+Embedded native child controls are not independent desktop windows. Ownership of a separate top-level window is a different relationship.
+
+Classifier improvement requires regression cases for both transient tools and ordinary windows. Evidence and tests must support changes over time.
+Exact heuristics, confidence thresholds, unowned-tool behavior, and owner lifecycle rules require a separate design from focused insertion.
+This requirement does not classify every popup or owned window as a transient tool.
 
 ### Workspaces and continuity
 

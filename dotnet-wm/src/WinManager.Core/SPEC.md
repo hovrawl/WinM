@@ -67,5 +67,29 @@ Unchanged committed state does not increment the revision. Subscriptions begin a
 Pause claims in `docs/configuration.md` and `docs/external-api.md` describe the desired visibility suspension, not current source behavior.
 Those documents remain reference inputs, not additional spec authorities.
 
+## Accepted focused-split contract, not yet implemented
+
+These rules refine `winmanager-goals`. They describe target acceptance, not the current `Reconcile` behavior above.
+
+- Keep a new eligible tile on its observed monitor, in that monitor's active workspace.
+- Use an existing focused eligible tile as anchor. Otherwise use that workspace's last observed focused eligible tile.
+- If the remembered tile no longer survives, use the last surviving leaf in tree order. Never use the newcomer as its own anchor.
+- A first tile fills an empty workspace's usable area, minus outer gaps.
+- Split only the anchor region. A single arrival shares it equally with the anchor, minus the inner gap.
+- Keep the anchor first. Place the new tile to its right for side-by-side insertion, or below it for stacked insertion.
+- A simultaneous arrival batch shares that local region equally with the anchor. Keep the anchor first and use deterministic newcomer order.
+- Preserve unrelated regions, orientations, node identities, and deliberate proportions. Equal shares permit one-pixel rounding differences.
+- Keep insertion direction sticky per workspace. Changing insertion intent must not rotate an existing container.
+- Preserve existing `setSplit` behavior. A separate insertion-direction action exposes its workspace-local value through committed snapshots and events.
+- Initial discovery without a saved arrangement uses deterministic equal columns. Subsequent discoveries use local insertion.
+- A window that returns from floating or minimized state uses normal insertion. Do not reserve an absent tile's old slot.
+- Closure collapses the empty branch without global rebalance. An untouched local equal-share group redistributes only inside its retained region.
+- Preserve deliberate ratios on surviving resized splits. Do not infer permission to rebalance unrelated ancestors from their lack of resize history.
+- Do not force native focus on arrival or closure. Record observed focus and keep anchor history local to its workspace.
+
+Recognized transient tools follow the product policy in `winmanager-goals`. Their focus must not erase the last eligible tile anchor.
+The focused-split slice preserves current tool exclusions. Broader classifier and owner-workspace lifecycle changes require a separate design.
+Existing geometry failure, visibility recovery, and semantic-exclusion safety contracts remain in force.
+
 **Unverified risk:** a lost native move-end notification can retain placement suppression. Periodic reconciliation does not time out move tracking.
 Fake-platform tests do not prove native focus acceptance, application resize compliance, or desktop interaction timing.

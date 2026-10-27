@@ -33,6 +33,15 @@ Replacement releases the previous set before native registration. On conflict, i
 This cleanup does not satisfy the transactional reload requirement in `winmanager-goals`.
 The 64-entry shortcut signal queue drops new signals under saturation. This differs from public IPC admission, which can return `busy`.
 
+## Transient-tool classification gap
+
+`winmanager-goals` defines the intended first-class tool policy. Current discovery exposes popup/tool/no-activate flags and an ownership boolean only.
+It does not expose the owner's window identity or a tested multi-signal transient classifier.
+Core currently leaves default-ignored candidates outside workspace visibility, rather than associating tools with the owner's workspace lifecycle.
+
+Existing style-bit and semantic-exclusion tests establish this baseline. They do not prove robust automatic recognition of ephemeral decision dialogs.
+Classifier and owner-lifecycle work require a separate design and regression corpus. Focused insertion must preserve recognized-tool exclusions without claiming this gap resolved.
+
 ## Recovery mechanism
 
 The helper owns private per-user journals and acknowledged registration before hides. It checks host lifetime and protected window identity before restoration.
