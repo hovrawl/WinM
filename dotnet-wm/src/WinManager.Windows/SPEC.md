@@ -5,6 +5,7 @@ status: draft
 title: Windows integration and recovery mechanisms
 parent: winmanager-architecture
 depends-on: [winmanager-core]
+references: [winmanager-goals]
 ---
 
 # Windows integration
@@ -27,7 +28,9 @@ Action-time identity checks protect against stale or reused HWNDs. Native placem
 Placement requests exact planned dimensions, including dimensions below native minimum hints. Applications can refuse those dimensions.
 Focus requests respect Windows foreground restrictions and verify immediate observed focus.
 
-Shortcut registration validates combinations and replaces registrations on the native thread. Partial native conflicts cause rollback.
+Shortcut registration validates combinations and replaces registrations on the native thread.
+Replacement releases the previous set before native registration. On conflict, it removes partial new registrations but does not restore the previous set.
+This cleanup does not satisfy the transactional reload requirement in `winmanager-goals`.
 The 64-entry shortcut signal queue drops new signals under saturation. This differs from public IPC admission, which can return `busy`.
 
 ## Recovery mechanism

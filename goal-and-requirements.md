@@ -48,7 +48,9 @@ Window matching and conflict handling for restart restoration require a separate
 - Pause suspends automatic placement and automatic workspace visibility enforcement. It does not disable deliberately issued commands.
 - Resume reconciles current intent with the observed desktop.
 - A configuration reload validates the complete candidate before application. Invalid configuration leaves the current configuration and session intact.
-- A valid reload preserves the session. It does not restart the host or discard arrangement state.
+- Reload is transactional. It commits the complete candidate or retains/restores the previous configuration and active controls if application fails.
+- This guarantee includes failures after validation, such as native shortcut conflicts. Failure must not leave a partial configuration or remove previous controls.
+- Reload preserves the session on success and failure. It does not restart the host or discard arrangement state.
 - A lightweight companion provides a reload action. Its visual form and other controls have no approved design yet.
 
 ### Reliable desktop control
