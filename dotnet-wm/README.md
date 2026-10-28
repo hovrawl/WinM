@@ -3,6 +3,23 @@
 Windows-only, headless .NET 10 tiling window manager. The adjacent
 GlazeWM checkout is a behavioral reference and is not modified or linked.
 
+## Product direction and specs
+
+Start with [product and UX requirements](../goal-and-requirements.md) and
+[architecture](../architecture.md). Module `SPEC.md` files describe current
+behavior, boundaries, and gaps. The [IPC protocol](docs/protocol.md) is part
+of that graph. All specs remain draft until owner review.
+
+The requirements distinguish intended UX from implemented behavior. Historical
+Junie plans and the iteration-two parity backlog do not define product scope.
+The sections below describe the existing implementation, not completion of the
+intended UX.
+
+The [spec fit assessment](docs/spec-fit-assessment.md) maps requirements to source
+and test evidence. It records implementation gaps, accepted focused-split
+scenarios, and ordered verification gates. Acceptance targets are not claims
+that the corresponding behavior exists or passes today.
+
 ## Tiling MVP
 
 - Native desktop discovery, stable window identities, serialized commands,
