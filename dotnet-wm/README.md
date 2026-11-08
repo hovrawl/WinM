@@ -3,7 +3,11 @@
 Windows-only, headless .NET 10 tiling window manager. The adjacent
 GlazeWM checkout is a behavioral reference and is not modified or linked.
 
-## Tiling MVP
+## Current implementation
+
+This section describes the current monitor-scoped implementation. It is not the
+target model. See [the one-desk goal](docs/project-goal.md) and its
+[migration plan](docs/desk-model-plan.md).
 
 - Native desktop discovery, stable window identities, serialized commands,
   horizontal/vertical split layouts, DPI-scaled gaps, directional focus/movement,
@@ -27,14 +31,14 @@ native message thread. `Host` composes them through dependency injection as a
 normal-privilege `WinExe`; `Client` depends only on public contracts.
 No tray, widget, service, browser bridge, or arbitrary shell execution is included.
 
-## Iteration two progress
+## Existing feature progress
 
 Container selection adds active-tree navigation, observable logical selection,
 and selected-container split orientation through CLI, SDK, and shortcuts.
 Filtered focus cycling adds next/previous wrapping within active workspaces,
 with optional tiling/floating filters and observed focus events.
-See [iteration two](docs/iteration-2.md) for completed features and the remaining
-ordered backlog; this is not a claim of full functional parity.
+See [the feature record](docs/iteration-2.md) for completed work. It is a history,
+not a functional-parity roadmap.
 
 ## Build and safe tests
 
@@ -84,7 +88,9 @@ For the full command reference and third-party CLI, .NET SDK, and named-pipe
 integration examples, see [External commands API](docs/external-api.md).
 For an updating four-line workspace/window/event display, use `status`; see the
 [live status guide](src/WinManager.Cli/README.md#live-status).
-See also `docs\configuration.md`, `docs\protocol.md`, `docs\validation.md`, and `docs\iteration-2.md`.
+See also `docs\configuration.md`, `docs\protocol.md`, `docs\validation.md`,
+`docs\iteration-2.md`, [the desk goal](docs/project-goal.md), and
+[the desk migration plan](docs/desk-model-plan.md).
 Commands commit logical intent; native operations are best-effort. Snapshots and
 events report observed physical geometry, not assumed successful placement.
 Managing elevated windows is best-effort and can fail without administrator rights.

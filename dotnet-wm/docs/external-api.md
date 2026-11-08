@@ -4,6 +4,10 @@ WinManager exposes its running manager through a local Windows named pipe.
 Third-party applications can use the CLI, the .NET client SDK, or implement
 the version 1 pipe protocol directly. There is no HTTP endpoint or browser bridge.
 
+This reference describes the current API. It does not provide desk state or
+transferable workspace-view commands. Those contracts are planned, not available.
+See [the project goal](project-goal.md) and [the migration plan](desk-model-plan.md).
+
 ## Choose an integration
 
 | Integration | Best for | Interface |

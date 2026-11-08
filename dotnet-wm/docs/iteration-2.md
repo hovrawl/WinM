@@ -1,52 +1,28 @@
-# Iteration two: ordered follow-up backlog
+# Iteration two: completed feature record
 
-These are separate follow-up tasks, not implemented MVP functionality. Each task
-must add its command contracts, events, client support, and automated tests.
-This is functional Windows parity, not GlazeWM wire/config compatibility.
+The earlier follow-up backlog set broad Windows feature parity as its direction.
+That backlog is retired. The current goal is one shared desk with transferable
+workspace views. See [the project goal](project-goal.md) and
+[the desk model migration plan](desk-model-plan.md).
 
-1. **Advanced layouts and interaction:** container selection, filtered focus
-   cycling, absolute/percentage sizing and placement, border adjustment,
-   drag-to-reorder/resize, advanced tiling direction. Reference
-   `glazewm/packages/wm/src/commands` and `wm-common/src/app_command.rs`.
-2. **Complete workspace behavior:** previous/recent/next-active navigation,
-   refocus toggling, keep-alive workspaces, persistent bindings and hotplug
-   migration, whole-workspace movement, display names, live workspace updates.
-   Reference `wm_state.rs`, workspace/monitor commands, README workspace config.
-3. **Full window states and effects:** floating placement/centering/topmost,
-   fullscreen/maximized/minimized commands, title bars, opacity, focus borders,
-   corners, taskbar behavior, and restoration of every modified native property.
-   Gate DWM effects by OS capability. Reference `platform_sync.rs`,
-   `app_command.rs`, and README window behavior/effects sections.
-4. **Rules, configuration, and keyboard parity:** process/class/title equals
-   and regex rules, triggers/run-once, multiple commands per binding, binding
-   modes, extended layouts/chords, transactional reload/rollback, default window
-   states, percentage gaps, optional GlazeWM YAML import. Reference
-   `manage_window.rs`, `wm-common/src/parsed_config`, and README configuration.
-5. **Automation and pointer behavior:** focus-follows-cursor, cursor jump
-   triggers, startup/shutdown/reload hooks, opt-in shell execution with an
-   explicit security model. Reference `packages/wm/src/main.rs` listeners and
-   general commands. The MVP never executes arbitrary shell commands.
-6. **Distribution and ecosystem integration:** signed installer, upgrades,
-   uninstall cleanup, package-manager delivery, optional tray client, optional
-   authenticated WebSocket adapter. Evolve the event catalogue, capability
-   negotiation, and migration policy alongside new features.
+This file records completed work. It does not set future scope.
 
-The status-bar widget is a separate project. Zebar bundling, macOS support, and
-exact GlazeWM CLI/IPC compatibility are excluded. Recheck the cloned inventory
-before claiming this backlog delivers complete functional parity.
+- Advanced layouts: **container selection complete**. Features include active-tree
+  node selection, parent/child/sibling/root navigation, snapshot selection,
+  `selection.changed` events, selection-aware split orientation, typed SDK/CLI
+  support, shortcut validation, and automated core/IPC tests. Selection clears
+  when focus or tree/workspace context changes. Group move and resize are not
+  implemented.
+- Advanced layouts: **filtered focus cycle complete**. The manager wraps
+  next/previous cycle actions within active workspaces. It supports filters for
+  tiling/floating modes, active-workspace scope, deterministic tree and floating
+  window order, observed `focus.changed` events, SDK/CLI and shortcut support,
+  and automated tests for filters, boundaries, exclusions, and native failures.
 
-## Implementation progress
+These features remain part of the current implementation. Reuse or change them
+only as needed for the desk model. No other item from the retired backlog is a
+project commitment.
 
-Features are implemented and committed individually for rollback. The ordered
-backlog above remains the scope, not a claim of completed parity.
-
-- Advanced layouts: **container selection complete**. Active-tree node targeting,
-  parent/child/sibling/root navigation, snapshot selection and `selection.changed`
-  events, selection-aware split orientation, typed SDK/CLI support, shortcut
-  validation, and automated core/IPC tests. Selection is cleared when focus or
-  tree/workspace context changes. Group movement/resizing is not yet implemented.
-- Advanced layouts: **filtered focus cycling complete**. Next/previous wrapping,
-  tiling/floating filters, active-workspace scope, deterministic tree/floating
-  order, observed `focus.changed` events, SDK/CLI and shortcut support, and
-  automated tests for filters, boundaries, exclusions, and native failures.
-- Remaining advanced-layout features and tasks 2–6 are pending.
+The status-bar widget is a separate project. The current external API and IPC
+remain documented in [External commands API](external-api.md) and
+[Local IPC protocol](protocol.md).

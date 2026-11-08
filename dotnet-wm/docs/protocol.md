@@ -1,5 +1,9 @@
 ### Local IPC, version 1
 
+This section documents the current version 1 protocol. It does not define the
+planned desk model or workspace-view transfer contracts. See
+[the project goal](project-goal.md) and [the migration plan](desk-model-plan.md).
+
 The Windows host exposes a duplex byte-mode named pipe. The default name is
 `WinManager.v1.<first 24 hex digits of SHA-256(user SID)>.<session ID>` as returned
 by `Protocol.DefaultPipeName()`. Use local machine `.`. Connections require

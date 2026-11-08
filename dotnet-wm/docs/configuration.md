@@ -6,6 +6,12 @@ Default configuration is created at `%LOCALAPPDATA%\WinManager\config.json`.
 Use `--config ABSOLUTE_PATH` for an existing alternate JSON file. Changes take
 effect on restart; live reload and YAML import are deferred.
 
+This guide describes the current monitor-scoped configuration. `monitorDeviceName`
+currently binds a workspace to a display. The target desk model removes monitor
+ownership from workspaces. See [the project goal](project-goal.md) and
+[the migration plan](desk-model-plan.md). The future configuration format is not
+implemented.
+
 Example (shortcuts are disabled in the generated defaults):
 
 ```json
@@ -109,5 +115,5 @@ journals, investigate logs, and restart in the same user session.
 
 Logon registration is explicit through CLI `install-startup`/`uninstall-startup`,
 using only the current user's Run entry. No service, elevation, scheduled task,
-or visualization process is required. Real logon and mixed-DPI/hotplug hardware
+or visualization process is required for the current manager. Real logon and mixed-DPI/hotplug hardware
 validation should accompany deployment to a new machine.
