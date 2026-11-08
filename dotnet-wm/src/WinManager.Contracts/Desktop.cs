@@ -7,7 +7,7 @@ public sealed record WindowInfo(Guid Id, Guid MonitorId, string Title, string Pr
     string ClassName, PixelRect Bounds, bool Visible, bool Minimized, bool Fullscreen,
     WindowMode Mode, int MinimumWidth = 1, int MinimumHeight = 1, bool ManagerHidden = false,
     bool IsPopup = false, bool IsToolWindow = false, bool IsOwned = false, bool IsNoActivate = false,
-    bool? TilingOverride = null)
+    bool? TilingOverride = null, bool LayoutOverflow = false)
 {
     public bool IsIgnored => TilingOverride != true && (Fullscreen || IsPopup || IsToolWindow || IsOwned || IsNoActivate);
 }

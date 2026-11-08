@@ -13,6 +13,7 @@ The target rules live in [Project goal: one shared desk](project-goal.md). Trans
 - `WorkspaceSet.Activate` supports a target monitor. `ManagerEngine` accepts optional `monitorId` for `ActivateWorkspace`; otherwise it uses the focused window's observed connected monitor, then a stable primary monitor. Native-action failures restore the prior view map and remove any fallback workspace created by the failed transfer.
 - `src/WinManager.Contracts/Commands.cs` exposes `WorkspaceViewInfo` through `ManagerSnapshot.WorkspaceViews`. The optional field is additive to the version 1 snapshot. `MoveToMonitor` still moves a window to the workspace currently shown by a monitor; it is distinct from view transfer.
 - `src/WinManager.Host/ManagerConfiguration.cs` validates the optional activation monitor target. The CLI and SDK serialize the existing `ManagerCommand` contract. Configuration, API, and protocol references describe the current view-transfer behavior.
+- `SplitTree.Layout` stages only windows whose reported minimum width and height fit. It retains the full tree and reports overflow IDs; `ManagerEngine` exposes `WindowInfo.LayoutOverflow`, minimizes overflow, and supports promoting one through the existing `focus` command. The Windows recovery helper restores manager-minimized overflow on graceful exit or host failure. CLI status lists affected titles; no visual client is included.
 
 These details are the baseline for migration. The `MonitorId` on `WindowInfo` is observed native placement, not a future desk relationship.
 
@@ -54,6 +55,8 @@ Implemented: disconnected monitors release their views without deleting workspac
 
 ### 3. Add workspace layout rules
 
+Implemented baseline: the existing split-tree layout respects each window's minimum size, deterministically admits fitting leaves while retaining the full saved tree, and reports the rest as overflow. The manager minimizes overflow windows, exposes logical `layoutOverflow` separately from observed `minimized`, retries native failures, restores manager-minimized windows when capacity returns, and can promote an overflow window by replacing the focused tile. Application-minimized windows remain excluded and are not auto-restored.
+
 Keep layout calculation in the system program. Add columns, rows, and Fibonacci rules as workspace-level state. Calculate native rectangles from the current monitor work area and workspace rule. Recalculate when a workspace rule, its bounds, or the view's work area changes.
 
 Keep the core layout input independent of a visual client's zoom and desk coordinates. Decide whether desk bounds affect window layout directly or only workspace placement in the overview. The recommended separation is that desk position affects the overview, while the monitor view's available work area drives native tile rectangles.
@@ -74,6 +77,7 @@ Add or update tests in the core, IPC, and Windows test projects. Cover these cas
 - Confirm that window membership and workspace desk bounds do not change during transfer.
 - Confirm source fallback and destination displacement for every selected policy.
 - Confirm native failure behavior, rollback limits, and observed geometry reports.
+- Confirm partial fit, no-fit overflow, stable saved split trees, focus promotion/swap, capacity-growth restoration, manual-minimize distinction, native minimization failure/retry, and recovery.
 - Add and remove monitors. Test the zero-monitor state. Retain workspace IDs, positions, membership, and layout rules.
 - Change columns, rows, and Fibonacci rules. Confirm deterministic reflow and valid rectangles.
 - Reject invalid spatial bounds and verify the selected overlap policy.
@@ -94,7 +98,7 @@ Do not make a UI a prerequisite for the data model or manager commands. Start UI
 | Bundled separate client | Keeps the process boundary and contracts; offers one installer and coordinated release. | Adds package, update, startup, and lifecycle work. | Consider after the companion proves useful. |
 | UI inside the manager host | One process and direct access to state. | Couples UI lifetime and platform concerns to the manager; weakens the headless boundary. | Not recommended. |
 
-The recommended companion can implement the desk overview and quick switcher. The overview can zoom out and show windows in workspace groups. Users can move groups on the desk or select a workspace.
+The recommended companion can implement the desk overview and quick switcher. The overview can zoom out and show windows in workspace groups, including an explicit overflow list that explains why a window is minimized and lets the user focus it to replace a staged tile. Users can move groups on the desk or select a workspace.
 
 The quick switcher can use a floating modal window with groups at uneven, desk-like positions. Arrow keys move selection. A name filter narrows the choices. Enter activates the selected workspace on the chosen monitor.
 

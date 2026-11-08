@@ -10,6 +10,14 @@ The current API exposes workspace membership and transferable monitor views.
 uses `Guid.Empty` and `false`. Older hosts may omit `WorkspaceViews`, so clients
 should treat that optional field as unavailable when it is null.
 
+Each `desktop.windows` item includes `layoutOverflow`, which is true when the
+window remains managed but its minimum size prevents it from being staged in the
+current layout. The manager minimizes these windows; `minimized` separately
+reports the observed native state, so clients can surface a failed minimize.
+Use the existing `focus` command on an overflow window in its active workspace
+to prioritize it for staging; when possible, the currently focused tile becomes
+the replacement overflow window. The CLI `status` view also lists overflow titles.
+
 View activation is implemented, but logical desk positions, workspace bounds,
 workspace-level columns/rows/Fibonacci rules, persistence of view assignments, and
 the visual desk client are not. See [the project goal](project-goal.md) and
@@ -73,7 +81,7 @@ replace `<window-guid>`, `<workspace-guid>`, and
 
 | `kind` | Required fields | Behavior | Example command JSON |
 | --- | --- | --- | --- |
-| `focus` | None; optional `direction` | Focus the target window, or its directional neighbor if a direction is supplied. | `{"kind":"focus","windowId":"<window-guid>"}` |
+| `focus` | None; optional `direction` | Focus the target window or its directional neighbor. Focusing a `layoutOverflow` window in its active workspace prioritizes it for staging and can minimize the focused tile in its place. | `{"kind":"focus","windowId":"<overflow-window-guid>"}` |
 | `focusCycle` | None; optional `cycleDirection`, `mode`, workspace target, `windowId` | Cycle eligible windows within an active workspace, wrapping at either end. | `{"kind":"focusCycle","cycleDirection":"next","mode":"tiling"}` |
 | `move` | `direction` | Swap the target tile with a directional tiling neighbor in its workspace; not a pixel-position move. | `{"kind":"move","direction":"left"}` |
 | `resize` | `direction`, `amount` | Adjust the nearest ancestor split on the direction's axis. | `{"kind":"resize","direction":"right","amount":0.05}` |
@@ -99,8 +107,10 @@ Argument details:
   `0.05` changes the split ratio by five percentage points. `left`/`up` decrease
   the first child's share; `right`/`down` increase it, regardless of which child
   contains the target. Ratios are clamped to `[0.1, 0.9]`; DPI-scaled gaps
-  constrain physical placement, but minimum-size hints do not. A missing matching
-  split or an adjustment already at the ratio limit returns `not_found`.
+  and window minimum sizes constrain placement. A layout that cannot stage every
+  window at its minimum size marks the remaining windows `layoutOverflow` and
+  minimizes them. A missing matching split or an adjustment already at the ratio
+  limit returns `not_found`.
 - `paused`: a JSON boolean. Pausing suspends automatic placement and workspace
   visibility application; it is not an API lock. Logical commands can still
   change state while paused, and unpausing reapplies it.

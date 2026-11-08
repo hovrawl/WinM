@@ -140,6 +140,7 @@ public sealed class ManagerTests
 internal sealed class FakeWindowPlatform : IWindowPlatform
 {
     private readonly Channel<NativeNotification> notifications = Channel.CreateUnbounded<NativeNotification>();
+    private readonly HashSet<Guid> managerMinimized = [];
     private int activeActions;
     public DesktopSnapshot Desktop { get; set; }
     public bool FailActions { get; set; }
@@ -184,11 +185,15 @@ internal sealed class FakeWindowPlatform : IWindowPlatform
                 {
                     var placement = plan.Placements.FirstOrDefault(placement => placement.WindowId == window.Id);
                     var visibility = plan.Visibility?.FirstOrDefault(visibility => visibility.WindowId == window.Id);
+                    var minimization = plan.Minimizations?.FirstOrDefault(minimization => minimization.WindowId == window.Id);
+                    if (minimization is { Minimized: true }) managerMinimized.Add(window.Id);
+                    else if (minimization is { Minimized: false }) managerMinimized.Remove(window.Id);
                     return window with
                     {
                         Bounds = placement?.Bounds ?? window.Bounds,
                         Visible = visibility?.Visible ?? window.Visible,
-                        ManagerHidden = visibility is null ? window.ManagerHidden : !visibility.Visible
+                        ManagerHidden = visibility is null ? window.ManagerHidden : !visibility.Visible,
+                        Minimized = minimization?.Minimized ?? window.Minimized
                     };
                 }).ToArray(),
                 FocusedWindowId = plan.FocusWindowId ?? Desktop.FocusedWindowId
@@ -200,8 +205,9 @@ internal sealed class FakeWindowPlatform : IWindowPlatform
     }
     public Task<ApplyResult> RestoreAsync(CancellationToken cancellationToken)
     {
-        Desktop = Desktop with { Windows = Desktop.Windows.Select(window => window.ManagerHidden
-            ? window with { Visible = true, ManagerHidden = false } : window).ToArray() };
+        Desktop = Desktop with { Windows = Desktop.Windows.Select(window => window.ManagerHidden || managerMinimized.Contains(window.Id)
+            ? window with { Visible = true, ManagerHidden = false, Minimized = false } : window).ToArray() };
+        managerMinimized.Clear();
         return Task.FromResult(new ApplyResult([]));
     }
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

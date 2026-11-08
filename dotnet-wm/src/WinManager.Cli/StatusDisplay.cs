@@ -17,13 +17,18 @@ internal sealed class StatusDisplay(IStatusTerminal terminal)
             ?? workspaces.FirstOrDefault(w => w.Active && w.MonitorId == window.MonitorId);
         var workspaceText = workspace is not null ? workspace.Name :
             string.Join(", ", workspaces.Where(w => w.Active).Select(w => w.Name));
-        return
-        [
+        var lines = new List<string>
+        {
             $"Current Workspace: {(workspaceText.Length == 0 ? "None" : Clean(workspaceText))}",
             $"Current Window: {(window is null ? "None" : $"{Clean(window.Title)} [{Clean(window.ProcessName)}] ({window.Id})")}",
             "Current Config direction: Not exposed by host",
             $"Latest event: {Clean(envelope.EventType)} (sequence {envelope.Sequence}, revision {envelope.StateRevision}; {(snapshot.Paused ? "paused" : "running")})"
-        ];
+        };
+        var overflow = snapshot.Desktop.Windows.Where(candidate => candidate.LayoutOverflow).ToArray();
+        if (overflow.Length > 0)
+            lines.Add("Layout overflow: " + string.Join(", ", overflow.Select(candidate =>
+                $"{Clean(candidate.Title)} [{Clean(candidate.ProcessName)}] ({(candidate.Minimized ? "minimized" : "not minimized")})")));
+        return lines.ToArray();
     }
 
     public void Update(IReadOnlyList<string> lines)

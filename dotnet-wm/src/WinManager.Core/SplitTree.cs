@@ -167,7 +167,7 @@ public sealed class SplitTree
         return changed;
     }
 
-    public LayoutPlan Layout(MonitorInfo monitor, int innerGap, int outerGap)
+    public LayoutPlan Layout(MonitorInfo monitor, int innerGap, int outerGap, IReadOnlyList<Guid>? priorityOrder = null)
     {
         ArgumentNullException.ThrowIfNull(monitor);
         ArgumentOutOfRangeException.ThrowIfNegative(innerGap);
@@ -179,13 +179,26 @@ public sealed class SplitTree
         var work = monitor.WorkArea;
         var area = Rectangle((long)work.X + outer, (long)work.Y + outer,
             (long)work.Width - 2L * outer, (long)work.Height - 2L * outer);
+        var candidates = WindowOrder.ToArray();
+        var candidateSet = candidates.ToHashSet();
+        var ordered = priorityOrder is null
+            ? candidates
+            : priorityOrder.Where(candidateSet.Contains).Distinct().Concat(candidates).Distinct().ToArray();
+        var selected = new HashSet<Guid>();
+        foreach (var id in ordered)
+        {
+            selected.Add(id);
+            if (!Fits(Project(root, selected), area, inner)) selected.Remove(id);
+        }
+        var projection = Project(root, selected);
+        var overflow = candidates.Where(id => !selected.Contains(id)).ToArray();
+        if (projection is null)
+            return new LayoutPlan(Array.Empty<WindowPlacement>(), OverflowWindowIds: Array.AsReadOnly(overflow));
         var minimums = new Dictionary<Guid, (long Width, long Height)>();
-        var minimum = Measure(root, inner, minimums);
-        if (area.Width < minimum.Width || area.Height < minimum.Height)
-            throw new InvalidOperationException("Work area cannot satisfy one-pixel tiles and configured gaps.");
+        Measure(projection, inner, minimums);
         var placements = new List<WindowPlacement>();
-        Place(root, area, inner, minimums, placements);
-        return new LayoutPlan(placements.AsReadOnly());
+        Place(projection, area, inner, minimums, placements);
+        return new LayoutPlan(placements.AsReadOnly(), OverflowWindowIds: Array.AsReadOnly(overflow));
     }
 
     public Guid? Neighbor(Guid windowId, Direction direction, IReadOnlyList<WindowInfo> windows)
@@ -223,7 +236,8 @@ public sealed class SplitTree
         return best;
     }
 
-    private static bool Eligible(WindowInfo window) => window.Visible && !window.Minimized && !window.IsIgnored;
+    private static bool Eligible(WindowInfo window) => !window.IsIgnored &&
+        (window.LayoutOverflow || window.Visible && !window.Minimized);
     private static bool HasArea(WindowInfo window) => window.Bounds.Width > 0 && window.Bounds.Height > 0;
     private static SplitOrientation Axis(Direction direction) => direction switch
     {
@@ -325,11 +339,34 @@ public sealed class SplitTree
         return (int)pixels;
     }
 
-    private static (long Width, long Height) Measure(SplitNodeInfo node, int gap,
+    private bool Fits(SplitNodeInfo? node, PixelRect area, int gap)
+    {
+        if (node is null) return true;
+        var minimums = new Dictionary<Guid, (long Width, long Height)>();
+        var minimum = Measure(node, gap, minimums);
+        return area.Width >= minimum.Width && area.Height >= minimum.Height;
+    }
+
+    private static SplitNodeInfo? Project(SplitNodeInfo? node, IReadOnlySet<Guid> selected)
+    {
+        if (node is null) return null;
+        if (node.WindowId is { } id) return selected.Contains(id) ? node : null;
+        var first = Project(node.First, selected);
+        var second = Project(node.Second, selected);
+        if (first is null) return second;
+        if (second is null) return first;
+        return node with { First = first, Second = second };
+    }
+
+    private (long Width, long Height) Measure(SplitNodeInfo node, int gap,
         Dictionary<Guid, (long Width, long Height)> minimums)
     {
         (long Width, long Height) result;
-        if (node.WindowId is not null) result = (1, 1);
+        if (node.WindowId is { } id)
+        {
+            var window = windows.GetValueOrDefault(id);
+            result = (Math.Max(1, window?.MinimumWidth ?? 1), Math.Max(1, window?.MinimumHeight ?? 1));
+        }
         else
         {
             var first = Measure(node.First!, gap, minimums);

@@ -6,7 +6,7 @@ using Windows.Win32.UI.WindowsAndMessaging;
 namespace WinManager.Windows;
 
 internal sealed record RecoveryRecord(long Handle, uint ProcessId, ulong CreationTime, uint ShowCommand, string Property,
-    bool HideConfirmed = false);
+    bool HideConfirmed = false, bool Minimization = false);
 internal sealed record RecoveryJournal(uint HostId, ulong HostCreationTime, List<RecoveryRecord> Records);
 internal sealed record RecoveryCommand(string Kind, RecoveryRecord? Record = null);
 
@@ -64,20 +64,27 @@ internal static class RecoveryNative
         var window = new HWND((nint)record.Handle);
         // A queued hide on a hung UI thread may not have executed yet. Seeing an already-visible
         // window is not proof that our subsequently queued show has executed.
-        var canConfirm = record.HideConfirmed || !PInvoke.IsWindowVisible(window);
+        var pendingMinimization = record.Minimization && !record.HideConfirmed && !PInvoke.IsIconic(window);
+        var canConfirm = record.HideConfirmed || !PInvoke.IsWindowVisible(window) || record.Minimization && !pendingMinimization;
         var command = (SHOW_WINDOW_CMD)record.ShowCommand;
         var show = command == SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED ? SHOW_WINDOW_CMD.SW_SHOWNA : command;
-        if (!PInvoke.ShowWindowAsync(window, show)) return false;
+        PInvoke.ShowWindowAsync(window, show);
+        var stableRestoredChecks = 0;
         for (var attempt = 0; attempt < 50; attempt++)
         {
             identity = Verify(record);
             if (identity != true) return identity == false;
             var placement = new WINDOWPLACEMENT { length = (uint)System.Runtime.InteropServices.Marshal.SizeOf<WINDOWPLACEMENT>() };
-            if (canConfirm && PInvoke.IsWindowVisible(window) && PInvoke.GetWindowPlacement(window, ref placement) &&
+            var restored = PInvoke.IsWindowVisible(window) && PInvoke.GetWindowPlacement(window, ref placement) &&
                 (command == SHOW_WINDOW_CMD.SW_SHOWMINNOACTIVE ? (bool)PInvoke.IsIconic(window) :
                     command == SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED ? placement.showCmd == SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED :
-                    !PInvoke.IsIconic(window) && placement.showCmd != SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED))
-                return true;
+                    !PInvoke.IsIconic(window) && placement.showCmd != SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED);
+            if (pendingMinimization)
+            {
+                stableRestoredChecks = restored ? stableRestoredChecks + 1 : 0;
+                if (stableRestoredChecks == 50) return true;
+            }
+            else if (canConfirm && restored) return true;
             Thread.Sleep(10);
         }
         return false;

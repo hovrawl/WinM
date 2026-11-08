@@ -10,12 +10,12 @@ public sealed class FullWorkspaceLayoutTests
     [InlineData(3)]
     [InlineData(4)]
     [InlineData(10)]
-    public void ColumnsTileEveryWindowAtEqualWidthsDespiteMinimumHints(int count)
+    public void ColumnsTileEveryWindowAtEqualWidthsWhenMinimumsFit(int count)
     {
         var monitor = new MonitorInfo(Guid.NewGuid(), "Primary", new(0, 0, 1920, 1200), new(0, 0, 1920, 1200), 144);
         var windows = Enumerable.Range(1, count).Select(i => new WindowInfo(new(i, 0, 0, new byte[8]),
             monitor.Id, "window", "test", "test", new(0, 0, 800, 1000), true, false, false,
-            WindowMode.Tiling, 1000, 1500)).ToArray();
+            WindowMode.Tiling, 100, 100)).ToArray();
         var tree = new SplitTree();
         tree.Reconcile(windows);
         var plan = tree.Layout(monitor, 8, 8);
@@ -38,7 +38,7 @@ public sealed class FullWorkspaceLayoutTests
         var monitor = new MonitorInfo(Guid.NewGuid(), "display", new(-900, -600, 900, 600), new(-900, -600, 900, 600), 96);
         var windows = Enumerable.Range(1, 4).Select(i => new WindowInfo(new(i, 0, 0, new byte[8]),
             monitor.Id, "window", "test", "test", new(0, 0, 800, 1000), true, false, false,
-            WindowMode.Tiling, 10000, 10000)).ToArray();
+            WindowMode.Tiling, 100, 100)).ToArray();
         var tree = new SplitTree();
         tree.Reconcile(windows);
         foreach (var window in windows) tree.SetOrientation(window.Id, SplitOrientation.Vertical);
@@ -59,7 +59,7 @@ public sealed class FullWorkspaceLayoutTests
         var monitor = new MonitorInfo(Guid.NewGuid(), "display", new(0, 0, 1000, 800), new(0, 0, 1000, 800), 96);
         var windows = Enumerable.Range(1, 4).Select(i => new WindowInfo(new(i, 0, 0, new byte[8]),
             monitor.Id, "window", "test", "test", new(0, 0, 100, 100), true, false, false,
-            WindowMode.Tiling, 2000, 2000)).ToArray();
+            WindowMode.Tiling, 100, 100)).ToArray();
         var tree = new SplitTree();
         tree.Reconcile(windows.Take(2).ToArray());
         tree.Resize(windows[0].Id, Direction.Right, .1);
@@ -76,14 +76,16 @@ public sealed class FullWorkspaceLayoutTests
     }
 
     [Fact]
-    public void ImpossibleOnePixelTilesAndGapsFailInsteadOfDroppingWindows()
+    public void TooManyOnePixelTilesOverflowWhileFittingTilesRemainStaged()
     {
         var monitor = new MonitorInfo(Guid.NewGuid(), "display", new(0, 0, 10, 10), new(0, 0, 10, 10), 96);
         var tree = new SplitTree();
         tree.Reconcile(Enumerable.Range(1, 2).Select(i => new WindowInfo(new(i, 0, 0, new byte[8]),
             monitor.Id, "window", "test", "test", new(0, 0, 100, 100), true, false, false,
             WindowMode.Tiling)).ToArray());
-        Assert.Throws<InvalidOperationException>(() => tree.Layout(monitor, 9, 0));
+        var partial = tree.Layout(monitor, 9, 0);
+        Assert.Single(partial.Placements);
+        Assert.Single(partial.OverflowWindowIds!);
         Assert.Equal(2, tree.Layout(monitor, 8, 0).Placements.Count);
     }
 }

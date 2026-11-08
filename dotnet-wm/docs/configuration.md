@@ -88,11 +88,12 @@ No shortcut automatically starts a shell or any arbitrary executable.
 
 The hidden native notification window receives display/work-area changes.
 Periodic enumeration closes event/discovery races. Every eligible tiled window
-in an active workspace receives a tile according to the split tree. Application
-minimum-size hints do not override tile widths or heights or cause windows to be
-skipped. The native placement layer requests the exact layout size, even below
-those hints; an application that independently refuses programmatic resizing
-can still constrain its own actual bounds.
+in an active workspace is managed, but a tile is staged only when its rectangle
+meets that window's reported minimum width and height. The manager keeps the full
+split tree and workspace membership, marks windows that do not fit with
+`layoutOverflow`, and minimizes them instead of squeezing them below their
+minimums. If a subset fits, it prefers windows already staged and then admits
+other fitting windows deterministically.
 
 Default horizontal splits form equal-width columns (within one rounding pixel),
 not recursively halved columns. Untouched vertical splits likewise divide
@@ -104,27 +105,37 @@ Per-window startup widths and saving/restoring split proportions across host
 restarts are not currently configuration options; a fresh host starts with equal
 shares unless changed through runtime commands or resizing.
 
-Invalid work areas or insufficient room for one-pixel tiles and configured gaps
-return `layout_constraints` rather than placing invalid rectangles. Startup and
-subsequent action failures are logged under `%LOCALAPPDATA%\WinManager\Logs`;
-unchanged diagnostics are deduplicated until the diagnostic state changes.
+Invalid work areas or gaps that cannot produce valid pixel rectangles return
+`layout_constraints`; windows that do not meet their minimum size remain in
+overflow, including when none fit. `layoutOverflow` in the snapshot describes the
+layout decision, while `minimized` reports the observed native state, so a failed
+minimize remains explicit and retryable. Focus an overflow window in its active
+workspace to promote it and replace the focused tile when possible; the displaced
+tile can become overflow. The native taskbar keeps minimized windows discoverable,
+and the CLI status view lists overflow titles. Startup and subsequent action
+failures are logged under `%LOCALAPPDATA%\WinManager\Logs`; unchanged diagnostics
+are deduplicated until the diagnostic state changes.
 Ordinary floating windows are kept inside destination work areas during monitor
 transfers. Default-ignored overlays and fullscreen windows are left untouched,
 unless explicitly opted into tiling. Application-minimized windows remain excluded
-from placement and workspace hiding regardless of an override. See the
+from placement and workspace hiding regardless of an override. Manager-minimized
+overflow windows remain in their workspace tree and are restored when they fit
+again or are promoted by focus. See the
 [window defaults and override reference](external-api.md#window-defaults-and-manual-overrides).
 
-Before a workspace hide, the helper durably records HWND/process identity and
-original show state and acknowledges it. If the helper cannot start or register,
-the manager refuses unsafe hiding. It monitors the host's actual process lifetime
-and restores identity-matched windows after a crash. Graceful exit restores
-manager-hidden windows before helper completion and final event draining. Stale
-journals are retried only when their owning host is no longer alive.
+Before a workspace hide or overflow minimize, the helper durably records
+HWND/process identity and original show state and acknowledges it. If the helper
+cannot start or register, the manager refuses the native action. It monitors the
+host's actual process lifetime and restores identity-matched windows after a crash.
+Graceful exit restores manager-hidden windows and manager-minimized overflow
+windows before helper completion and final event draining. Stale journals are
+retried only when their owning host is no longer alive.
 
-Shutdown restores manager-hidden visibility, not every pre-tiling rectangle.
-Application-hidden windows are never spuriously restored. Do not delete recovery
-journals while a host/helper is running. If restoration fails, preserve the
-journals, investigate logs, and restart in the same user session.
+Shutdown restores manager-hidden visibility and the original show state of
+manager-minimized overflow windows, not every pre-tiling rectangle. Application-
+minimized windows are never spuriously restored. Do not delete recovery journals
+while a host/helper is running. If restoration fails, preserve the journals,
+investigate logs, and restart in the same user session.
 
 Logon registration is explicit through CLI `install-startup`/`uninstall-startup`,
 using only the current user's Run entry. No service, elevation, scheduled task,

@@ -37,7 +37,9 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         new BoundedChannelOptions(64) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait, AllowSynchronousContinuations = false });
     private readonly Dictionary<Guid, WindowInfo> observedWindows = [];
     private readonly Dictionary<Guid, RecoveryRecord> hiddenWindows = [];
+    private readonly Dictionary<Guid, RecoveryRecord> minimizedWindows = [];
     private readonly HashSet<Guid> issuedHides = [];
+    private readonly HashSet<Guid> issuedMinimizations = [];
     private readonly RecoveryConnection recovery = new();
     private readonly string recoveryExecutablePath;
     private readonly TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -138,7 +140,8 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     {
         ArgumentNullException.ThrowIfNull(plan);
         return DispatchApplyAsync(new LayoutPlan(plan.Placements.ToArray(), plan.FocusWindowId,
-            plan.Visibility?.ToArray(), plan.CompletedMoves?.ToArray()), false, cancellationToken);
+            plan.Visibility?.ToArray(), plan.CompletedMoves?.ToArray(), plan.Minimizations?.ToArray(),
+            plan.OverflowWindowIds?.ToArray()), false, cancellationToken);
     }
 
     public Task<ApplyResult> RestoreAsync(CancellationToken cancellationToken) =>
@@ -533,6 +536,12 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             if (movingWindows.ContainsValue(visibility.WindowId) || pendingDrops.Contains(visibility.WindowId)) continue;
             ApplyVisibility(visibility, failures, cancellationToken);
         }
+        foreach (var minimization in plan.Minimizations ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (movingWindows.ContainsValue(minimization.WindowId) || pendingDrops.Contains(minimization.WindowId)) continue;
+            ApplyMinimization(minimization, failures, cancellationToken);
+        }
         foreach (var placement in plan.Placements)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -636,7 +645,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
 
     private void CheckRecovery()
     {
-        if (hiddenWindows.Count != 0 && !recovery.Healthy)
+        if ((hiddenWindows.Count != 0 || minimizedWindows.Count != 0) && !recovery.Healthy)
             RestoreManaged(CancellationToken.None, false);
     }
 
@@ -668,7 +677,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         var command = placement.showCmd == SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED
             ? SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED : SHOW_WINDOW_CMD.SW_SHOWNOACTIVATE;
         var record = new RecoveryRecord((long)(nint)window.Value, identity.ProcessId, identity.ProcessCreationTime,
-            (uint)command, "WinManager.Recovery." + Guid.NewGuid().ToString("N"));
+            (uint)command, "WinManager.Recovery." + Guid.NewGuid().ToString("N"), Minimization: true);
         try
         {
             recovery.Start(recoveryExecutablePath);
@@ -739,11 +748,101 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         Notify();
     }
 
+    private unsafe void ApplyMinimization(WindowMinimization minimization, List<NativeActionFailure> failures, CancellationToken token)
+    {
+        if (!ValidateTarget(minimization.WindowId, out var window, out _, out var failure))
+        {
+            failures.Add(failure!);
+            return;
+        }
+        if (!minimization.Minimized)
+        {
+            if (minimizedWindows.TryGetValue(minimization.WindowId, out var original))
+                RestoreOne(minimization.WindowId, original, failures);
+            return;
+        }
+        if (minimizedWindows.ContainsKey(minimization.WindowId) || PInvoke.IsIconic(window)) return;
+        var placement = new WINDOWPLACEMENT { length = (uint)Marshal.SizeOf<WINDOWPLACEMENT>() };
+        if (!PInvoke.GetWindowPlacement(window, ref placement) || !identities.TryResolve(minimization.WindowId, out var identity))
+        {
+            failures.Add(ActionError(minimization.WindowId, "GetWindowPlacement"));
+            return;
+        }
+        var command = placement.showCmd == SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED
+            ? SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED : SHOW_WINDOW_CMD.SW_SHOWNOACTIVATE;
+        var record = new RecoveryRecord((long)(nint)window.Value, identity.ProcessId, identity.ProcessCreationTime,
+            (uint)command, "WinManager.Recovery." + Guid.NewGuid().ToString("N"));
+        try
+        {
+            recovery.Start(recoveryExecutablePath);
+            if (!ValidateTarget(minimization.WindowId, out window, out _, out failure))
+            {
+                failures.Add(failure!);
+                return;
+            }
+            if (!RecoveryNative.Mark(record))
+            {
+                failures.Add(ActionError(minimization.WindowId, "SetProp"));
+                return;
+            }
+            minimizedWindows.Add(minimization.WindowId, record);
+            recovery.Send(new RecoveryCommand("register", record));
+        }
+        catch (Exception error) when (error is IOException or Win32Exception or OperationCanceledException or
+            UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            failures.Add(new(minimization.WindowId, "recovery_unavailable", error.Message));
+            if (minimizedWindows.ContainsKey(minimization.WindowId))
+                RestoreOne(minimization.WindowId, record with { HideConfirmed = true }, failures);
+            CheckRecovery();
+            return;
+        }
+        if (token.IsCancellationRequested)
+        {
+            RestoreOne(minimization.WindowId, record with { HideConfirmed = true }, failures);
+            token.ThrowIfCancellationRequested();
+        }
+        if (!ValidateTarget(minimization.WindowId, out window, out _, out failure) || !RecoveryNative.Matches(record))
+        {
+            failures.Add(failure ?? new(minimization.WindowId, "stale_window", "Target changed during recovery registration."));
+            RestoreOne(minimization.WindowId, record with { HideConfirmed = true }, failures);
+            return;
+        }
+        if (!recovery.Healthy)
+        {
+            failures.Add(new(minimization.WindowId, "recovery_unavailable", "Recovery helper exited before minimizing."));
+            RestoreOne(minimization.WindowId, record with { HideConfirmed = true }, failures);
+            return;
+        }
+        issuedMinimizations.Add(minimization.WindowId);
+        PInvoke.ShowWindowAsync(window, SHOW_WINDOW_CMD.SW_MINIMIZE);
+        for (var attempt = 0; attempt < 50 && RecoveryNative.Matches(record) && !PInvoke.IsIconic(window); attempt++)
+            Thread.Sleep(10);
+        if (!RecoveryNative.Matches(record) || !PInvoke.IsIconic(window))
+        {
+            failures.Add(new(minimization.WindowId, "minimize_denied", "Window did not become minimized."));
+            RestoreOne(minimization.WindowId, record with { HideConfirmed = true }, failures);
+        }
+        else
+        {
+            record = record with { HideConfirmed = true };
+            minimizedWindows[minimization.WindowId] = record;
+            try { recovery.Send(new RecoveryCommand("confirmed", record)); }
+            catch (Exception error) when (error is IOException or OperationCanceledException)
+            {
+                failures.Add(new(minimization.WindowId, "recovery_unavailable", error.Message));
+                RestoreOne(minimization.WindowId, record, failures);
+                CheckRecovery();
+            }
+        }
+        Notify();
+    }
+
     private void RestoreOne(Guid id, RecoveryRecord record, List<NativeActionFailure> failures)
     {
-        if (issuedHides.Contains(id) && !RecoveryNative.Restore(record))
+        if ((issuedHides.Contains(id) || issuedMinimizations.Contains(id)) && !RecoveryNative.Restore(record))
         {
-            failures.Add(new(id, "restore_failed", "Original window visibility was not restored; recovery record retained."));
+            failures.Add(new(id, "restore_failed", "Original window state was not restored; recovery record retained."));
             return;
         }
         // Never retire durable protection before actual native restoration has succeeded.
@@ -757,7 +856,9 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         }
         RecoveryNative.Unmark(record);
         hiddenWindows.Remove(id);
+        minimizedWindows.Remove(id);
         issuedHides.Remove(id);
+        issuedMinimizations.Remove(id);
         Notify();
     }
 
@@ -769,7 +870,12 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             token.ThrowIfCancellationRequested();
             RestoreOne(pair.Key, pair.Value, failures);
         }
-        if (complete && hiddenWindows.Count == 0 && failures.Count == 0 && recovery.Healthy)
+        foreach (var pair in minimizedWindows.ToArray())
+        {
+            token.ThrowIfCancellationRequested();
+            RestoreOne(pair.Key, pair.Value, failures);
+        }
+        if (complete && hiddenWindows.Count == 0 && minimizedWindows.Count == 0 && failures.Count == 0 && recovery.Healthy)
         {
             try { recovery.Complete(); }
             catch (Exception error) when (error is IOException or OperationCanceledException)

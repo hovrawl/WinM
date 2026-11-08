@@ -10,8 +10,9 @@ workspace identity. See [the one-desk goal](docs/project-goal.md) and its
 [migration plan](docs/desk-model-plan.md) for implemented behavior and remaining work.
 
 - Native desktop discovery, stable window identities, serialized commands,
-  horizontal/vertical split layouts, DPI-scaled gaps, directional focus/movement,
-  split resize, floating mode, and minimized/fullscreen exclusions.
+  horizontal/vertical split layouts, DPI-scaled gaps, minimum-size-aware overflow
+  staging with recovery-protected minimization, directional focus/movement, split
+  resize, floating mode, and application-minimized/fullscreen exclusions.
 - Semantic fullscreen/popup/tool/owned/no-activate exclusions by default, with
   per-window `setMode`/`toggleMode` overrides through shortcuts, CLI, and SDK.
 - Free window dragging while managed: drop over a tile to swap positions, or
@@ -89,7 +90,7 @@ another instance owns the session; `2` indicates startup/lifetime failure and
 
 For the full command reference and third-party CLI, .NET SDK, and named-pipe
 integration examples, see [External commands API](docs/external-api.md).
-For an updating four-line workspace/window/event display, use `status`; see the
+For an updating workspace/window/event display with overflow titles when needed, use `status`; see the
 [live status guide](src/WinManager.Cli/README.md#live-status).
 See also `docs\configuration.md`, `docs\protocol.md`, `docs\validation.md`,
 `docs\iteration-2.md`, [the desk goal](docs/project-goal.md), and

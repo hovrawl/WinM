@@ -38,6 +38,30 @@ public sealed class StatusDisplayTests
     }
 
     [Fact]
+    public void ReportsLayoutOverflowAndObservedMinimizedState()
+    {
+        var overflow = new WindowInfo(Guid.NewGuid(), Guid.NewGuid(), "Large editor", "editor", "test",
+            new(0, 0, 100, 100), true, true, false, WindowMode.Tiling, LayoutOverflow: true);
+        var snapshot = new ManagerSnapshot(Guid.NewGuid(), 1, new([], [overflow], null), new Dictionary<Guid, SplitNodeInfo?>(), false);
+
+        var lines = StatusDisplay.Format(Event(snapshot));
+
+        Assert.Contains("Layout overflow: Large editor [editor] (minimized)", lines);
+    }
+
+    [Fact]
+    public void ReportsOverflowEvenWhenNativeMinimizationWasRejected()
+    {
+        var overflow = new WindowInfo(Guid.NewGuid(), Guid.NewGuid(), "Large editor", "editor", "test",
+            new(0, 0, 100, 100), true, false, false, WindowMode.Tiling, LayoutOverflow: true);
+        var snapshot = new ManagerSnapshot(Guid.NewGuid(), 1, new([], [overflow], null), new Dictionary<Guid, SplitNodeInfo?>(), false);
+
+        var lines = StatusDisplay.Format(Event(snapshot));
+
+        Assert.Contains("Layout overflow: Large editor [editor] (not minimized)", lines);
+    }
+
+    [Fact]
     public void RemovesControlCharactersFromHostText()
     {
         var window = new WindowInfo(Guid.NewGuid(), Guid.NewGuid(), "Bad\r\n\u001b[2J\tTitle", "app\b", "test",

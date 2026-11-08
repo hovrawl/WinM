@@ -57,13 +57,16 @@ The menu also works with redirected input/output. Explicit one-off invocations a
 ## Live status
 
 Run `status [--pipe NAME] [--reconnect]` while the Host is running. It subscribes to
-all SDK events and replaces four lines in place, starting from the atomic initial snapshot:
+all SDK events and replaces four lines in place, starting from the atomic initial snapshot.
+When a layout cannot stage all windows at their minimum sizes, an additional line lists
+overflow titles and whether each window is observed as minimized:
 
 ```text
 Current Workspace: Code
 Current Window: Editor [editor] (window GUID)
 Current Config direction: Not exposed by host
 Latest event: focus.changed (sequence 7, revision 12; running)
+Layout overflow: Large editor [editor] (minimized)
 ```
 
 The current workspace belongs to the focused managed window. With no managed focus,

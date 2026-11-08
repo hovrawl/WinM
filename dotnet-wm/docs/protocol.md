@@ -63,8 +63,16 @@ workspace or creates an empty one, without using the displaced destination view.
 otherwise it uses the focused observable window. `setMode: tiling` and toggling
 into tiling override fullscreen/popup/tool/owned/no-activate defaults for that
 window's lifetime. Snapshot windows include `isPopup`, `isToolWindow`, `isOwned`,
-`isNoActivate`, `isIgnored`, and nullable `tilingOverride`; default-ignored
-windows remain discoverable but are neither placed nor workspace-hidden.
+`isNoActivate`, `isIgnored`, nullable `tilingOverride`, and `layoutOverflow`.
+Older version 1 hosts may omit `layoutOverflow`; clients should treat an absent
+field as false.
+`layoutOverflow` marks a managed tiled window that cannot be staged at its
+reported minimum size in the active layout. The manager minimizes it while
+preserving workspace membership and its split-tree leaf. `minimized` reports
+observed native state separately. Focusing an overflow window in its active
+workspace prioritizes it for staging and can replace the focused tile; the
+displaced window may then become overflow. Default-ignored windows remain
+discoverable but are neither placed nor workspace-hidden.
 
 `selectContainer` selects an active tiling-tree node by `nodeId`, or navigates
 from a selected/focused tile using `parent`, `firstChild`, `secondChild`, `sibling`,

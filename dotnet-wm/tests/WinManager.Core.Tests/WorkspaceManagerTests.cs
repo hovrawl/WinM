@@ -7,6 +7,49 @@ namespace WinManager.Core.Tests;
 public sealed class WorkspaceManagerTests
 {
     [Fact]
+    public async Task OversizedWindowIsKeptManagedButNotStagedAlongsideWindowsThatFit()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var monitor = new MonitorInfo(Guid.NewGuid(), "Primary", new(0, 0, 800, 600), new(0, 0, 800, 600), 96);
+        var template = fake.Desktop.Windows[0];
+        var oversized = template with
+        {
+            Id = new(1, 0, 0, new byte[8]), MonitorId = monitor.Id, MinimumWidth = 1200, MinimumHeight = 100
+        };
+        var fitting = template with
+        {
+            Id = new(2, 0, 0, new byte[8]), MonitorId = monitor.Id, MinimumWidth = 100, MinimumHeight = 100
+        };
+        fake.Desktop = new([monitor], [oversized, fitting], fitting.Id);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+
+            var snapshot = engine.Current!;
+            Assert.Equal(2, snapshot.Workspaces!.Single().WindowIds.Count);
+            Assert.True(snapshot.Desktop.Windows.Single(window => window.Id == oversized.Id).Minimized);
+            var staged = snapshot.Desktop.Windows.Single(window => window.Id == fitting.Id);
+            Assert.False(staged.Minimized);
+            Assert.True(staged.Bounds.Width >= fitting.MinimumWidth);
+            Assert.True(staged.Bounds.Height >= fitting.MinimumHeight);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+        Assert.All(fake.Desktop.Windows, window =>
+        {
+            Assert.False(window.Minimized);
+            Assert.True(window.Visible);
+            Assert.False(window.ManagerHidden);
+        });
+    }
+
+    [Fact]
     public async Task PrimaryMinimumSizeOverflowDoesNotBlockAllTilingAndRecoversWhenSpaceReturns()
     {
         await using var fake = new FakeWindowPlatform();
@@ -15,10 +58,10 @@ public sealed class WorkspaceManagerTests
         var template = fake.Desktop.Windows[0];
         WindowInfo[] windows =
         [
-            template with { Id = new(1, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 974, MinimumHeight = 964 },
-            template with { Id = new(2, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 807, MinimumHeight = 909 },
-            template with { Id = new(3, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 882, MinimumHeight = 892 },
-            template with { Id = new(4, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 542, MinimumHeight = 541 },
+            template with { Id = new(1, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 1200, MinimumHeight = 500 },
+            template with { Id = new(2, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 1200, MinimumHeight = 500 },
+            template with { Id = new(3, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 1200, MinimumHeight = 500 },
+            template with { Id = new(4, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 1200, MinimumHeight = 500 },
             template with { Id = new(5, 0, 0, new byte[8]), MonitorId = secondary.Id }
         ];
         fake.Desktop = new([primary, secondary], windows, null);
@@ -32,22 +75,31 @@ public sealed class WorkspaceManagerTests
             await engine.Ready.WaitAsync(timeout.Token);
             var current = engine.Current!;
             Assert.NotEqual(windows[0].Bounds, current.Desktop.Windows.Single(w => w.Id == windows[0].Id).Bounds);
-            Assert.NotEqual(windows[1].Bounds, current.Desktop.Windows.Single(w => w.Id == windows[1].Id).Bounds);
-            Assert.Equal(new PixelRect(966, 12, 465, 1176), current.Desktop.Windows.Single(w => w.Id == windows[2].Id).Bounds);
-            Assert.Equal(new PixelRect(1443, 12, 465, 1176), current.Desktop.Windows.Single(w => w.Id == windows[3].Id).Bounds);
+            Assert.All(windows.Skip(1).Take(3), window =>
+            {
+                var overflow = current.Desktop.Windows.Single(observed => observed.Id == window.Id);
+                Assert.True(overflow.LayoutOverflow && overflow.Minimized);
+            });
             Assert.NotEqual(windows[4].Bounds, current.Desktop.Windows.Single(w => w.Id == windows[4].Id).Bounds);
             Assert.All(current.Desktop.Windows, w => { Assert.True(w.Visible); Assert.False(w.ManagerHidden); Assert.Equal(WindowMode.Tiling, w.Mode); });
             Assert.Equal(4, current.Workspaces!.Single(w => w.Name == "1").WindowIds.Count);
             var result = await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token);
             Assert.True(result.Success);
             Assert.Empty(diagnostics);
-            var widths = current.Desktop.Windows.Where(w => w.MonitorId == primary.Id).Select(w => w.Bounds.Width).ToArray();
-            Assert.InRange(widths.Max() - widths.Min(), 0, 1);
 
             fake.Desktop = fake.Desktop with { Windows = fake.Desktop.Windows.Select(w => w with { MinimumWidth = 100, MinimumHeight = 100 }).ToArray() };
             Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
-            Assert.All(engine.Current!.Desktop.Windows, w => Assert.NotEqual(template.Bounds, w.Bounds));
-            fake.Desktop = fake.Desktop with { Windows = windows };
+            Assert.All(engine.Current!.Desktop.Windows.Where(window => windows.Take(4).Any(original => original.Id == window.Id)),
+                window => Assert.False(window.Minimized || window.LayoutOverflow));
+            fake.Desktop = fake.Desktop with
+            {
+                Monitors = [primary with { WorkArea = new(0, 0, 5000, 1200) }, secondary],
+                Windows = windows
+            };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            Assert.All(engine.Current!.Desktop.Windows.Where(window => windows.Take(4).Any(original => original.Id == window.Id)),
+                window => Assert.False(window.Minimized || window.LayoutOverflow));
+            fake.Desktop = fake.Desktop with { Monitors = [primary, secondary], Windows = windows };
             Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
             Assert.Empty(diagnostics);
 
@@ -58,8 +110,11 @@ public sealed class WorkspaceManagerTests
             Assert.True(engine.Current!.Workspaces!.Single(w => w.Id == destination.Id).Active);
             Assert.True(engine.Current.Desktop.Windows.Single(w => w.Id == windows[3].Id).Visible);
             Assert.NotEqual(windows[3].Bounds, engine.Current.Desktop.Windows.Single(w => w.Id == windows[3].Id).Bounds);
-            Assert.All(engine.Current.Desktop.Windows.Where(w => windows.Take(3).Any(original => original.Id == w.Id)),
-                w => { Assert.False(w.Visible); Assert.True(w.ManagerHidden); });
+            var hidden = engine.Current.Desktop.Windows.Single(window => window.Id == windows[0].Id);
+            Assert.False(hidden.Visible);
+            Assert.True(hidden.ManagerHidden);
+            Assert.All(engine.Current.Desktop.Windows.Where(window => windows.Skip(1).Take(2).Any(original => original.Id == window.Id)),
+                window => Assert.True(window.Minimized && window.LayoutOverflow));
             Assert.True(engine.Current.Desktop.Windows.Single(w => w.Id == windows[4].Id).Visible);
         }
         finally
@@ -85,10 +140,116 @@ public sealed class WorkspaceManagerTests
         try
         {
             await engine.Ready.WaitAsync(timeout.Token);
-            Assert.NotEqual(oversized.Bounds, engine.Current!.Desktop.Windows.Single(w => w.Id == oversized.Id).Bounds);
-            Assert.NotEqual(neighbor.Bounds, engine.Current.Desktop.Windows.Single(w => w.Id == neighbor.Id).Bounds);
-            Assert.InRange(Math.Abs(engine.Current.Desktop.Windows[0].Bounds.Width - engine.Current.Desktop.Windows[1].Bounds.Width), 0, 1);
-            Assert.All(engine.Current.Desktop.Windows, w => Assert.True(w.Visible && !w.ManagerHidden));
+            var current = engine.Current!;
+            var overflow = current.Desktop.Windows.Single(window => window.Id == oversized.Id);
+            var staged = current.Desktop.Windows.Single(window => window.Id == neighbor.Id);
+            Assert.True(overflow.LayoutOverflow && overflow.Minimized);
+            Assert.False(staged.LayoutOverflow || staged.Minimized);
+            Assert.NotEqual(neighbor.Bounds, staged.Bounds);
+            Assert.True(staged.Bounds.Width >= neighbor.MinimumWidth);
+            Assert.True(staged.Bounds.Height >= neighbor.MinimumHeight);
+            Assert.All(current.Desktop.Windows, window => Assert.True(window.Visible && !window.ManagerHidden));
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task FocusingOverflowWindowSwapsItWithTheFocusedTileAndExpandedSpaceRestoresBoth()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var monitor = new MonitorInfo(Guid.NewGuid(), "Primary", new(0, 0, 1000, 800), new(0, 0, 1000, 800), 96);
+        var template = fake.Desktop.Windows[0];
+        var first = template with { Id = new(1, 0, 0, new byte[8]), MonitorId = monitor.Id, MinimumWidth = 600 };
+        var second = template with { Id = new(2, 0, 0, new byte[8]), MonitorId = monitor.Id, MinimumWidth = 600 };
+        fake.Desktop = new([monitor], [first, second], first.Id);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var before = engine.Current!;
+            Assert.True(before.Desktop.Windows.Single(window => window.Id == second.Id).LayoutOverflow);
+            Assert.True(before.Desktop.Windows.Single(window => window.Id == second.Id).Minimized);
+
+            var restore = await engine.ExecuteAsync(new(CommandKind.Focus, second.Id), timeout.Token);
+
+            Assert.True(restore.Success);
+            var restored = engine.Current!;
+            Assert.Equal(second.Id, restored.Desktop.FocusedWindowId);
+            Assert.False(restored.Desktop.Windows.Single(window => window.Id == second.Id).Minimized);
+            Assert.False(restored.Desktop.Windows.Single(window => window.Id == second.Id).LayoutOverflow);
+            Assert.True(restored.Desktop.Windows.Single(window => window.Id == first.Id).Minimized);
+            Assert.True(restored.Desktop.Windows.Single(window => window.Id == first.Id).LayoutOverflow);
+            Assert.Equal(2, restored.Workspaces!.Single().WindowIds.Count);
+
+            fake.Desktop = fake.Desktop with { Monitors = [monitor with { WorkArea = new(0, 0, 1400, 800) }] };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            Assert.All(engine.Current!.Desktop.Windows, window => Assert.False(window.Minimized || window.LayoutOverflow));
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task ApplicationMinimizedWindowIsNotMarkedAsOverflowOrAutoRestored()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var monitor = fake.Desktop.Monitors[0];
+        var windows = fake.Desktop.Windows.OrderBy(window => window.Id).ToArray();
+        var manuallyMinimized = windows[0] with { Minimized = true };
+        fake.Desktop = fake.Desktop with { Windows = [manuallyMinimized, windows[1]] };
+        var engine = new ManagerEngine(fake);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var window = engine.Current!.Desktop.Windows.Single(candidate => candidate.Id == manuallyMinimized.Id);
+            Assert.True(window.Minimized);
+            Assert.False(window.LayoutOverflow);
+
+            fake.Desktop = fake.Desktop with { Monitors = [monitor with { WorkArea = new(0, 0, 2000, 1200) }] };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            window = engine.Current!.Desktop.Windows.Single(candidate => candidate.Id == manuallyMinimized.Id);
+            Assert.True(window.Minimized);
+            Assert.False(window.LayoutOverflow);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task RejectedOverflowMinimizationRemainsExplicitAndRetryable()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var monitor = fake.Desktop.Monitors[0];
+        var windows = fake.Desktop.Windows.OrderBy(window => window.Id).ToArray();
+        var oversized = windows[0] with { MinimumWidth = 1000000, MinimumHeight = 1000000 };
+        fake.Desktop = fake.Desktop with { Windows = [oversized, windows[1]] };
+        fake.FailActions = true;
+        var engine = new ManagerEngine(fake);
+        var failures = new List<IReadOnlyList<NativeActionFailure>>();
+        engine.ActionsFailed += failures.Add;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var overflow = engine.Current!.Desktop.Windows.Single(window => window.Id == oversized.Id);
+            Assert.True(overflow.LayoutOverflow);
+            Assert.False(overflow.Minimized);
+            Assert.Contains(failures.SelectMany(items => items), failure => failure.Code == "access_denied");
         }
         finally
         {

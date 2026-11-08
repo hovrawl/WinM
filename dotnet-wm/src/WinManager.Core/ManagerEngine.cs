@@ -31,6 +31,9 @@ public sealed class ManagerEngine
     private readonly Dictionary<Guid, WindowMode> modes = [];
     private readonly Dictionary<Guid, PixelRect> movingWindows = [];
     private readonly HashSet<Guid> resizingWindows = [];
+    private readonly HashSet<Guid> overflowWindowIds = [];
+    private readonly HashSet<Guid> managerMinimizedWindowIds = [];
+    private readonly Dictionary<Guid, HashSet<Guid>> stagedWindowIds = [];
     private readonly Guid instanceId = Guid.NewGuid();
     private readonly int innerGap;
     private readonly int outerGap;
@@ -223,21 +226,35 @@ public sealed class ManagerEngine
 
     private DesktopSnapshot ApplyModes(DesktopSnapshot desktop) => desktop with
     {
-        Windows = desktop.Windows.Select(window => modes.TryGetValue(window.Id, out var mode)
-            ? window with { Mode = mode, TilingOverride = mode == WindowMode.Tiling }
-            : window with { Mode = window.IsIgnored ? WindowMode.Floating : window.Mode }).ToArray()
+        Windows = desktop.Windows.Select(window =>
+        {
+            var mode = modes.TryGetValue(window.Id, out var selectedMode)
+                ? selectedMode : window.IsIgnored ? WindowMode.Floating : window.Mode;
+            return window with
+            {
+                Mode = mode,
+                TilingOverride = modes.ContainsKey(window.Id) ? mode == WindowMode.Tiling : window.TilingOverride,
+                LayoutOverflow = overflowWindowIds.Contains(window.Id)
+            };
+        }).ToArray()
     };
 
     private void ReconcileTrees(DesktopSnapshot desktop)
     {
-        foreach (var id in modes.Keys.Except(desktop.Windows.Select(window => window.Id)).ToArray()) modes.Remove(id);
-        foreach (var id in movingWindows.Keys.Except(desktop.Windows.Select(window => window.Id)).ToArray()) movingWindows.Remove(id);
+        var existing = desktop.Windows.Select(window => window.Id).ToHashSet();
+        foreach (var id in modes.Keys.Except(existing).ToArray()) modes.Remove(id);
+        foreach (var id in movingWindows.Keys.Except(existing).ToArray()) movingWindows.Remove(id);
+        overflowWindowIds.IntersectWith(existing);
+        managerMinimizedWindowIds.IntersectWith(existing);
+        var observed = desktop.Windows.ToDictionary(window => window.Id);
+        managerMinimizedWindowIds.RemoveWhere(id => !observed[id].Minimized);
+        foreach (var staged in stagedWindowIds.Values) staged.IntersectWith(existing);
         resizingWindows.IntersectWith(movingWindows.Keys);
         workspaces.Reconcile(desktop);
     }
 
     private async Task<IReadOnlyList<NativeActionFailure>> ReconcileAsync(CancellationToken cancellationToken, Guid? focus = null,
-        Guid? droppedWindowId = null)
+        Guid? droppedWindowId = null, Guid? restoreOverflowWindowId = null)
     {
         var desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
         ReconcileTrees(desktop);
@@ -253,14 +270,33 @@ public sealed class ManagerEngine
         List<WindowPlacement> placements = [];
         if (!paused)
         {
-            foreach (var workspace in workspaces.Snapshot.Where(workspace => workspace.Active))
+            var activeWorkspaces = workspaces.Snapshot.Where(workspace => workspace.Active).ToArray();
+            var activeWindowIds = activeWorkspaces.SelectMany(workspace => workspace.WindowIds).ToHashSet();
+            var windowsById = desktop.Windows.ToDictionary(window => window.Id);
+            var nextOverflow = overflowWindowIds.Where(id => !activeWindowIds.Contains(id) &&
+                windowsById.TryGetValue(id, out var window) && window.Mode == WindowMode.Tiling && !window.IsIgnored).ToHashSet();
+            foreach (var workspace in activeWorkspaces)
             {
                 var monitor = desktop.Monitors.SingleOrDefault(monitor => monitor.Id == workspace.MonitorId);
                 if (monitor is null) continue;
                 try
                 {
-                    var plan = workspaces.Trees[workspace.Id].Layout(monitor, innerGap, outerGap);
+                    var priority = new List<Guid>();
+                    if (restoreOverflowWindowId is { } restoring && workspace.WindowIds.Contains(restoring))
+                        priority.Add(restoring);
+                    if (stagedWindowIds.TryGetValue(workspace.Id, out var staged))
+                    {
+                        var displacedFocus = restoreOverflowWindowId is not null &&
+                            desktop.FocusedWindowId is { } focused && workspace.WindowIds.Contains(focused)
+                            ? focused : (Guid?)null;
+                        priority.AddRange(staged.Where(id => id != displacedFocus));
+                        if (displacedFocus is { } displaced) priority.Add(displaced);
+                    }
+                    var plan = workspaces.Trees[workspace.Id].Layout(monitor, innerGap, outerGap, priority);
                     placements.AddRange(plan.Placements);
+                    nextOverflow.ExceptWith(workspace.WindowIds);
+                    nextOverflow.UnionWith(plan.OverflowWindowIds ?? []);
+                    stagedWindowIds[workspace.Id] = plan.Placements.Select(placement => placement.WindowId).ToHashSet();
                 }
                 catch (InvalidOperationException error) { failures.Add(new(null, "layout_constraints", error.Message)); }
                 foreach (var window in desktop.Windows.Where(window => workspace.WindowIds.Contains(window.Id) &&
@@ -282,15 +318,33 @@ public sealed class ManagerEngine
                     if (target != bounds) placements.Add(new(window.Id, target));
                 }
             }
+            overflowWindowIds.Clear();
+            overflowWindowIds.UnionWith(nextOverflow);
         }
+        desktop = ApplyModes(desktop);
         var changes = placements.Where(placement => desktop.Windows.Any(window =>
             window.Id == placement.WindowId && window.Bounds != placement.Bounds) && !movingWindows.ContainsKey(placement.WindowId)).ToArray();
         var visibility = workspaces.Visibility(desktop).Where(change => !movingWindows.ContainsKey(change.WindowId)).ToArray();
-        if (changes.Length > 0 || focus is not null || visibility.Length > 0 || droppedWindowId is not null)
+        var minimizations = desktop.Windows.Where(window =>
+        {
+            if (overflowWindowIds.Contains(window.Id)) return !window.Minimized;
+            return managerMinimizedWindowIds.Contains(window.Id) && window.Minimized;
+        }).Select(window => new WindowMinimization(window.Id, overflowWindowIds.Contains(window.Id))).ToArray();
+        if (changes.Length > 0 || focus is not null || visibility.Length > 0 || minimizations.Length > 0 || droppedWindowId is not null)
         {
             failures.AddRange((await platform.ApplyAsync(new(changes, focus, visibility,
-                droppedWindowId is { } completed ? [completed] : null), cancellationToken)).Failures);
+                droppedWindowId is { } completed ? [completed] : null, minimizations), cancellationToken)).Failures);
             desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
+            var observed = desktop.Windows.ToDictionary(window => window.Id);
+            foreach (var minimization in minimizations)
+            {
+                if (!observed.TryGetValue(minimization.WindowId, out var window)) continue;
+                if (minimization.Minimized && window.Minimized) managerMinimizedWindowIds.Add(window.Id);
+                else if (!minimization.Minimized && !window.Minimized) managerMinimizedWindowIds.Remove(window.Id);
+                else if (!minimization.Minimized && managerMinimizedWindowIds.Contains(window.Id))
+                    overflowWindowIds.Add(window.Id);
+            }
+            desktop = ApplyModes(desktop);
             ReconcileTrees(desktop);
         }
         Commit(desktop);
@@ -559,7 +613,21 @@ public sealed class ManagerEngine
                     var target = command.Direction is { } focusDirection
                         ? tree.Neighbor(window.Id, focusDirection, desktop.Windows) : window.Id;
                     if (target is null) return Error("not_found", "No directional focus target.");
-                    var failures = await ReconcileAsync(cancellationToken, target);
+                    Guid? restoreOverflow = null;
+                    if (window.Id == target.Value && window.LayoutOverflow)
+                    {
+                        if (paused) return Error("not_ready", "Resume the manager before restoring an overflow window.");
+                        if (!workspaces.Snapshot.Any(workspace => workspace.Id == assigned && workspace.Active))
+                            return Error("not_ready", "Activate the workspace view before restoring an overflow window.");
+                        restoreOverflow = window.Id;
+                        if (desktop.FocusedWindowId is { } focused && focused != window.Id &&
+                            workspaces.WorkspaceFor(focused) == assigned &&
+                            desktop.Windows.FirstOrDefault(candidate => candidate.Id == focused) is
+                                { Minimized: false, LayoutOverflow: false, Mode: WindowMode.Tiling } &&
+                            tree.NodeForWindow(focused) is not null)
+                            tree.Swap(window.Id, focused);
+                    }
+                    var failures = await ReconcileAsync(cancellationToken, target, restoreOverflowWindowId: restoreOverflow);
                     return Result(failures);
                 }
                 case CommandKind.Move:
