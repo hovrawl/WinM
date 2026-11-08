@@ -29,6 +29,7 @@ public sealed class ManagerEngine
     private readonly Channel<ManagerInput> inputs;
     private readonly WorkspaceSet workspaces;
     private readonly Dictionary<Guid, WindowMode> modes = [];
+    private readonly Dictionary<Guid, PixelRect> floatingBounds = [];
     private readonly Dictionary<Guid, PixelRect> movingWindows = [];
     private readonly HashSet<Guid> resizingWindows = [];
     private readonly HashSet<Guid> overflowWindowIds = [];
@@ -243,6 +244,7 @@ public sealed class ManagerEngine
     {
         var existing = desktop.Windows.Select(window => window.Id).ToHashSet();
         foreach (var id in modes.Keys.Except(existing).ToArray()) modes.Remove(id);
+        foreach (var id in floatingBounds.Keys.Except(existing).ToArray()) floatingBounds.Remove(id);
         foreach (var id in movingWindows.Keys.Except(existing).ToArray()) movingWindows.Remove(id);
         overflowWindowIds.IntersectWith(existing);
         managerMinimizedWindowIds.IntersectWith(existing);
@@ -254,9 +256,25 @@ public sealed class ManagerEngine
     }
 
     private async Task<IReadOnlyList<NativeActionFailure>> ReconcileAsync(CancellationToken cancellationToken, Guid? focus = null,
-        Guid? droppedWindowId = null, Guid? restoreOverflowWindowId = null)
+        Guid? droppedWindowId = null, Guid? restoreOverflowWindowId = null,
+        (Guid WindowId, WindowMode Mode)? modeChange = null)
     {
         var desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
+        foreach (var window in desktop.Windows.Where(window => window.Visible && !window.Minimized && !window.ManagerHidden &&
+            window.Bounds.Width > 0 && window.Bounds.Height > 0))
+        {
+            if (window.Mode == WindowMode.Floating || !floatingBounds.ContainsKey(window.Id))
+                floatingBounds[window.Id] = window.Bounds;
+        }
+        Guid? restoreFloatingWindowId = null;
+        if (modeChange is { } change)
+        {
+            if (change.Mode == WindowMode.Floating && desktop.Windows.Any(window => window.Id == change.WindowId &&
+                window.Mode == WindowMode.Tiling && !window.IsIgnored))
+                restoreFloatingWindowId = change.WindowId;
+            modes[change.WindowId] = change.Mode;
+            desktop = ApplyModes(desktop);
+        }
         ReconcileTrees(desktop);
         if (!paused)
             foreach (var (id, originalBounds) in movingWindows)
@@ -303,7 +321,8 @@ public sealed class ManagerEngine
                     window.Mode == WindowMode.Floating && (window.Visible || window.ManagerHidden) && !window.Minimized && !window.IsIgnored))
                 {
                     var area = monitor.WorkArea;
-                    var bounds = window.Bounds;
+                    var bounds = window.Id == restoreFloatingWindowId && floatingBounds.TryGetValue(window.Id, out var saved)
+                        ? saved : window.Bounds;
                     var width = Math.Min(bounds.Width, area.Width);
                     var height = Math.Min(bounds.Height, area.Height);
                     if (width < window.MinimumWidth || height < window.MinimumHeight)
@@ -315,7 +334,7 @@ public sealed class ManagerEngine
                     var y = window.MonitorId == monitor.Id ? bounds.Y : area.Y + (area.Height - height) / 2;
                     var target = new PixelRect(Math.Clamp(x, area.X, area.X + area.Width - width),
                         Math.Clamp(y, area.Y, area.Y + area.Height - height), width, height);
-                    if (target != bounds) placements.Add(new(window.Id, target));
+                    if (target != window.Bounds) placements.Add(new(window.Id, target));
                 }
             }
             overflowWindowIds.Clear();
@@ -469,6 +488,9 @@ public sealed class ManagerEngine
             if (!oldWindows.TryGetValue(id, out var old)) Publish(ManagerEventTypes.WindowManaged, next);
             else if (old != window) Publish(ManagerEventTypes.WindowUpdated, next);
         }
+        if ((previous?.Desktop.ConfiguredExclusions is null) != (next.Desktop.ConfiguredExclusions is null) ||
+            !(previous?.Desktop.ConfiguredExclusions ?? []).SequenceEqual(next.Desktop.ConfiguredExclusions ?? []))
+            Publish(ManagerEventTypes.WindowUpdated, next);
         if (previous?.Desktop.FocusedWindowId != next.Desktop.FocusedWindowId) Publish(ManagerEventTypes.FocusChanged, next);
         if (previous?.Selection != next.Selection) Publish(ManagerEventTypes.SelectionChanged, next);
         var oldMonitors = previous?.Desktop.Monitors.ToDictionary(monitor => monitor.Id) ?? [];
@@ -648,12 +670,11 @@ public sealed class ManagerEngine
                     break;
                 case CommandKind.SetMode:
                     if (command.Mode is not { } requestedMode) return Error("invalid_argument", "Mode requires tiling or floating.");
-                    modes[window.Id] = requestedMode;
-                    break;
+                    return Result(await ReconcileAsync(cancellationToken, modeChange: (window.Id, requestedMode)));
                 case CommandKind.ToggleMode:
-                    modes[window.Id] = window.Mode == WindowMode.Tiling && !window.IsIgnored
+                    var toggledMode = window.Mode == WindowMode.Tiling && !window.IsIgnored
                         ? WindowMode.Floating : WindowMode.Tiling;
-                    break;
+                    return Result(await ReconcileAsync(cancellationToken, modeChange: (window.Id, toggledMode)));
                 case CommandKind.MoveToWorkspace:
                 case CommandKind.MoveToMonitor:
                     if (command.Kind == CommandKind.MoveToWorkspace && command.WorkspaceId is null ||

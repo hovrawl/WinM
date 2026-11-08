@@ -18,9 +18,23 @@ Use the existing `focus` command on an overflow window in its active workspace
 to prioritize it for staging; when possible, the currently focused tile becomes
 the replacement overflow window. The CLI `status` view also lists overflow titles.
 
+The optional `desktop.configuredExclusions` array reports safely identifiable
+visible candidates excluded by configured process/class names. Each entry has
+`title`, `processName`, `className`, `monitorId`, `bounds`, `processNameExcluded`,
+and `classNameExcluded`, but no actionable window ID. These entries never join
+workspace membership or the tiling tree. Change configuration and restart the
+host to include them; `setMode` does not override configured exclusions. Missing
+or null means diagnostics are unavailable on that host; empty means no matching
+candidates were observed. This is not a full native-window inventory. Changes
+produce `window.updated` with the complete snapshot.
+
+The separate [one-desk Avalonia inspector](../src/WinManager.DebugUi/README.md)
+uses this SDK/IPC contract for its display and explicit controls. It does not
+create desks or own manager state.
+
 View activation is implemented, but logical desk positions, workspace bounds,
 workspace-level columns/rows/Fibonacci rules, persistence of view assignments, and
-the visual desk client are not. See [the project goal](project-goal.md) and
+the spatial overview/quick switcher are not. See [the project goal](project-goal.md) and
 [the migration plan](desk-model-plan.md).
 
 ## Choose an integration

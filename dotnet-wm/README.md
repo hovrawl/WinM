@@ -1,6 +1,7 @@
 # WinManager
 
-Windows-only, headless .NET 10 tiling window manager. The adjacent
+Windows-only, headless .NET 10 tiling window manager with a separate optional
+Avalonia debug/control companion for its **one shared desk**. The adjacent
 GlazeWM checkout is a behavioral reference and is not modified or linked.
 
 ## Current implementation
@@ -15,11 +16,14 @@ workspace identity. See [the one-desk goal](docs/project-goal.md) and its
   resize, floating mode, and application-minimized/fullscreen exclusions.
 - Semantic fullscreen/popup/tool/owned/no-activate exclusions by default, with
   per-window `setMode`/`toggleMode` overrides through shortcuts, CLI, and SDK.
+- Explicitly returning a window to floating restores its last observed pre-tiling
+  floating bounds once, clamped to its workspace view's work area. This does not
+  continually constrain user movement beyond the existing floating-window clamping.
 - Free window dragging while managed: drop over a tile to swap positions, or
   onto another monitor to transfer to its active workspace and reflow the layout.
 - Live tiled-window resizing: neighboring tiles reflow as split boundaries move,
   and the new proportions persist on release. Default columns share width equally;
-  all eligible windows tile, even when their minimum-size hints exceed available space.
+  windows that cannot fit remain managed as minimized layout overflow.
 - Desk-owned workspaces with exclusive, transferable monitor views, deterministic
   source fallback, monitor hotplug handling, safe visibility, and an acknowledged
   crash-recovery helper. `WorkspaceViews` exposes current monitor assignments.
@@ -27,13 +31,16 @@ workspace identity. See [the one-desk goal](docs/project-goal.md) and its
   subscriptions, bounded clients, a .NET SDK, and a headless CLI.
 - Validated JSON configuration, optional registered shortcuts, pause/redraw/exit,
   rotating logs, single-instance protection, and explicit logon registration.
+- A code-only Avalonia inspector shows the one desk's workspaces, monitor views,
+  window membership, overflow and configured exclusions, with explicit controls
+  through the SDK. See [the companion guide](src/WinManager.DebugUi/README.md).
 
 `Core` has no generated native dependencies. `Windows` isolates CsWin32 on its
 native message thread. `Host` composes them through dependency injection as a
 normal-privilege `WinExe`; `Client` depends only on public contracts.
 No tray, widget, service, browser bridge, or arbitrary shell execution is included.
 Logical desk positions, columns/rows/Fibonacci workspace rules, persistent view
-assignments, and a visual client are not implemented in this pass.
+assignments, and the spatial desk overview/quick switcher remain future work.
 
 ## Existing feature progress
 

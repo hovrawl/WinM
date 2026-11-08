@@ -49,7 +49,9 @@ public sealed class DesktopObservation(IDesktopObserver platform, TimeSpan? resc
         {
             var next = await platform.CaptureAsync(cancellationToken);
             if (Current is null || Current.FocusedWindowId != next.FocusedWindowId ||
-                !Current.Windows.SequenceEqual(next.Windows) || !Current.Monitors.SequenceEqual(next.Monitors))
+                !Current.Windows.SequenceEqual(next.Windows) || !Current.Monitors.SequenceEqual(next.Monitors) ||
+                (Current.ConfiguredExclusions is null) != (next.ConfiguredExclusions is null) ||
+                !(Current.ConfiguredExclusions ?? []).SequenceEqual(next.ConfiguredExclusions ?? []))
             {
                 Current = next;
                 Changed?.Invoke(next);

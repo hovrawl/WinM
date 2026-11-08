@@ -12,4 +12,7 @@ public sealed record WindowInfo(Guid Id, Guid MonitorId, string Title, string Pr
     public bool IsIgnored => TilingOverride != true && (Fullscreen || IsPopup || IsToolWindow || IsOwned || IsNoActivate);
 }
 public sealed record DesktopSnapshot(IReadOnlyList<MonitorInfo> Monitors,
-    IReadOnlyList<WindowInfo> Windows, Guid? FocusedWindowId);
+    IReadOnlyList<WindowInfo> Windows, Guid? FocusedWindowId,
+    IReadOnlyList<ConfiguredWindowExclusion>? ConfiguredExclusions = null);
+public sealed record ConfiguredWindowExclusion(string Title, string ProcessName, string ClassName,
+    Guid MonitorId, PixelRect Bounds, bool ProcessNameExcluded, bool ClassNameExcluded);

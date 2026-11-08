@@ -7,6 +7,77 @@ namespace WinManager.Core.Tests;
 public sealed class WorkspaceManagerTests
 {
     [Fact]
+    public async Task ConfiguredExclusionsRemainReadOnlyAndAreNotManagedOrActionable()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var excluded = new ConfiguredWindowExclusion("Excluded", "sample", "SampleClass",
+            fake.Desktop.Monitors.Single().Id, new(50, 50, 300, 200), true, false);
+        fake.Desktop = fake.Desktop with { ConfiguredExclusions = [excluded] };
+        var engine = new ManagerEngine(fake);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var snapshot = engine.Current!;
+            Assert.Equal(excluded, Assert.Single(snapshot.Desktop.ConfiguredExclusions!));
+            Assert.DoesNotContain(snapshot.Desktop.Windows, window => window.Title == excluded.Title);
+            Assert.Equal(fake.Desktop.Windows.Select(window => window.Id).ToHashSet(),
+                snapshot.Workspaces!.SelectMany(workspace => workspace.WindowIds).ToHashSet());
+
+            var result = await engine.ExecuteAsync(new(CommandKind.Focus, WindowId: Guid.NewGuid()), timeout.Token);
+            Assert.False(result.Success);
+            Assert.Equal("not_found", result.ErrorCode);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task WindowDiscoveredOnPreviouslyEmptyMonitorIsAssignedAndTiled()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var primary = fake.Desktop.Monitors.Single();
+        var emptyMonitor = primary with
+        {
+            Id = Guid.NewGuid(), DeviceName = "Empty", Bounds = new(1000, 0, 1000, 900),
+            WorkArea = new(1000, 0, 1000, 850)
+        };
+        fake.Desktop = new([primary, emptyMonitor], fake.Desktop.Windows, fake.Desktop.FocusedWindowId);
+        var engine = new ManagerEngine(fake);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var emptyWorkspace = Assert.Single(engine.Current!.Workspaces!, workspace => workspace.MonitorId == emptyMonitor.Id);
+            Assert.Empty(emptyWorkspace.WindowIds);
+
+            var arriving = fake.Desktop.Windows[0] with
+            {
+                Id = Guid.NewGuid(), MonitorId = emptyMonitor.Id, Bounds = new(1100, 100, 400, 300)
+            };
+            fake.Desktop = fake.Desktop with { Windows = fake.Desktop.Windows.Append(arriving).ToArray() };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+
+            var current = engine.Current!;
+            Assert.Contains(arriving.Id, current.Workspaces!.Single(workspace => workspace.Id == emptyWorkspace.Id).WindowIds);
+            var tiled = Assert.Single(current.Desktop.Windows, window => window.Id == arriving.Id);
+            Assert.False(tiled.Minimized);
+            Assert.True(tiled.Visible);
+            Assert.Equal(new PixelRect(1008, 8, 984, 834), tiled.Bounds);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
     public async Task OversizedWindowIsKeptManagedButNotStagedAlongsideWindowsThatFit()
     {
         await using var fake = new FakeWindowPlatform();

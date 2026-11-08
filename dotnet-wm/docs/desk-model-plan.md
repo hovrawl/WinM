@@ -2,7 +2,7 @@
 
 ## Goal and scope
 
-Move from monitor-owned workspaces to one shared desk with transferable workspace views. The first headless implementation pass is complete. This plan tracks remaining system work and the later visual client; it does not add a user interface.
+Move from monitor-owned workspaces to exactly one shared desk with transferable workspace views. The first headless implementation pass and a separate Avalonia debug/control companion are complete. This plan tracks remaining system work and the later spatial overview/quick switcher.
 
 The target rules live in [Project goal: one shared desk](project-goal.md). Transfer and target-selection policies below are now implemented; spatial, layout, and persistence policies remain open.
 
@@ -13,7 +13,7 @@ The target rules live in [Project goal: one shared desk](project-goal.md). Trans
 - `WorkspaceSet.Activate` supports a target monitor. `ManagerEngine` accepts optional `monitorId` for `ActivateWorkspace`; otherwise it uses the focused window's observed connected monitor, then a stable primary monitor. Native-action failures restore the prior view map and remove any fallback workspace created by the failed transfer.
 - `src/WinManager.Contracts/Commands.cs` exposes `WorkspaceViewInfo` through `ManagerSnapshot.WorkspaceViews`. The optional field is additive to the version 1 snapshot. `MoveToMonitor` still moves a window to the workspace currently shown by a monitor; it is distinct from view transfer.
 - `src/WinManager.Host/ManagerConfiguration.cs` validates the optional activation monitor target. The CLI and SDK serialize the existing `ManagerCommand` contract. Configuration, API, and protocol references describe the current view-transfer behavior.
-- `SplitTree.Layout` stages only windows whose reported minimum width and height fit. It retains the full tree and reports overflow IDs; `ManagerEngine` exposes `WindowInfo.LayoutOverflow`, minimizes overflow, and supports promoting one through the existing `focus` command. The Windows recovery helper restores manager-minimized overflow on graceful exit or host failure. CLI status lists affected titles; no visual client is included.
+- `SplitTree.Layout` stages only windows whose reported minimum width and height fit. It retains the full tree and reports overflow IDs; `ManagerEngine` exposes `WindowInfo.LayoutOverflow`, minimizes overflow, and supports promoting one through the existing `focus` command. The Windows recovery helper restores manager-minimized overflow on graceful exit or host failure. CLI status and the separate Avalonia inspector expose affected windows.
 
 These details are the baseline for migration. The `MonitorId` on `WindowInfo` is observed native placement, not a future desk relationship.
 
@@ -86,9 +86,11 @@ Add or update tests in the core, IPC, and Windows test projects. Cover these cas
 
 Run the targeted core, IPC, and Windows tests in a safe interactive environment where required. Do not run native desktop integration tests on a normal managed desktop.
 
-### 6. Add a visual client as an explicit later phase
+### 6. Add visual clients without changing single-desk ownership
 
-Do not make a UI a prerequisite for the data model or manager commands. Start UI work only after the manager contracts and core transfer tests are stable.
+Implemented first slice: `WinManager.DebugUi` is a code-only Avalonia companion using the existing SDK. It shows monitor views (including empty ones), all desk workspaces, window state and membership, and read-only configured-exclusion diagnostics. Explicit controls activate views, change membership, focus/promote overflow, set modes, pause/resume and redraw. Its demo mode never connects to the manager. See [the companion guide](../src/WinManager.DebugUi/README.md).
+
+There is exactly one desk, not a collection of desks. UI groups represent workspaces and monitor views on that shared desk. Keep the manager headless and authoritative. Spatial overview and quick-switcher gestures remain later work, after their spatial contracts exist; they must not invent a separate desk model in the client.
 
 ## Visual client choices
 

@@ -7,6 +7,182 @@ namespace WinManager.Core.Tests;
 public sealed class WindowSemanticsTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReturningToFloatingRestoresLastUntiledBoundsOnlyOnce(bool toggle)
+    {
+        await using var fake = new FakeWindowPlatform();
+        var original = fake.Desktop.Windows[0];
+        var engine = new ManagerEngine(fake);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            Assert.NotEqual(original.Bounds, Find(engine, original.Id).Bounds);
+            var floating = new ManagerCommand(toggle ? CommandKind.ToggleMode : CommandKind.SetMode,
+                original.Id, Mode: toggle ? null : WindowMode.Floating);
+            Assert.True((await engine.ExecuteAsync(floating, timeout.Token)).Success);
+            Assert.Equal(WindowMode.Floating, Find(engine, original.Id).Mode);
+            Assert.Equal(original.Bounds, Find(engine, original.Id).Bounds);
+            Assert.Contains(fake.Plans.SelectMany(plan => plan.Placements),
+                placement => placement.WindowId == original.Id && placement.Bounds == original.Bounds);
+
+            var moved = new PixelRect(-750, 180, 320, 260);
+            fake.Desktop = fake.Desktop with { Windows = fake.Desktop.Windows.Select(window => window.Id == original.Id
+                ? window with { Bounds = moved } : window).ToArray() };
+            fake.Plans.Clear();
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.SetMode, original.Id, Mode: WindowMode.Floating), timeout.Token)).Success);
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            Assert.Equal(moved, Find(engine, original.Id).Bounds);
+            Assert.DoesNotContain(fake.Plans.SelectMany(plan => plan.Placements), placement => placement.WindowId == original.Id);
+
+            var latest = new PixelRect(-800, 100, 350, 300);
+            fake.Desktop = fake.Desktop with { Windows = fake.Desktop.Windows.Select(window => window.Id == original.Id
+                ? window with { Bounds = latest } : window).ToArray() };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.SetMode, original.Id, Mode: WindowMode.Tiling), timeout.Token)).Success);
+            Assert.NotEqual(latest, Find(engine, original.Id).Bounds);
+            Assert.True((await engine.ExecuteAsync(floating, timeout.Token)).Success);
+            Assert.Equal(latest, Find(engine, original.Id).Bounds);
+        }
+        finally
+        {
+            timeout.Cancel();
+            try { await run; }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested) { }
+        }
+    }
+
+    [Fact]
+    public async Task SavedFloatingBoundsAreClampedToTheCurrentMonitorWorkArea()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var id = fake.Desktop.Windows[0].Id;
+        var engine = new ManagerEngine(fake);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var monitor = fake.Desktop.Monitors[0] with
+            {
+                Id = Guid.NewGuid(), Bounds = new(0, 0, 500, 400), WorkArea = new(0, 0, 500, 350)
+            };
+            fake.Desktop = fake.Desktop with
+            {
+                Monitors = [monitor], Windows = fake.Desktop.Windows.Select(window => window with { MonitorId = monitor.Id }).ToArray()
+            };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.SetMode, id, Mode: WindowMode.Floating), timeout.Token)).Success);
+            Assert.Equal(new PixelRect(0, 50, 200, 200), Find(engine, id).Bounds);
+        }
+        finally
+        {
+            timeout.Cancel();
+            try { await run; }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested) { }
+        }
+    }
+
+    [Fact]
+    public async Task FailedFloatingRestorationReportsFailureWithoutInventingGeometry()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var original = fake.Desktop.Windows[0];
+        var engine = new ManagerEngine(fake);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var tiled = Find(engine, original.Id).Bounds;
+            fake.FailActions = true;
+            var result = await engine.ExecuteAsync(new(CommandKind.SetMode, original.Id, Mode: WindowMode.Floating), timeout.Token);
+            Assert.False(result.Success);
+            Assert.Equal("access_denied", result.ErrorCode);
+            Assert.Equal(WindowMode.Floating, Find(engine, original.Id).Mode);
+            Assert.Equal(tiled, Find(engine, original.Id).Bounds);
+            Assert.Contains(fake.Plans.Last().Placements,
+                placement => placement.WindowId == original.Id && placement.Bounds == original.Bounds);
+        }
+        finally
+        {
+            timeout.Cancel();
+            try { await run; }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested) { }
+        }
+    }
+
+    [Theory]
+    [InlineData("paused")]
+    [InlineData("minimized")]
+    [InlineData("inactive")]
+    public async Task ChangingToFloatingDoesNotRestoreUnavailableWindowGeometry(string state)
+    {
+        await using var fake = new FakeWindowPlatform();
+        var id = fake.Desktop.Windows[0].Id;
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("1"), new("2")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            if (state == "paused")
+                Assert.True((await engine.ExecuteAsync(new(CommandKind.Pause, Paused: true), timeout.Token)).Success);
+            if (state == "inactive")
+                Assert.True((await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceName: "2"), timeout.Token)).Success);
+            if (state == "minimized")
+                fake.Desktop = fake.Desktop with { Windows = fake.Desktop.Windows.Select(window => window.Id == id
+                    ? window with { Minimized = true } : window).ToArray() };
+            var before = fake.Desktop.Windows.Single(window => window.Id == id);
+            fake.Plans.Clear();
+
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.SetMode, id, Mode: WindowMode.Floating), timeout.Token)).Success);
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+
+            var after = Find(engine, id);
+            Assert.Equal(WindowMode.Floating, after.Mode);
+            Assert.Equal(before.Bounds, after.Bounds);
+            Assert.Equal(before.Minimized, after.Minimized);
+            Assert.Equal(before.ManagerHidden, after.ManagerHidden);
+            Assert.DoesNotContain(fake.Plans.SelectMany(plan => plan.Placements), placement => placement.WindowId == id);
+            Assert.DoesNotContain(fake.Plans.SelectMany(plan => plan.Minimizations ?? []), change => change.WindowId == id);
+        }
+        finally
+        {
+            timeout.Cancel();
+            try { await run; }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested) { }
+        }
+    }
+
+    [Fact]
+    public async Task StartupFloatingWindowKeepsItsActualBoundsAndRestoresThemAfterTiling()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var original = fake.Desktop.Windows[0] with { Mode = WindowMode.Floating };
+        fake.Desktop = fake.Desktop with { Windows = [original, fake.Desktop.Windows[1]] };
+        var engine = new ManagerEngine(fake);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            Assert.Equal(original.Bounds, Find(engine, original.Id).Bounds);
+            Assert.DoesNotContain(fake.Plans.SelectMany(plan => plan.Placements), placement => placement.WindowId == original.Id);
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.SetMode, original.Id, Mode: WindowMode.Tiling), timeout.Token)).Success);
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.SetMode, original.Id, Mode: WindowMode.Floating), timeout.Token)).Success);
+            Assert.Equal(original.Bounds, Find(engine, original.Id).Bounds);
+        }
+        finally
+        {
+            timeout.Cancel();
+            try { await run; }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested) { }
+        }
+    }
+
+    [Theory]
     [InlineData("popup")]
     [InlineData("tool")]
     [InlineData("owned")]
@@ -49,8 +225,10 @@ public sealed class WindowSemanticsTests
             Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
             Assert.Equal(WindowMode.Tiling, Find(engine, overlay.Id).Mode);
 
+            fake.Plans.Clear();
             Assert.True((await engine.ExecuteAsync(new(CommandKind.ToggleMode, overlay.Id), timeout.Token)).Success);
             Assert.True(Find(engine, overlay.Id).IsIgnored);
+            Assert.DoesNotContain(fake.Plans.SelectMany(plan => plan.Placements), p => p.WindowId == overlay.Id);
             fake.Plans.Clear();
             Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
             Assert.DoesNotContain(fake.Plans.SelectMany(plan => plan.Placements), p => p.WindowId == overlay.Id);

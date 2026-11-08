@@ -1,3 +1,4 @@
+using System.Text.Json;
 using WinManager.Contracts;
 using WinManager.Core;
 using Xunit;
@@ -6,6 +7,41 @@ namespace WinManager.Core.Tests;
 
 public sealed class SubscriptionTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ConfiguredExclusionOnlyChangePublishesWindowUpdatedWithCompleteSnapshot(bool hasExclusion)
+    {
+        await using var fake = new FakeWindowPlatform();
+        var engine = new ManagerEngine(fake);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            var sink = new Sink();
+            Assert.True((await engine.SubscribeAsync(sink, [ManagerEventTypes.WindowUpdated], timeout.Token)).Success);
+            var previousRevision = engine.Current!.StateRevision;
+            var excluded = new ConfiguredWindowExclusion("Excluded", "sample", "SampleClass",
+                fake.Desktop.Monitors.Single().Id, new(0, 0, 400, 300), true, false);
+            fake.Desktop = fake.Desktop with { ConfiguredExclusions = hasExclusion ? [excluded] : [] };
+
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+
+            var changed = Assert.Single(sink.Events, envelope => envelope.EventType == ManagerEventTypes.WindowUpdated);
+            Assert.True(changed.StateRevision > previousRevision);
+            var published = changed.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!;
+            Assert.NotNull(published.Desktop.ConfiguredExclusions);
+            if (hasExclusion) Assert.Equal(excluded, Assert.Single(published.Desktop.ConfiguredExclusions));
+            else Assert.Empty(published.Desktop.ConfiguredExclusions);
+            Assert.Equal(fake.Desktop.Windows.Count, published.Desktop.Windows.Count);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
     [Fact]
     public async Task SnapshotPrecedesFilteredEventsAndRevisionSequenceAreMonotonic()
     {

@@ -39,6 +39,10 @@ public sealed class WindowsDesktopObserverInteractiveTests
             }
             foreach (var name in new[] { "hidden", "child", "ignored", "own-process" })
                 Assert.DoesNotContain(first.Windows, candidate => candidate.Title == fixture.Prefix + "." + name);
+            var classExclusion = Assert.Single(first.ConfiguredExclusions!, candidate => candidate.Title == fixture.Prefix + ".ignored");
+            Assert.True(classExclusion.ClassNameExcluded);
+            Assert.False(classExclusion.ProcessNameExcluded);
+            Assert.Equal(fixture.IgnoredClass, classExclusion.ClassName);
             var window = Assert.Single(candidates, window => window.Title == fixture.Prefix + ".normal");
             Assert.Equal(fixture.Prefix + ".normal", window.Title);
             Assert.Equal(fixture.WindowClass, window.ClassName);
@@ -64,8 +68,12 @@ public sealed class WindowsDesktopObserverInteractiveTests
 
             await using var ignoreProcess = new WindowsDesktopObserver(ignoredProcessNames: [window.ProcessName.ToUpperInvariant() + ".exe"]);
             await ignoreProcess.StartAsync(timeout.Token);
-            Assert.DoesNotContain((await ignoreProcess.CaptureAsync(timeout.Token)).Windows,
+            var processExcluded = await ignoreProcess.CaptureAsync(timeout.Token);
+            Assert.DoesNotContain(processExcluded.Windows,
                 candidate => candidate.Title.StartsWith(fixture.Prefix, StringComparison.Ordinal));
+            var processExclusion = Assert.Single(processExcluded.ConfiguredExclusions!, candidate => candidate.Title == window.Title);
+            Assert.True(processExclusion.ProcessNameExcluded);
+            Assert.False(processExclusion.ClassNameExcluded);
         }
         Assert.Equal(count, NativeInspection.ObserverWindowCount());
     }

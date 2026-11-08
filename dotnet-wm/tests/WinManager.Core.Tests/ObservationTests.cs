@@ -78,6 +78,42 @@ public sealed class ObservationTests
     }
 
     [Fact]
+    public async Task ConfiguredExclusionChangesArePublishedWithoutEnteringManagedWindows()
+    {
+        var excluded = new ConfiguredWindowExclusion("Excluded window", "sample", "SampleClass", MonitorId,
+            new(20, 30, 400, 300), ProcessNameExcluded: true, ClassNameExcluded: false);
+        await using var fake = new FakeObserver(new([], [], null));
+        var observation = new DesktopObservation(fake);
+        var published = new List<DesktopSnapshot>();
+        observation.Changed += published.Add;
+        await observation.ReconcileAsync(default);
+        fake.Snapshot = new([], [], null, [excluded]);
+
+        await observation.ReconcileAsync(default);
+
+        Assert.Equal(2, published.Count);
+        Assert.Empty(observation.Current!.Windows);
+        Assert.Equal(excluded, Assert.Single(observation.Current.ConfiguredExclusions!));
+    }
+
+    [Fact]
+    public async Task ConfiguredExclusionAvailabilityIsDistinctFromNoMatches()
+    {
+        await using var fake = new FakeObserver(new([], [], null));
+        var observation = new DesktopObservation(fake);
+        var count = 0;
+        observation.Changed += _ => count++;
+        await observation.ReconcileAsync(default);
+        fake.Snapshot = new([], [], null, []);
+
+        await observation.ReconcileAsync(default);
+
+        Assert.Equal(2, count);
+        Assert.NotNull(observation.Current!.ConfiguredExclusions);
+        Assert.Empty(observation.Current.ConfiguredExclusions);
+    }
+
+    [Fact]
     public async Task CaptureFailureLeavesLastCommittedSnapshotIntact()
     {
         await using var fake = new FakeObserver(Snapshot());

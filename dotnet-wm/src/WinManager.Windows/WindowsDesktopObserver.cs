@@ -60,12 +60,14 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     public WindowsDesktopObserver(IEnumerable<string>? ignoredProcessNames = null, IEnumerable<string>? ignoredClassNames = null,
         string? recoveryExecutablePath = null)
     {
-        ignoredProcesses = new HashSet<string>((ignoredProcessNames ?? []).Select(NormalizeProcessName), StringComparer.OrdinalIgnoreCase);
+        ignoredProcesses = new HashSet<string>((ignoredProcessNames ?? []).Append("WinManager.DebugUi").Select(NormalizeProcessName), StringComparer.OrdinalIgnoreCase);
         ignoredClasses = new HashSet<string>(ignoredClassNames ?? [], StringComparer.OrdinalIgnoreCase);
         this.recoveryExecutablePath = recoveryExecutablePath ?? Path.Combine(AppContext.BaseDirectory, "WinManager.Recovery.exe");
         windowProcedure = WindowProcedure;
         eventProcedure = WinEventProcedure;
     }
+
+    internal bool IsProcessExcluded(string name) => ignoredProcesses.Contains(NormalizeProcessName(name));
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -446,6 +448,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         if (!monitorResult) throw NativeError("EnumDisplayMonitors");
 
         var windows = new List<WindowInfo>();
+        var configuredExclusions = new List<ConfiguredWindowExclusion>();
         var seen = new HashSet<nint>();
         var handles = new List<HWND>();
         var foreground = PInvoke.GetForegroundWindow();
@@ -468,7 +471,8 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         foreach (var window in handles)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var candidate = ReadWindow(window, monitorsByHandle);
+            var candidate = ReadWindow(window, monitorsByHandle, out var exclusion);
+            if (exclusion is not null) configuredExclusions.Add(exclusion);
             if (candidate is null) continue;
             windows.Add(candidate);
             if (window == foreground) focused = candidate.Id;
@@ -477,11 +481,15 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         observedWindows.Clear();
         foreach (var candidate in windows) observedWindows.Add(candidate.Id, candidate);
         return new DesktopSnapshot(monitorsByHandle.Values.OrderBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase).ToArray(),
-            windows.OrderBy(window => window.Id).ToArray(), focused);
+            windows.OrderBy(window => window.Id).ToArray(), focused,
+            configuredExclusions.OrderBy(exclusion => exclusion.MonitorId).ThenBy(exclusion => exclusion.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(exclusion => exclusion.ClassName, StringComparer.OrdinalIgnoreCase).ThenBy(exclusion => exclusion.Title, StringComparer.Ordinal).ToArray());
     }
 
-    private unsafe WindowInfo? ReadWindow(HWND window, Dictionary<HMONITOR, MonitorInfo> monitors)
+    private unsafe WindowInfo? ReadWindow(HWND window, Dictionary<HMONITOR, MonitorInfo> monitors,
+        out ConfiguredWindowExclusion? exclusion)
     {
+        exclusion = null;
         var managerHidden = hiddenWindows.Any(pair => issuedHides.Contains(pair.Key) &&
             pair.Value.Handle == (long)(nint)window.Value && RecoveryNative.Matches(pair.Value));
         if ((!PInvoke.IsWindowVisible(window) && !managerHidden) || window == PInvoke.GetShellWindow() || window == PInvoke.GetDesktopWindow() ||
@@ -491,25 +499,33 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         if ((style & (uint)WINDOW_STYLE.WS_CHILD) != 0) return null;
         var flags = ClassifyWindowStyles(style, extendedStyle, PInvoke.GetWindow(window, GET_WINDOW_CMD.GW_OWNER) != default);
         var className = ReadClassName(window);
-        if (className.Length == 0 || ignoredClasses.Contains(className) || IsShellOrTransientClass(className)) return null;
+        if (className.Length == 0 || IsShellOrTransientClass(className)) return null;
+        var classNameExcluded = ignoredClasses.Contains(className);
         uint cloaked = 0;
         if (PInvoke.DwmGetWindowAttribute(window, global::Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_CLOAKED,
             &cloaked, sizeof(uint)).Failed || cloaked != 0) return null;
         PInvoke.GetWindowThreadProcessId(window, out var pid);
         if (pid == 0 || pid == (uint)Environment.ProcessId) return null;
-        if (!TryReadProcess(pid, out var creationTime, out var processName) || ignoredProcesses.Contains(processName)) return null;
+        if (!TryReadProcess(pid, out var creationTime, out var processName)) return null;
+        var processNameExcluded = IsProcessExcluded(processName);
         var monitor = PInvoke.MonitorFromWindow(window, MONITOR_FROM_FLAGS.MONITOR_DEFAULTTONEAREST);
         if (!monitors.TryGetValue(monitor, out var monitorInfo)) return null;
         RECT rectangle;
         if (PInvoke.DwmGetWindowAttribute(window, global::Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_EXTENDED_FRAME_BOUNDS,
             &rectangle, (uint)sizeof(RECT)).Failed && !PInvoke.GetWindowRect(window, out rectangle)) return null;
         var title = ReadTitle(window);
-        var minimum = ReadMinimumSize(window, rectangle);
+        var minimum = processNameExcluded || classNameExcluded ? default : ReadMinimumSize(window, rectangle);
         // Revalidate after the cross-process queries: an HWND may disappear or be recycled meanwhile.
         PInvoke.GetWindowThreadProcessId(window, out var currentPid);
         if (!PInvoke.IsWindow(window) || currentPid != pid ||
             !TryReadProcess(pid, out var currentCreationTime, out _) || currentCreationTime != creationTime) return null;
         var bounds = Rect(rectangle);
+        if (processNameExcluded || classNameExcluded)
+        {
+            exclusion = new ConfiguredWindowExclusion(title, processName, className, monitorInfo.Id, bounds,
+                processNameExcluded, classNameExcluded);
+            return null;
+        }
         var minimized = (bool)PInvoke.IsIconic(window);
         var fullscreen = !minimized && Covers(bounds, monitorInfo.Bounds);
         var id = identities.GetOrCreate(new WindowIdentity((nint)window.Value, pid, creationTime), PInvoke.GetTickCount64());
@@ -616,7 +632,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         window = new HWND(identity.Handle);
         PInvoke.GetWindowThreadProcessId(window, out var pid);
         if (!PInvoke.IsWindow(window) || pid != identity.ProcessId) return false;
-        if (!TryReadProcess(pid, out var creationTime, out _))
+        if (!TryReadProcess(pid, out var creationTime, out var processName))
         {
             failure = new(id, "access_denied", "Cannot verify the target process identity.");
             return false;
@@ -629,6 +645,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         if ((!PInvoke.IsWindowVisible(window) && !managerHidden) || window == PInvoke.GetShellWindow() || window == PInvoke.GetDesktopWindow() ||
             PInvoke.GetAncestor(window, GET_ANCESTOR_FLAGS.GA_ROOT) != window ||
             (normalStyle & (uint)WINDOW_STYLE.WS_CHILD) != 0 ||
+            IsProcessExcluded(processName) ||
             className.Length == 0 || ignoredClasses.Contains(className) || IsShellOrTransientClass(className) ||
             PInvoke.DwmGetWindowAttribute(window, global::Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_CLOAKED,
                 &cloaked, sizeof(uint)).Failed || cloaked != 0)

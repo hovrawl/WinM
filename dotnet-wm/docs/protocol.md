@@ -2,8 +2,8 @@
 
 This section documents the current version 1 protocol, including the first
 workspace-view transfer contracts. Logical desk positions, workspace bounds,
-workspace-level layout rules, persistent view assignments, and visualization
-remain planned. See [the project goal](project-goal.md) and
+workspace-level layout rules, persistent view assignments, and spatial visualization
+remain planned; a separate debug/control inspector is available. See [the project goal](project-goal.md) and
 [the migration plan](desk-model-plan.md).
 
 The Windows host exposes a duplex byte-mode named pipe. The default name is
@@ -73,6 +73,17 @@ observed native state separately. Focusing an overflow window in its active
 workspace prioritizes it for staging and can replace the focused tile; the
 displaced window may then become overflow. Default-ignored windows remain
 discoverable but are neither placed nor workspace-hidden.
+
+`desktop.configuredExclusions` is an optional additive version 1 field. An absent
+or null field means diagnostics are unavailable; an empty array means no matching
+candidates were observed. Entries contain `title`, `processName`, `className`,
+`monitorId`, `bounds`, `processNameExcluded`, and `classNameExcluded`. They report
+configured process/class exclusions after native visibility, shell/cloak, and
+identity checks. They are separate from `desktop.windows`, have no window ID,
+and cannot be passed to native-action commands or opted into tiling. They are
+not an exhaustive inventory of hidden, shell or inaccessible native windows.
+Diagnostic-only changes publish the existing `window.updated` event with a full
+committed snapshot; protocol framing and version remain unchanged.
 
 `selectContainer` selects an active tiling-tree node by `nodeId`, or navigates
 from a selected/focused tile using `parent`, `firstChild`, `secondChild`, `sibling`,

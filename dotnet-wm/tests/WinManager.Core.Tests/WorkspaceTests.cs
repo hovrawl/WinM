@@ -384,4 +384,23 @@ public sealed class WorkspaceTests
         Assert.Equal(one.Id, set.Views.Single(view => view.MonitorId == SecondMonitor).WorkspaceId);
         Assert.Equal(2, set.Views.Select(view => view.WorkspaceId).Distinct().Count());
     }
+
+    [Fact]
+    public void EmptyMonitorGetsAWorkspaceBeforeAWindowArrives()
+    {
+        var monitor = Monitor(FirstMonitor, "Empty");
+        var set = new WorkspaceSet();
+
+        set.Reconcile(Desktop([], monitor));
+
+        var workspace = Assert.Single(set.Snapshot);
+        Assert.Equal(monitor.Id, workspace.MonitorId);
+        Assert.True(workspace.Active);
+        Assert.Empty(workspace.WindowIds);
+
+        var window = Window(monitor: monitor.Id);
+        set.Reconcile(Desktop([window], monitor));
+        Assert.Equal(workspace.Id, set.WorkspaceFor(window.Id));
+        Assert.Equal(window.Id, Assert.Single(set.Snapshot.Single().WindowIds));
+    }
 }

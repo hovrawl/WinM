@@ -61,11 +61,21 @@ Example (shortcuts are disabled in the generated defaults):
   command.
 - Gaps are DIPs in `[0,256]`, converted per-monitor to physical pixels.
 - Process/class ignores are case-insensitive exact names, not regex rules.
+  The `WinManager.DebugUi` companion process is always excluded, even when
+  `ignoredProcessNames` is empty. It is never tiled, workspace-hidden, or minimized
+  by the manager; its read-only process-exclusion diagnostic cannot be opted into
+  management by editing the configured lists or issuing `setMode`.
   Fullscreen, popup (`WS_POPUP`), tool (`WS_EX_TOOLWINDOW`), owned, and no-activate
   windows are ignored semantically by default, without excluding their entire
   application class. They remain in snapshots but are neither placed nor hidden.
   `setMode`/`toggleMode` can explicitly tile an individual observed window; hard
   process/class exclusions cannot be overridden this way.
+  Safely identifiable configured-excluded candidates appear in the optional
+  snapshot `desktop.configuredExclusions` and the [debug companion](../src/WinManager.DebugUi/README.md),
+  separately from actionable windows. This diagnostic is not an exhaustive native
+  window list; shell, hidden/cloaked and inaccessible candidates are still filtered.
+  Change these configuration lists and restart the host to include a configured-excluded
+  window; the built-in companion exemption remains in effect.
 - Shortcut modifier bits: Alt `1`, Control `2`, Shift `4`, Win `8`, NoRepeat
   `16384`. The example uses Control+Shift+NoRepeat. `virtualKey` uses Windows
   virtual-key codes; reserved F12 is rejected. Duplicate keys and invalid command

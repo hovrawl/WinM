@@ -2,9 +2,9 @@
 
 ## Purpose
 
-WinManager will manage one logical desk. Each monitor will show one workspace view onto that desk. A workspace will belong to the desk, not to a monitor.
+WinManager manages exactly one logical desk. There is no desk list, desk switching, or separate desk per monitor. Each monitor shows one workspace view onto that same desk. A workspace belongs to the desk, not to a monitor.
 
-This document defines the target model. The first system pass now keeps workspace identity independent from monitor views and supports exclusive view transfer. Current tiling also keeps every eligible window managed when minimum sizes exceed available space. Spatial bounds, workspace layout-rule selection, persistent view assignments, and visualization remain future work. See [the migration plan](desk-model-plan.md) for the status and next phases.
+This document defines the target model. The first system pass now keeps workspace identity independent from monitor views and supports exclusive view transfer. Current tiling also keeps every eligible window managed when minimum sizes exceed available space. Spatial bounds, workspace layout-rule selection, persistent view assignments, and the spatial overview remain future work; a separate debug/control inspector is available. See [the migration plan](desk-model-plan.md) for the status and next phases.
 
 ## Confirmed rules
 
@@ -54,4 +54,6 @@ Both views use public manager state and commands. The client does not own worksp
 
 `WorkspaceSet` now keeps workspaces independent from a monitor-to-workspace view map. `ManagerSnapshot.WorkspaceViews` exposes that map; `WorkspaceInfo.MonitorId` and `Active` remain compatibility projections, with `Guid.Empty` and `false` for an unviewed workspace. The manager transfers views, applies the selected source fallback, releases views on monitor removal, and restores view state after native-action failure. `WorkspaceDefinition.MonitorDeviceName` is used as an initial placement hint.
 
-The current native tiling still uses the existing split-tree layout, now respecting window minimum sizes. `layoutOverflow` is exposed in snapshots and the CLI status view; Windows minimizes overflow windows with crash recovery, and focus can promote an overflow window by replacing the focused tile. Logical desk coordinates, workspace bounds, columns/rows/Fibonacci rules, and persistence of transferred views are not part of this first pass. No visual client is included; the overview and quick switcher remain explicit integration work after the manager contract stabilizes.
+The current native tiling still uses the existing split-tree layout, now respecting window minimum sizes. `layoutOverflow` is exposed in snapshots and the CLI status view; Windows minimizes overflow windows with crash recovery, and focus can promote an overflow window by replacing the focused tile. Logical desk coordinates, workspace bounds, columns/rows/Fibonacci rules, and persistence of transferred views are not part of this first pass.
+
+The separate [Avalonia debug/control companion](../src/WinManager.DebugUi/README.md) is the first visual slice. It inspects the single desk and sends public manager commands; it never creates another desk or owns membership. Safely identifiable configured exclusions are exposed as read-only diagnostics, separate from actionable windows. The spatial overview and quick switcher remain later integration work.
