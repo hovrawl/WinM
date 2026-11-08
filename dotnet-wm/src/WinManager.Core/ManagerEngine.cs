@@ -368,7 +368,8 @@ public sealed class ManagerEngine
              selectedTree.FindNode(selected.NodeId) is null))
             selection = null;
         var next = new ManagerSnapshot(instanceId, 0, desktop,
-            workspaces.Trees.ToDictionary(pair => pair.Key, pair => pair.Value.Snapshot), paused, workspaces.Snapshot, selection);
+            workspaces.Trees.ToDictionary(pair => pair.Key, pair => pair.Value.Snapshot), paused,
+            workspaces.Snapshot, selection, workspaces.Views);
         var signature = JsonSerializer.Serialize(next);
         if (signature == committedSignature) return;
         committedSignature = signature;
@@ -457,6 +458,8 @@ public sealed class ManagerEngine
             command.Navigation is { } navigation && !Enum.IsDefined(navigation) ||
             command.CycleDirection is { } cycleDirection && !Enum.IsDefined(cycleDirection))
             return Error("invalid_argument", "Unknown command or enum value.");
+        if (command.MonitorId is not null && command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToMonitor))
+            return Error("invalid_argument", "Monitor ID is only supported by activateWorkspace and moveToMonitor.");
         if (command.Kind != CommandKind.SelectContainer && (command.NodeId is not null || command.Navigation is not null))
             return Error("invalid_argument", "Node ID and navigation are only supported by selectContainer.");
         if (command.Kind != CommandKind.FocusCycle && command.CycleDirection is not null)
@@ -521,13 +524,22 @@ public sealed class ManagerEngine
         else if (command.Kind == CommandKind.ActivateWorkspace)
         {
             if (command.WorkspaceId is not { } workspaceId) return Error("invalid_argument", "Workspace ID is required.");
-            var previous = workspaces.Snapshot.ToArray();
-            if (previous.Any(workspace => workspace.Id == workspaceId && workspace.Active)) return new(true, null, null, revision);
-            if (!workspaces.Activate(workspaceId)) return Error("not_found", "Workspace is not assigned to a monitor.");
+            if (!workspaces.Snapshot.Any(workspace => workspace.Id == workspaceId))
+                return Error("not_found", "Workspace does not exist.");
+            var desktop = Current!.Desktop;
+            var monitorId = command.MonitorId ?? ResolveTargetMonitor(desktop);
+            if (monitorId == Guid.Empty) return Error("not_ready", "No connected monitor is available for a workspace view.");
+            if (!desktop.Monitors.Any(monitor => monitor.Id == monitorId))
+                return Error("not_found", "Target monitor is not connected.");
+            if (workspaces.Views.Any(view => view.MonitorId == monitorId && view.WorkspaceId == workspaceId))
+                return new(true, null, null, revision);
+            var previous = workspaces.CaptureState();
+            if (!workspaces.Activate(workspaceId, monitorId))
+                return Error("not_found", "Workspace view could not be assigned to the target monitor.");
             var failures = await ReconcileAsync(cancellationToken);
             if (failures.Count > 0)
             {
-                foreach (var workspace in previous.Where(workspace => workspace.Active)) workspaces.Activate(workspace.Id);
+                workspaces.RestoreState(previous);
                 await ReconcileAsync(cancellationToken);
             }
             return Result(failures);
@@ -634,6 +646,17 @@ public sealed class ManagerEngine
             : candidates[(index + 1) % candidates.Length].Id;
         if (target == desktop.FocusedWindowId) return new(true, null, null, revision);
         return Result(await ReconcileAsync(cancellationToken, target));
+    }
+
+    private static Guid ResolveTargetMonitor(DesktopSnapshot desktop)
+    {
+        var connected = desktop.Monitors.ToDictionary(monitor => monitor.Id);
+        if (desktop.FocusedWindowId is { } focusedId &&
+            desktop.Windows.FirstOrDefault(window => window.Id == focusedId) is { } focused &&
+            connected.ContainsKey(focused.MonitorId)) return focused.MonitorId;
+        return desktop.Monitors.OrderBy(monitor => monitor.Bounds.X == 0 && monitor.Bounds.Y == 0 ? 0 : 1)
+            .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase).ThenBy(monitor => monitor.Id)
+            .Select(monitor => monitor.Id).FirstOrDefault();
     }
 
     private CommandResult Result(IReadOnlyList<NativeActionFailure> failures) => failures.Count == 0

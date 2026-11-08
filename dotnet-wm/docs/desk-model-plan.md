@@ -2,50 +2,55 @@
 
 ## Goal and scope
 
-Move from monitor-owned workspaces to one shared desk with transferable workspace views. This is a plan only. It does not change code or add a user interface.
+Move from monitor-owned workspaces to one shared desk with transferable workspace views. The first headless implementation pass is complete. This plan tracks remaining system work and the later visual client; it does not add a user interface.
 
-The target rules live in [Project goal: one shared desk](project-goal.md). Complete the policy choices below before the implementation fixes behavior.
+The target rules live in [Project goal: one shared desk](project-goal.md). Transfer and target-selection policies below are now implemented; spatial, layout, and persistence policies remain open.
 
 ## Current implementation
 
-- `src/WinManager.Core/WorkspaceSet.cs` stores a `MonitorId` and `Active` flag on each workspace. `Reconcile` binds workspaces to detected monitors and normalizes one active workspace per monitor. Window assignment is a separate map. The manager assigns new windows to workspaces based on their observed monitor.
-- `WorkspaceSet.Activate` activates a workspace only within its current monitor group. `MoveWindowToMonitor` finds the active workspace for a monitor.
-- `src/WinManager.Core/ManagerEngine.cs` handles `ActivateWorkspace` without a monitor target. It calls `WorkspaceSet.Activate`, then reconciles native state. On native failure, it attempts to restore the previous active workspaces.
-- `src/WinManager.Contracts/Commands.cs` defines `WorkspaceDefinition` with an optional monitor device name and `WorkspaceInfo` with monitor ID and active state. `ManagerSnapshot` exposes these workspace records.
-- `src/WinManager.Host/ManagerConfiguration.cs` validates the current workspace definitions and shortcut commands. `docs/configuration.md`, `docs/external-api.md`, and `docs/protocol.md` document the current behavior.
+- `src/WinManager.Core/WorkspaceSet.cs` stores workspace identity, window membership, and split trees separately from a monitor-to-workspace view map. A workspace can remain on the desk without a view. `WorkspaceInfo.MonitorId` and `Active` are compatibility projections; unviewed workspaces use `Guid.Empty` and `false`.
+- `WorkspaceSet.Reconcile` retains workspaces and memberships when a monitor disconnects. `WorkspaceDefinition.MonitorDeviceName` acts only as an initial placement hint. New windows join the workspace shown by their observed monitor, or the primary view when no matching view exists.
+- `WorkspaceSet.Activate` supports a target monitor. `ManagerEngine` accepts optional `monitorId` for `ActivateWorkspace`; otherwise it uses the focused window's observed connected monitor, then a stable primary monitor. Native-action failures restore the prior view map and remove any fallback workspace created by the failed transfer.
+- `src/WinManager.Contracts/Commands.cs` exposes `WorkspaceViewInfo` through `ManagerSnapshot.WorkspaceViews`. The optional field is additive to the version 1 snapshot. `MoveToMonitor` still moves a window to the workspace currently shown by a monitor; it is distinct from view transfer.
+- `src/WinManager.Host/ManagerConfiguration.cs` validates the optional activation monitor target. The CLI and SDK serialize the existing `ManagerCommand` contract. Configuration, API, and protocol references describe the current view-transfer behavior.
 
 These details are the baseline for migration. The `MonitorId` on `WindowInfo` is observed native placement, not a future desk relationship.
 
-## Decisions to make before implementation
+## Policies implemented in the first system pass
 
-1. **Source monitor fallback:** choose the destination's displaced workspace, another unviewed workspace, a configured default, or a new empty workspace.
-2. **Destination displacement:** keep the displaced workspace on the desk without a view, or swap it to the source monitor. The target spec does not require an automatic swap.
-3. **Request target:** define how a command names the monitor view. Prefer an explicit monitor ID in client requests, with a documented default for shortcuts and older clients.
-4. **No-monitor state:** define behavior when the system has no connected monitors. Workspace data and positions must remain valid.
-5. **Spatial rules:** choose coordinate units, bounds validation, overlap policy, and defaults for new workspaces. Coordinates must remain independent of monitor pixels, DPI, and client zoom.
-6. **Persistence and compatibility:** choose a config/state schema migration, defaults for old files, and a protocol version policy for changed snapshots and commands.
+- **Source monitor fallback:** use another workspace that was already unviewed, in stable workspace order. Exclude the destination's displaced workspace. Create a uniquely named empty workspace if no other unviewed workspace exists.
+- **Destination displacement:** keep the displaced workspace on the desk without a view; do not swap views.
+- **Request target:** use explicit `monitorId` when supplied. Otherwise use the focused window's observed connected monitor, then the stable primary monitor.
+- **No-monitor state:** retain desk workspaces and membership with no views. Activation returns `not_ready` until a monitor is connected.
+
+## Decisions that remain
+
+- **Spatial rules:** choose coordinate units, bounds validation, overlap policy, and defaults for new workspaces. Coordinates must remain independent of monitor pixels, DPI, and client zoom.
+- **Layout rules:** define columns, rows, and Fibonacci tile calculations, including reflow behavior and layout constraints.
+- **Persistence and compatibility:** define persisted desk state, view restoration across manager restarts, migration from current configuration, and any future protocol changes.
 
 ## Phased migration
 
 ### 1. Add desk state and invariants
 
-Replace monitor ownership in `WorkspaceSet` with desk state. Keep stable workspace IDs and window membership. Add workspace bounds and a per-workspace layout rule. Add a `WorkspaceView` assignment for each connected monitor.
+The first slice is implemented: `WorkspaceSet` keeps stable workspace IDs, window membership, split trees, and monitor views as separate state. The remaining work is to add logical workspace positions and bounds and a per-workspace layout rule.
 
 Enforce these invariants in core state:
 
-- A window belongs to at most one workspace.
-- A workspace view appears on at most one monitor.
-- A workspace can exist without a view.
-- View transfer changes monitor-to-workspace assignments only. It does not change window membership or workspace bounds.
-- Observed Windows monitor placement remains separate from workspace membership and desk coordinates.
+- Implemented: a window belongs to at most one workspace.
+- Implemented: a workspace view appears on at most one monitor.
+- Implemented: a workspace can exist without a view.
+- Implemented: view transfer does not change window membership.
+- Implemented: observed Windows monitor placement remains separate from workspace membership.
+- Remaining: validate desk bounds and define overlap behavior independently of monitor pixels, DPI, and client zoom.
 
 ### 2. Change activation and reconciliation
 
-Refactor `WorkspaceSet.Activate` and `Reconcile` to transfer a view across monitors and apply the chosen source fallback policy. Keep window movement to another workspace distinct from view transfer. Review `MoveWindowToMonitor`. It moves a window to the active workspace on a monitor. Keep that command separate from view transfer.
+Implemented: `WorkspaceSet.Activate` and `Reconcile` transfer views and retain workspace data during hotplug. Window movement to another workspace remains distinct from view transfer. `MoveWindowToMonitor` still moves a window to the workspace shown by a monitor.
 
-Update `ManagerEngine` commands to resolve a target monitor view, apply the view transfer, and reconcile window visibility and layout. Preserve the current recovery behavior. If native operations fail, report the failures, restore prior logical view assignments where possible, and publish observed geometry rather than assumed placement.
+Implemented: `ManagerEngine` resolves explicit or default monitor targets, applies transfers, and reconciles window visibility and layout. If native operations fail, it reports failures, restores prior view assignments, removes a newly created fallback workspace, and publishes observed geometry.
 
-Update display hotplug and zero-monitor paths. A missing monitor must not delete workspaces or their desk positions. Reconnect must not silently restore monitor ownership unless the selected policy requires it.
+Implemented: disconnected monitors release their views without deleting workspace identity or membership. With zero monitors the desk retains its workspaces and has no views. A reconnect uses current placement rules, not persistent monitor ownership.
 
 ### 3. Add workspace layout rules
 
@@ -55,9 +60,9 @@ Keep the core layout input independent of a visual client's zoom and desk coordi
 
 ### 4. Evolve contracts, configuration, and persistence
 
-Update `src/WinManager.Contracts/Commands.cs` and snapshot records to expose desk state, workspace bounds and rules, monitor view assignments, and view-transfer targets. Add separate commands for view activation and workspace movement when one command mixes those operations.
+Implemented: `src/WinManager.Contracts/Commands.cs` exposes `WorkspaceViews` and an optional monitor target on `ActivateWorkspace`; `MoveToMonitor` remains a separate window-membership operation. Workspace bounds and layout rules remain future contract fields.
 
-Update `src/WinManager.Host/ManagerConfiguration.cs` and the persisted state format for workspace positions and layout rules. Define how current `monitorDeviceName` entries migrate. Do not silently reinterpret old workspace-to-monitor bindings as permanent ownership.
+Implemented: host validation accepts a nonempty optional activation target. Current `monitorDeviceName` values act as initial placement hints. Persisted workspace positions, layout rules, and transferred view assignments remain future work; the current manager does not save transfers across restarts.
 
 Version protocol changes deliberately. Update `docs/protocol.md` and `docs/external-api.md` only when the new contracts exist. Keep the current version 1 examples marked as current until then. Preserve the current IPC security model and atomic snapshot/event behavior.
 

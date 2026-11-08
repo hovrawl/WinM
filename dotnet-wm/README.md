@@ -5,9 +5,9 @@ GlazeWM checkout is a behavioral reference and is not modified or linked.
 
 ## Current implementation
 
-This section describes the current monitor-scoped implementation. It is not the
-target model. See [the one-desk goal](docs/project-goal.md) and its
-[migration plan](docs/desk-model-plan.md).
+The system now keeps workspaces on one desk and monitor views separate from
+workspace identity. See [the one-desk goal](docs/project-goal.md) and its
+[migration plan](docs/desk-model-plan.md) for implemented behavior and remaining work.
 
 - Native desktop discovery, stable window identities, serialized commands,
   horizontal/vertical split layouts, DPI-scaled gaps, directional focus/movement,
@@ -19,8 +19,9 @@ target model. See [the one-desk goal](docs/project-goal.md) and its
 - Live tiled-window resizing: neighboring tiles reflow as split boundaries move,
   and the new proportions persist on release. Default columns share width equally;
   all eligible windows tile, even when their minimum-size hints exceed available space.
-- Named per-monitor workspaces, monitor transfers/removal handling, safe
-  workspace visibility, and an acknowledged crash-recovery helper.
+- Desk-owned workspaces with exclusive, transferable monitor views, deterministic
+  source fallback, monitor hotplug handling, safe visibility, and an acknowledged
+  crash-recovery helper. `WorkspaceViews` exposes current monitor assignments.
 - Same-user/session named-pipe queries, commands, atomic snapshot/event
   subscriptions, bounded clients, a .NET SDK, and a headless CLI.
 - Validated JSON configuration, optional registered shortcuts, pause/redraw/exit,
@@ -30,6 +31,8 @@ target model. See [the one-desk goal](docs/project-goal.md) and its
 native message thread. `Host` composes them through dependency injection as a
 normal-privilege `WinExe`; `Client` depends only on public contracts.
 No tray, widget, service, browser bridge, or arbitrary shell execution is included.
+Logical desk positions, columns/rows/Fibonacci workspace rules, persistent view
+assignments, and a visual client are not implemented in this pass.
 
 ## Existing feature progress
 
@@ -67,7 +70,7 @@ dotnet publish src\WinManager.Cli\WinManager.Cli.csproj -c Release -r win-x64 --
 & '.\publish\cli\WinManager.Cli.exe' 'watch' '--reconnect'
 & '.\publish\cli\WinManager.Cli.exe' 'status'
 '{"kind":"pause","paused":true}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
-'{"kind":"activateWorkspace","workspaceName":"2"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
+'{"kind":"activateWorkspace","workspaceName":"2","monitorId":"<monitor-guid>"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
 '{"kind":"exit"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
 ```
 

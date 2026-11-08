@@ -53,7 +53,7 @@ public sealed class WorkspaceManagerTests
 
             var destination = engine.Current!.Workspaces!.Single(w => w.Name == "2");
             Assert.True((await engine.ExecuteAsync(new(CommandKind.MoveToWorkspace, windows[3].Id, WorkspaceId: destination.Id), timeout.Token)).Success);
-            Assert.Equal(windows[3].Id, Assert.Single(engine.Current!.Workspaces!.Single(w => w.Id == destination.Id).WindowIds));
+            Assert.Equal(2, engine.Current!.Workspaces!.Single(w => w.Id == destination.Id).WindowIds.Count);
             Assert.True((await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceId: destination.Id), timeout.Token)).Success);
             Assert.True(engine.Current!.Workspaces!.Single(w => w.Id == destination.Id).Active);
             Assert.True(engine.Current.Desktop.Windows.Single(w => w.Id == windows[3].Id).Visible);
@@ -115,7 +115,7 @@ public sealed class WorkspaceManagerTests
         var original = engine.Current!.Workspaces!.ToDictionary(w => w.Name);
         Assert.Equal(primary.Id, original["1"].MonitorId);
         Assert.Equal(mainWindow.Id, Assert.Single(original["1"].WindowIds));
-        Assert.Equal(otherWindow.Id, Assert.Single(original["Secondary"].WindowIds));
+        Assert.Equal(otherWindow.Id, Assert.Single(original["2"].WindowIds));
         AssertTiled();
 
         fake.Desktop = fake.Desktop with { Monitors = [secondary] };
@@ -202,5 +202,114 @@ public sealed class WorkspaceManagerTests
         Assert.All(fake.Desktop.Windows, window => Assert.True(window.Visible));
         await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
         await run;
+    }
+
+    [Fact]
+    public async Task ActivateWorkspaceTransfersItsViewToRequestedMonitorAndUsesFocusedMonitorByDefault()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var primary = new MonitorInfo(Guid.NewGuid(), "Primary", new(0, 0, 1000, 900), new(0, 0, 1000, 850), 96);
+        var secondary = new MonitorInfo(Guid.NewGuid(), "Secondary", new(1000, 0, 1000, 900), new(1000, 0, 1000, 850), 96);
+        var window = fake.Desktop.Windows[0] with { MonitorId = primary.Id, Bounds = new(50, 50, 300, 300) };
+        fake.Desktop = new([primary, secondary], [window], window.Id);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One"), new("Two"), new("Three")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var one = engine.Current!.Workspaces!.Single(workspace => workspace.Name == "One");
+            var two = engine.Current.Workspaces!.Single(workspace => workspace.Name == "Two");
+            var three = engine.Current.Workspaces!.Single(workspace => workspace.Name == "Three");
+            var membership = engine.Current.Workspaces!.ToDictionary(workspace => workspace.Id,
+                workspace => workspace.WindowIds.ToArray());
+            var originalViews = engine.Current.WorkspaceViews!.ToArray();
+
+            var invalidTarget = await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace,
+                WorkspaceId: one.Id, MonitorId: Guid.NewGuid()), timeout.Token);
+
+            Assert.False(invalidTarget.Success);
+            Assert.Equal("not_found", invalidTarget.ErrorCode);
+            Assert.Equal(originalViews, engine.Current.WorkspaceViews!);
+
+            var transfer = await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace,
+                WorkspaceId: one.Id, MonitorId: secondary.Id), timeout.Token);
+
+            Assert.True(transfer.Success);
+            Assert.Equal(one.Id, engine.Current!.WorkspaceViews!.Single(view => view.MonitorId == secondary.Id).WorkspaceId);
+            Assert.Equal(three.Id, engine.Current.WorkspaceViews!.Single(view => view.MonitorId == primary.Id).WorkspaceId);
+            Assert.DoesNotContain(engine.Current.WorkspaceViews!, view => view.WorkspaceId == two.Id);
+            Assert.All(engine.Current.Workspaces!, workspace => Assert.Equal(membership[workspace.Id], workspace.WindowIds));
+            Assert.True(engine.Current.Desktop.Windows.Single(candidate => candidate.Id == window.Id).Visible);
+            Assert.InRange(engine.Current.Desktop.Windows.Single(candidate => candidate.Id == window.Id).Bounds.X,
+                secondary.WorkArea.X, secondary.WorkArea.X + secondary.WorkArea.Width);
+
+            var focusedDefault = await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceId: two.Id), timeout.Token);
+
+            Assert.True(focusedDefault.Success);
+            Assert.Equal(two.Id, engine.Current!.WorkspaceViews!.Single(view => view.MonitorId == primary.Id).WorkspaceId);
+            Assert.Equal(one.Id, engine.Current.Workspaces!.Single(workspace => workspace.Name == "One").Id);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task FailedCrossMonitorTransferRestoresViewsAndRemovesCreatedFallback()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var primary = new MonitorInfo(Guid.NewGuid(), "Primary", new(0, 0, 1000, 900), new(0, 0, 1000, 850), 96);
+        var secondary = new MonitorInfo(Guid.NewGuid(), "Secondary", new(1000, 0, 1000, 900), new(1000, 0, 1000, 850), 96);
+        var window = fake.Desktop.Windows[0] with { MonitorId = primary.Id };
+        fake.Desktop = new([primary, secondary], [window], window.Id);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One"), new("Two")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var before = engine.Current!;
+            var source = before.Workspaces!.Single(workspace => workspace.Name == "One");
+            var ids = before.Workspaces!.Select(workspace => workspace.Id).ToHashSet();
+            fake.FailActions = true;
+
+            var result = await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace,
+                WorkspaceId: source.Id, MonitorId: secondary.Id), timeout.Token);
+
+            Assert.False(result.Success);
+            Assert.Equal(before.WorkspaceViews, engine.Current!.WorkspaceViews);
+            Assert.Equal(ids, engine.Current.Workspaces!.Select(workspace => workspace.Id).ToHashSet());
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task WorkspaceActivationWithoutConnectedMonitorsReturnsNotReady()
+    {
+        await using var fake = new FakeWindowPlatform { Desktop = new([], [], null) };
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var workspace = engine.Current!.Workspaces!.Single();
+            var result = await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceId: workspace.Id), timeout.Token);
+            Assert.False(result.Success);
+            Assert.Equal("not_ready", result.ErrorCode);
+            Assert.Empty(engine.Current.WorkspaceViews!);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
     }
 }

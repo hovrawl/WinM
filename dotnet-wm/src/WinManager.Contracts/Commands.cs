@@ -15,8 +15,10 @@ public sealed record SplitNodeInfo(Guid Id, Guid? WindowId, SplitOrientation? Or
     double Ratio, SplitNodeInfo? First, SplitNodeInfo? Second);
 public sealed record ManagerSnapshot(Guid InstanceId, long StateRevision, DesktopSnapshot Desktop,
     IReadOnlyDictionary<Guid, SplitNodeInfo?> Trees, bool Paused,
-    IReadOnlyList<WorkspaceInfo>? Workspaces = null, ContainerSelection? Selection = null);
+    IReadOnlyList<WorkspaceInfo>? Workspaces = null, ContainerSelection? Selection = null,
+    IReadOnlyList<WorkspaceViewInfo>? WorkspaceViews = null);
 public sealed record ContainerSelection(Guid WorkspaceId, Guid NodeId);
 
 public sealed record WorkspaceDefinition(string Name, string? MonitorDeviceName = null);
 public sealed record WorkspaceInfo(Guid Id, string Name, Guid MonitorId, bool Active, IReadOnlyList<Guid> WindowIds);
+public sealed record WorkspaceViewInfo(Guid MonitorId, Guid WorkspaceId);

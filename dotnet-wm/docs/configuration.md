@@ -6,11 +6,19 @@ Default configuration is created at `%LOCALAPPDATA%\WinManager\config.json`.
 Use `--config ABSOLUTE_PATH` for an existing alternate JSON file. Changes take
 effect on restart; live reload and YAML import are deferred.
 
-This guide describes the current monitor-scoped configuration. `monitorDeviceName`
-currently binds a workspace to a display. The target desk model removes monitor
-ownership from workspaces. See [the project goal](project-goal.md) and
-[the migration plan](desk-model-plan.md). The future configuration format is not
-implemented.
+`monitorDeviceName` is an initial placement hint, not workspace ownership. A
+matching connected display receives that workspace during reconciliation. Other
+unbound workspaces fill remaining monitor views in configuration order; a monitor
+with no available workspace gets a uniquely named empty workspace. A hint for a
+missing display remains available until that display appears, but a completed
+view transfer is not undone by a later reconcile.
+
+Each connected monitor shows one workspace. A workspace can have no view. The
+current view map is exposed in `ManagerSnapshot.WorkspaceViews`; the older
+`WorkspaceInfo.MonitorId` and `Active` fields are projections, with `Guid.Empty`
+and `false` for an unviewed workspace. View assignments are not saved across
+manager restarts. See [the project goal](project-goal.md) and
+[the migration plan](desk-model-plan.md) for the remaining spatial and persistence work.
 
 Example (shortcuts are disabled in the generated defaults):
 
@@ -37,15 +45,20 @@ Example (shortcuts are disabled in the generated defaults):
 ```
 
 - Names are unique, case-insensitive, nonblank strings (maximum 64 characters).
-  An optional `monitorDeviceName` on a workspace uses the device name from a
-  snapshot, for example `\\.\DISPLAY1`. Workspaces without an explicit binding
-  initially use the Windows primary display (at desktop origin `0,0`), not random
-  monitor IDs. Each other display gets an active workspace named after its device,
-  so `status` showing `1` on one monitor and `\\.\DISPLAY3` on another is normal;
-  both active workspaces are tiled independently.
-  Missing displays are handled through reconciliation; detached monitor bindings
-  migrate to surviving displays and return to their original device when it
-  reconnects, retaining workspace identity, window assignments, and split trees.
+  An optional `monitorDeviceName` uses the device name from a snapshot, for example
+  `\\.\DISPLAY1`, as an initial placement hint. Unbound entries fill currently
+  unassigned monitor views in configuration order. When there are more monitors
+  than available configured workspaces, the manager creates a uniquely named
+  workspace for each remaining view. An unviewed workspace retains its identity,
+  window assignments, and split tree when a monitor is removed.
+- `activateWorkspace` accepts an optional `monitorId`. Without it, the manager
+  targets the focused window's observed connected monitor, then the primary
+  monitor in stable device-name/GUID order. If no monitor is connected, activation
+  returns `not_ready`. The destination's previous workspace remains unviewed; a
+  workspace transferred from another monitor leaves its source monitor on another
+  unviewed workspace or on a new empty workspace. This operation changes a view,
+  not workspace membership. `moveToMonitor` remains a separate window-membership
+  command.
 - Gaps are DIPs in `[0,256]`, converted per-monitor to physical pixels.
 - Process/class ignores are case-insensitive exact names, not regex rules.
   Fullscreen, popup (`WS_POPUP`), tool (`WS_EX_TOOLWINDOW`), owned, and no-activate

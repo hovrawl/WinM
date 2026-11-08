@@ -78,6 +78,8 @@ public sealed record ManagerConfiguration
             _ => true
         };
         if (!valid || command.WorkspaceId is not null && command.WorkspaceName is not null ||
+            command.Kind == CommandKind.ActivateWorkspace && command.MonitorId == Guid.Empty ||
+            command.MonitorId is not null && command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToMonitor) ||
             command.Kind != CommandKind.SelectContainer && (command.NodeId is not null || command.Navigation is not null) ||
             command.Kind != CommandKind.FocusCycle && command.CycleDirection is not null)
             throw new InvalidDataException("Shortcut command arguments are invalid.");

@@ -1,8 +1,10 @@
 ### Local IPC, version 1
 
-This section documents the current version 1 protocol. It does not define the
-planned desk model or workspace-view transfer contracts. See
-[the project goal](project-goal.md) and [the migration plan](desk-model-plan.md).
+This section documents the current version 1 protocol, including the first
+workspace-view transfer contracts. Logical desk positions, workspace bounds,
+workspace-level layout rules, persistent view assignments, and visualization
+remain planned. See [the project goal](project-goal.md) and
+[the migration plan](desk-model-plan.md).
 
 The Windows host exposes a duplex byte-mode named pipe. The default name is
 `WinManager.v1.<first 24 hex digits of SHA-256(user SID)>.<session ID>` as returned
@@ -50,6 +52,13 @@ commands accept exactly one workspace GUID or case-insensitive configured name;
 named targets are resolved atomically in the manager. Command-specific argument and
 target validation is performed by the manager actor. For example, `pause`
 requires `paused`, and `resize` requires `direction` and a fraction in `(0, 0.8]`.
+`activateWorkspace` uses optional `monitorId` to name the target monitor. Without
+it, the manager selects the focused window's observed connected monitor, then the
+primary monitor in stable device-name/GUID order. If no monitor is connected, it
+returns `not_ready`. Selecting a workspace visible on another monitor transfers
+its exclusive view; the destination's prior workspace remains unviewed. If a
+source monitor needs a fallback, the manager uses another pre-existing unviewed
+workspace or creates an empty one, without using the displaced destination view.
 `toggleMode` needs no arguments; an optional `windowId` selects the target,
 otherwise it uses the focused observable window. `setMode: tiling` and toggling
 into tiling override fullscreen/popup/tool/owned/no-activate defaults for that
@@ -63,8 +72,12 @@ or `root`. Node targeting and navigation are mutually exclusive. Selection is
 logical, not native focus; snapshots expose nullable `selection` containing
 `workspaceId` and `nodeId`. `clearSelection` clears it. `setSplit` uses a selected
 branch when no explicit `windowId` is supplied. See the [command reference](external-api.md#container-selection).
-These are additive version 1 extensions; older hosts reject the new commands
-and fields, so deploy matching contracts/clients and host for these features.
+`ManagerSnapshot.WorkspaceViews` is an optional additive version 1 field containing
+`monitorId`/`workspaceId` pairs. Use it as the authoritative monitor view map.
+`WorkspaceInfo.MonitorId` and `Active` remain compatibility projections; an
+unviewed workspace has `Guid.Empty` and `false`. Older hosts may omit
+`WorkspaceViews`; the named-pipe framing and protocol version do not change.
+Other newer commands and fields may still require a matching host version.
 
 `focusCycle` accepts `cycleDirection: next|previous` (default `next`), optional
 `mode: tiling|floating`, and optional active-workspace name/ID scope. It cycles

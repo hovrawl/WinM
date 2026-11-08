@@ -18,16 +18,19 @@ public sealed class WorkspaceTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void UnboundConfiguredWorkspacesStartOnPrimaryMonitorRegardlessOfGuidOrder(bool reverse)
+    public void UnboundConfiguredWorkspacesFillAvailableMonitorViewsInStableOrder(bool reverse)
     {
         var primary = Monitor(SecondMonitor, "Primary") with { Bounds = new(0, 0, 1920, 1080), WorkArea = new(0, 0, 1920, 1040) };
         var secondary = Monitor(FirstMonitor, "Secondary");
         var set = new WorkspaceSet([new("1"), new("2"), new("3")]);
         set.Reconcile(Desktop([], reverse ? [primary, secondary] : [secondary, primary]));
 
-        Assert.All(set.Snapshot.Where(w => w.Name is "1" or "2" or "3"), w => Assert.Equal(primary.Id, w.MonitorId));
+        Assert.Equal(primary.Id, set.Snapshot.Single(workspace => workspace.Name == "1").MonitorId);
+        Assert.Equal(secondary.Id, set.Snapshot.Single(workspace => workspace.Name == "2").MonitorId);
+        Assert.Equal(Guid.Empty, set.Snapshot.Single(workspace => workspace.Name == "3").MonitorId);
         Assert.True(set.Snapshot.Single(w => w.Name == "1").Active);
-        Assert.True(set.Snapshot.Single(w => w.Name == "Secondary").Active);
+        Assert.True(set.Snapshot.Single(w => w.Name == "2").Active);
+        Assert.False(set.Snapshot.Single(w => w.Name == "3").Active);
     }
 
     [Theory]
@@ -87,14 +90,17 @@ public sealed class WorkspaceTests
         Assert.Throws<ArgumentException>(() => new WorkspaceSet([new("Work"), new("work")]));
 
     [Fact]
-    public void ConfiguredDeviceNamesResolveAndEveryMonitorHasOneActiveWorkspace()
+    public void ConfiguredDeviceNamesAreInitialPlacementHintsAndUnviewedWorkspacesRemainOnTheDesk()
     {
         var set = new WorkspaceSet([new("Code", "left"), new("Chat", "Left"), new("Media", "Right")]);
         set.Reconcile(Desktop([], Monitor(FirstMonitor, "Left"), Monitor(SecondMonitor, "Right")));
         Assert.Equal(FirstMonitor, set.Snapshot.Single(w => w.Name == "Code").MonitorId);
         Assert.Equal(SecondMonitor, set.Snapshot.Single(w => w.Name == "Media").MonitorId);
-        Assert.All(set.Snapshot.GroupBy(w => w.MonitorId), g => Assert.Single(g, w => w.Active));
+        Assert.Equal(2, set.Views.Count);
+        Assert.Equal(2, set.Views.Select(view => view.WorkspaceId).Distinct().Count());
         var chat = set.Snapshot.Single(w => w.Name == "Chat");
+        Assert.Equal(Guid.Empty, chat.MonitorId);
+        Assert.False(chat.Active);
         Assert.True(set.Activate(chat.Id));
         Assert.False(set.Activate(chat.Id));
         Assert.True(set.Snapshot.Single(w => w.Name == "Media").Active);
@@ -165,7 +171,7 @@ public sealed class WorkspaceTests
     }
 
     [Fact]
-    public void MonitorRemovalMigratesWorkspacesWithoutLosingIdentityOrAssignments()
+    public void MonitorRemovalReleasesViewWithoutLosingWorkspaceIdentityOrAssignments()
     {
         var window = Window(monitor: SecondMonitor);
         var set = new WorkspaceSet();
@@ -175,7 +181,9 @@ public sealed class WorkspaceTests
         var root = tree.Snapshot;
         set.Reconcile(Desktop([window], Monitor(FirstMonitor)));
         Assert.Equal(id, set.WorkspaceFor(window.Id));
-        Assert.All(set.Snapshot, w => Assert.Equal(FirstMonitor, w.MonitorId));
+        Assert.Equal(Guid.Empty, set.Snapshot.Single(workspace => workspace.Id == id).MonitorId);
+        Assert.False(set.Snapshot.Single(workspace => workspace.Id == id).Active);
+        Assert.Equal(FirstMonitor, Assert.Single(set.Views).MonitorId);
         Assert.Single(set.Snapshot, w => w.Active);
         Assert.Same(tree, set.Trees[id]);
         Assert.Equal(root, tree.Snapshot);
@@ -199,16 +207,20 @@ public sealed class WorkspaceTests
     }
 
     [Fact]
-    public void MissingConfiguredMonitorResolvesWhenItAppears()
+    public void MissingConfiguredMonitorHintIsUsedWhenTheDisplayAppears()
     {
         var window = Window();
         var set = new WorkspaceSet([new("RightWork", "Right")]);
         set.Reconcile(Desktop([window], Monitor(FirstMonitor, "Left")));
         var id = set.WorkspaceFor(window.Id);
+        var rightWork = set.Snapshot.Single(workspace => workspace.Name == "RightWork");
+        Assert.NotEqual(id, rightWork.Id);
+        Assert.Equal(FirstMonitor, set.Snapshot.Single(workspace => workspace.Id == id).MonitorId);
         set.Reconcile(Desktop([window], Monitor(FirstMonitor, "Left"), Monitor(SecondMonitor, "Right")));
         Assert.Equal(id, set.WorkspaceFor(window.Id));
-        Assert.Equal(SecondMonitor, set.Snapshot.Single(w => w.Id == id).MonitorId);
-        Assert.All(set.Snapshot.GroupBy(w => w.MonitorId), g => Assert.Single(g, w => w.Active));
+        Assert.Equal(FirstMonitor, set.Snapshot.Single(workspace => workspace.Id == id).MonitorId);
+        Assert.Equal(SecondMonitor, set.Snapshot.Single(workspace => workspace.Name == "RightWork").MonitorId);
+        Assert.Equal(2, set.Views.Count);
     }
 
     [Fact]
@@ -327,5 +339,49 @@ public sealed class WorkspaceTests
         Assert.True(snapshot[0].Active);
         Assert.Equal(window.Id, snapshot[0].WindowIds.Single());
         Assert.Empty(snapshot[1].WindowIds);
+    }
+
+    [Fact]
+    public void TransferMovesExclusiveViewAndUsesAnExistingUnviewedWorkspaceAsSourceFallback()
+    {
+        var first = Window(monitor: FirstMonitor);
+        var second = Window(monitor: FirstMonitor);
+        var set = new WorkspaceSet([new("One"), new("Two"), new("Three")]);
+        set.Reconcile(Desktop([first, second], Monitor(FirstMonitor, "Primary"), Monitor(SecondMonitor, "Secondary")));
+        var one = set.Snapshot.Single(workspace => workspace.Name == "One");
+        var two = set.Snapshot.Single(workspace => workspace.Name == "Two");
+        var three = set.Snapshot.Single(workspace => workspace.Name == "Three");
+        var tree = set.Trees[one.Id];
+        var membership = set.Snapshot.ToDictionary(workspace => workspace.Id, workspace => workspace.WindowIds.ToArray());
+
+        Assert.True(set.Activate(one.Id, SecondMonitor));
+
+        Assert.Equal(one.Id, set.Views.Single(view => view.MonitorId == SecondMonitor).WorkspaceId);
+        Assert.Equal(three.Id, set.Views.Single(view => view.MonitorId == FirstMonitor).WorkspaceId);
+        Assert.DoesNotContain(set.Views, view => view.WorkspaceId == two.Id);
+        Assert.Equal(Guid.Empty, set.Snapshot.Single(workspace => workspace.Id == two.Id).MonitorId);
+        Assert.False(set.Snapshot.Single(workspace => workspace.Id == two.Id).Active);
+        Assert.All(set.Snapshot, workspace => Assert.Equal(membership[workspace.Id], workspace.WindowIds));
+        Assert.Same(tree, set.Trees[one.Id]);
+        Assert.False(set.Activate(one.Id, SecondMonitor));
+    }
+
+    [Fact]
+    public void TransferCreatesAnEmptySourceFallbackWhenNoUnviewedWorkspaceExists()
+    {
+        var set = new WorkspaceSet([new("One"), new("Two")]);
+        set.Reconcile(Desktop([], Monitor(FirstMonitor, "Primary"), Monitor(SecondMonitor, "Secondary")));
+        var one = set.Snapshot.Single(workspace => workspace.Name == "One");
+        var two = set.Snapshot.Single(workspace => workspace.Name == "Two");
+
+        Assert.True(set.Activate(one.Id, SecondMonitor));
+
+        var fallback = set.Views.Single(view => view.MonitorId == FirstMonitor).WorkspaceId;
+        Assert.NotEqual(one.Id, fallback);
+        Assert.NotEqual(two.Id, fallback);
+        Assert.DoesNotContain(set.Views, view => view.WorkspaceId == two.Id);
+        Assert.Empty(set.Snapshot.Single(workspace => workspace.Id == fallback).WindowIds);
+        Assert.Equal(one.Id, set.Views.Single(view => view.MonitorId == SecondMonitor).WorkspaceId);
+        Assert.Equal(2, set.Views.Select(view => view.WorkspaceId).Distinct().Count());
     }
 }

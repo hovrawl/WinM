@@ -426,18 +426,20 @@ internal sealed class PipeHost : IAsyncDisposable
     public Task ServerRun { get; }
     public CancellationToken Token => timeout.Token;
 
-    private PipeHost(string? name, int maximumClients, int outputCapacity, int titleLength, bool popup)
+    private PipeHost(string? name, int maximumClients, int outputCapacity, int titleLength, bool popup,
+        IEnumerable<WorkspaceDefinition>? workspaceDefinitions)
     {
         Name = name ?? "WinManager.test." + Guid.NewGuid().ToString("N");
         platform = new TestWindowPlatform(titleLength, popup);
-        Engine = new(platform);
+        Engine = new(platform, workspaceDefinitions: workspaceDefinitions);
         EngineRun = Engine.RunAsync(Token);
         Server = new(Engine, Name, maximumClients, outputCapacity);
         ServerRun = Server.RunAsync(Token);
     }
-    internal static async Task<PipeHost> StartAsync(string? name = null, int maximumClients = 16, int outputCapacity = 128, int titleLength = 8, bool popup = false)
+    internal static async Task<PipeHost> StartAsync(string? name = null, int maximumClients = 16, int outputCapacity = 128,
+        int titleLength = 8, bool popup = false, IEnumerable<WorkspaceDefinition>? workspaceDefinitions = null)
     {
-        var host = new PipeHost(name, maximumClients, outputCapacity, titleLength, popup);
+        var host = new PipeHost(name, maximumClients, outputCapacity, titleLength, popup, workspaceDefinitions);
         Assert.True((await host.Engine.ExecuteAsync(new(CommandKind.Redraw), host.Token)).Success);
         return host;
     }

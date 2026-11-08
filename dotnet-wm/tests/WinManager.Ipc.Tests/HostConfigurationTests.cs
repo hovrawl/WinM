@@ -113,6 +113,23 @@ public sealed class HostConfigurationTests
     }
 
     [Fact]
+    public void ActivationShortcutAcceptsOnlyAValidOptionalMonitorTarget()
+    {
+        (new ManagerConfiguration
+        {
+            Shortcuts = [new(2, 65, new(CommandKind.ActivateWorkspace,
+                WorkspaceName: "2", MonitorId: Guid.NewGuid()))]
+        }).Validate();
+        var invalid = new ManagerCommand[]
+        {
+            new(CommandKind.ActivateWorkspace, WorkspaceName: "2", MonitorId: Guid.Empty),
+            new(CommandKind.Pause, Paused: true, MonitorId: Guid.NewGuid())
+        };
+        foreach (var command in invalid)
+            Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration { Shortcuts = [new(2, 65, command)] }).Validate());
+    }
+
+    [Fact]
     public async Task SingleInstanceLeaseSurvivesCrossThreadDisposalAndCanBeReacquired()
     {
         var name = "Local\\WinManager.LeaseTest." + Guid.NewGuid().ToString("N");

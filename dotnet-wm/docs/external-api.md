@@ -4,9 +4,16 @@ WinManager exposes its running manager through a local Windows named pipe.
 Third-party applications can use the CLI, the .NET client SDK, or implement
 the version 1 pipe protocol directly. There is no HTTP endpoint or browser bridge.
 
-This reference describes the current API. It does not provide desk state or
-transferable workspace-view commands. Those contracts are planned, not available.
-See [the project goal](project-goal.md) and [the migration plan](desk-model-plan.md).
+The current API exposes workspace membership and transferable monitor views.
+`ManagerSnapshot.WorkspaceViews` contains monitor/workspace pairs; older workspace
+`MonitorId` and `Active` values are compatibility projections. An unviewed workspace
+uses `Guid.Empty` and `false`. Older hosts may omit `WorkspaceViews`, so clients
+should treat that optional field as unavailable when it is null.
+
+View activation is implemented, but logical desk positions, workspace bounds,
+workspace-level columns/rows/Fibonacci rules, persistence of view assignments, and
+the visual desk client are not. See [the project goal](project-goal.md) and
+[the migration plan](desk-model-plan.md).
 
 ## Choose an integration
 
@@ -78,9 +85,9 @@ replace `<window-guid>`, `<workspace-guid>`, and
 | `pause` | `paused` | Set pause explicitly to `true` or `false`; not a toggle. | `{"kind":"pause","paused":true}` |
 | `redraw` | None | Rescan and reconcile the desktop; applies layouts when not paused. | `{"kind":"redraw"}` |
 | `exit` | None | Request manager shutdown and restoration of manager-owned native changes. | `{"kind":"exit"}` |
-| `activateWorkspace` | Exactly one of `workspaceId`, `workspaceName` | Activate an existing workspace on its assigned monitor, hiding eligible windows in the previous workspace. | `{"kind":"activateWorkspace","workspaceName":"2"}` |
+| `activateWorkspace` | Exactly one of `workspaceId`, `workspaceName`; optional `monitorId` | Show the workspace on the target monitor. If it is visible elsewhere, transfer its view; the destination's prior workspace remains unviewed. Without `monitorId`, use the focused window's connected monitor, then the primary monitor. | `{"kind":"activateWorkspace","workspaceName":"2","monitorId":"<monitor-guid>"}` |
 | `moveToWorkspace` | Exactly one of `workspaceId`, `workspaceName` | Assign the target window to an existing workspace; does not activate the destination. | `{"kind":"moveToWorkspace","windowId":"<window-guid>","workspaceId":"<workspace-guid>"}` |
-| `moveToMonitor` | `monitorId` | Assign the target window to the destination monitor's active workspace. | `{"kind":"moveToMonitor","monitorId":"<monitor-guid>"}` |
+| `moveToMonitor` | `monitorId` | Assign the target window to the workspace currently shown by the destination monitor; this does not transfer a workspace view. | `{"kind":"moveToMonitor","monitorId":"<monitor-guid>"}` |
 
 Argument details:
 

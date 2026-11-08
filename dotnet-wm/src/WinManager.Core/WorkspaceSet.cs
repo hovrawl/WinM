@@ -5,20 +5,19 @@ namespace WinManager.Core;
 
 public sealed class WorkspaceSet
 {
-    private sealed class Workspace(string name, string? deviceName, Guid monitorId)
+    private sealed class Workspace(string name, string? initialDeviceName)
     {
         public Guid Id { get; } = Guid.NewGuid();
         public string Name { get; } = name;
-        public string? DeviceName { get; set; } = deviceName;
-        public Guid MonitorId { get; set; } = monitorId;
-        public bool Active { get; set; }
+        public string? InitialDeviceName { get; set; } = initialDeviceName;
     }
 
     private readonly List<Workspace> workspaces = [];
     private readonly Dictionary<Guid, SplitTree> trees = [];
     private readonly Dictionary<Guid, Guid> assignments = [];
+    private readonly Dictionary<Guid, Guid> views = [];
     private Dictionary<Guid, WindowInfo> windows = [];
-    private HashSet<Guid> monitors = [];
+    private Dictionary<Guid, MonitorInfo> monitors = [];
     private readonly IReadOnlyDictionary<Guid, SplitTree> treeView;
 
     public WorkspaceSet(IEnumerable<WorkspaceDefinition>? definitions = null)
@@ -31,67 +30,84 @@ public sealed class WorkspaceSet
         if (configured.Select(d => d.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != configured.Length)
             throw new ArgumentException("Workspace names must be unique.", nameof(definitions));
         foreach (var definition in configured)
-            Add(definition.Name, definition.MonitorDeviceName, Guid.Empty);
+            Add(definition.Name, definition.MonitorDeviceName);
     }
 
-    public IReadOnlyList<WorkspaceInfo> Snapshot => workspaces.Select(w => new WorkspaceInfo(
-        w.Id, w.Name, w.MonitorId, w.Active,
-        Array.AsReadOnly(assignments.Where(a => a.Value == w.Id).Select(a => a.Key).Order().ToArray())))
-        .ToList().AsReadOnly();
+    public IReadOnlyList<WorkspaceInfo> Snapshot => workspaces.Select(workspace =>
+    {
+        var monitorId = views.FirstOrDefault(view => view.Value == workspace.Id).Key;
+        return new WorkspaceInfo(workspace.Id, workspace.Name, monitorId, monitorId != Guid.Empty,
+            Array.AsReadOnly(assignments.Where(assignment => assignment.Value == workspace.Id)
+                .Select(assignment => assignment.Key).Order().ToArray()));
+    }).ToList().AsReadOnly();
+
+    public IReadOnlyList<WorkspaceViewInfo> Views => views.OrderBy(view => view.Key)
+        .Select(view => new WorkspaceViewInfo(view.Key, view.Value)).ToList().AsReadOnly();
 
     public IReadOnlyDictionary<Guid, SplitTree> Trees => treeView;
 
     public void Reconcile(DesktopSnapshot desktop)
     {
         ArgumentNullException.ThrowIfNull(desktop);
-        var ordered = desktop.Monitors.OrderBy(m => m.Id).ToArray();
-        monitors = ordered.Select(m => m.Id).ToHashSet();
+        var ordered = desktop.Monitors.OrderBy(monitor => monitor.Bounds.X == 0 && monitor.Bounds.Y == 0 ? 0 : 1)
+            .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase).ThenBy(monitor => monitor.Id).ToArray();
+        monitors = ordered.ToDictionary(monitor => monitor.Id);
         windows = desktop.Windows.ToDictionary(w => w.Id);
         foreach (var id in assignments.Keys.Where(id => !windows.ContainsKey(id)).ToArray())
             assignments.Remove(id);
 
-        if (ordered.Length > 0)
+        foreach (var monitorId in views.Keys.Where(id => !monitors.ContainsKey(id)).ToArray())
+            views.Remove(monitorId);
+        foreach (var monitor in ordered)
         {
-            // Windows places the primary display at the virtual desktop origin.
-            var initialMonitor = ordered.FirstOrDefault(m => m.Bounds.X == 0 && m.Bounds.Y == 0)
-                ?? ordered.OrderBy(m => m.DeviceName, StringComparer.OrdinalIgnoreCase).ThenBy(m => m.Id).First();
-            foreach (var workspace in workspaces)
-            {
-                var preferred = ordered.FirstOrDefault(m => workspace.DeviceName is not null &&
-                    string.Equals(m.DeviceName, workspace.DeviceName, StringComparison.OrdinalIgnoreCase));
-                if (preferred is not null) workspace.MonitorId = preferred.Id;
-                else if (workspace.MonitorId == Guid.Empty) workspace.MonitorId = initialMonitor.Id;
-                else if (!monitors.Contains(workspace.MonitorId)) workspace.MonitorId = ordered[0].Id;
-                workspace.DeviceName ??= ordered.First(m => m.Id == workspace.MonitorId).DeviceName;
-            }
-            foreach (var monitor in ordered)
-                if (!workspaces.Any(w => w.MonitorId == monitor.Id))
-                    Add(DefaultName(monitor.DeviceName), monitor.DeviceName, monitor.Id);
+            if (views.ContainsKey(monitor.Id)) continue;
+            var workspace = workspaces.FirstOrDefault(candidate => candidate.InitialDeviceName is not null &&
+                string.Equals(candidate.InitialDeviceName, monitor.DeviceName, StringComparison.OrdinalIgnoreCase) &&
+                !views.Values.Contains(candidate.Id))
+                ?? workspaces.FirstOrDefault(candidate => candidate.InitialDeviceName is null && !views.Values.Contains(candidate.Id))
+                ?? Add(DefaultName(monitor.DeviceName), null);
+            workspace.InitialDeviceName = null;
+            views.Add(monitor.Id, workspace.Id);
         }
 
-        NormalizeActive();
         foreach (var window in windows.Values.OrderBy(w => w.Id))
         {
             if (assignments.ContainsKey(window.Id)) continue;
-            var target = workspaces.FirstOrDefault(w => w.MonitorId == window.MonitorId && w.Active)
-                ?? workspaces.FirstOrDefault(w => w.MonitorId == window.MonitorId);
-            if (target is null && ordered.Length > 0)
-                target = workspaces.FirstOrDefault(w => w.MonitorId == ordered[0].Id && w.Active)
-                    ?? workspaces.First(w => w.MonitorId == ordered[0].Id);
+            var viewId = views.GetValueOrDefault(window.MonitorId, PrimaryWorkspaceId());
+            var target = workspaces.FirstOrDefault(workspace => workspace.Id == viewId);
             target ??= workspaces.FirstOrDefault();
-            target ??= Add(DefaultName("Default"), null, window.MonitorId);
+            target ??= Add(DefaultName("Default"), null);
             assignments.Add(window.Id, target.Id);
         }
-        NormalizeActive();
         ReconcileTrees();
     }
 
     public bool Activate(Guid workspaceId)
     {
-        var target = workspaces.FirstOrDefault(w => w.Id == workspaceId);
-        if (target is null || target.Active) return false;
-        foreach (var workspace in workspaces.Where(w => w.MonitorId == target.MonitorId))
-            workspace.Active = workspace == target;
+        var targetMonitor = views.FirstOrDefault(view => view.Value == workspaceId).Key;
+        if (targetMonitor == Guid.Empty) targetMonitor = PrimaryMonitorId();
+        return targetMonitor != Guid.Empty && Activate(workspaceId, targetMonitor);
+    }
+
+    public bool Activate(Guid workspaceId, Guid monitorId)
+    {
+        var target = workspaces.FirstOrDefault(workspace => workspace.Id == workspaceId);
+        if (target is null || !monitors.ContainsKey(monitorId) || !views.TryGetValue(monitorId, out var displacedId))
+            return false;
+        if (displacedId == workspaceId) return false;
+
+        var sourceMonitor = views.FirstOrDefault(view => view.Value == workspaceId).Key;
+        if (sourceMonitor != Guid.Empty && sourceMonitor != monitorId)
+        {
+            var fallback = workspaces.FirstOrDefault(workspace => !views.Values.Contains(workspace.Id) &&
+                workspace.Id != displacedId && workspace.Id != workspaceId)
+                ?? Add(DefaultName(monitors[sourceMonitor].DeviceName), null);
+            fallback.InitialDeviceName = null;
+            views[sourceMonitor] = fallback.Id;
+        }
+
+        target.InitialDeviceName = null;
+        views[monitorId] = target.Id;
         return true;
     }
 
@@ -106,17 +122,38 @@ public sealed class WorkspaceSet
 
     public bool MoveWindowToMonitor(Guid windowId, Guid monitorId)
     {
-        if (!monitors.Contains(monitorId)) return false;
-        var target = workspaces.FirstOrDefault(w => w.MonitorId == monitorId && w.Active);
-        return target is not null && MoveWindow(windowId, target.Id);
+        return views.TryGetValue(monitorId, out var workspaceId) && MoveWindow(windowId, workspaceId);
     }
+
+    internal State CaptureState() => new(views.ToDictionary(),
+        workspaces.ToDictionary(workspace => workspace.Id, workspace => workspace.InitialDeviceName),
+        workspaces.Select(workspace => workspace.Id).ToHashSet());
+
+    internal void RestoreState(State state)
+    {
+        views.Clear();
+        foreach (var (monitorId, workspaceId) in state.Views) views.Add(monitorId, workspaceId);
+        foreach (var workspace in workspaces.Where(workspace => !state.WorkspaceIds.Contains(workspace.Id)).ToArray())
+        {
+            workspaces.Remove(workspace);
+            trees.Remove(workspace.Id);
+            foreach (var windowId in assignments.Where(assignment => assignment.Value == workspace.Id)
+                .Select(assignment => assignment.Key).ToArray()) assignments.Remove(windowId);
+        }
+        foreach (var workspace in workspaces)
+            if (state.InitialDeviceNames.TryGetValue(workspace.Id, out var deviceName))
+                workspace.InitialDeviceName = deviceName;
+    }
+
+    internal sealed record State(Dictionary<Guid, Guid> Views,
+        Dictionary<Guid, string?> InitialDeviceNames, HashSet<Guid> WorkspaceIds);
 
     public Guid? WorkspaceFor(Guid windowId) => assignments.TryGetValue(windowId, out var id) ? id : null;
 
     public IReadOnlyList<WindowVisibility> Visibility(DesktopSnapshot desktop)
     {
         ArgumentNullException.ThrowIfNull(desktop);
-        var active = workspaces.Where(w => w.Active).Select(w => w.Id).ToHashSet();
+        var active = views.Values.ToHashSet();
         var result = new List<WindowVisibility>();
         foreach (var window in desktop.Windows.OrderBy(w => w.Id))
         {
@@ -136,9 +173,9 @@ public sealed class WorkspaceSet
         return result.AsReadOnly();
     }
 
-    private Workspace Add(string name, string? deviceName, Guid monitorId)
+    private Workspace Add(string name, string? deviceName)
     {
-        var workspace = new Workspace(name, deviceName, monitorId);
+        var workspace = new Workspace(name, deviceName);
         workspaces.Add(workspace);
         trees.Add(workspace.Id, new SplitTree());
         return workspace;
@@ -152,13 +189,17 @@ public sealed class WorkspaceSet
         return name;
     }
 
-    private void NormalizeActive()
+    private Guid PrimaryMonitorId()
     {
-        foreach (var group in workspaces.GroupBy(w => w.MonitorId))
-        {
-            var active = group.FirstOrDefault(w => w.Active) ?? group.First();
-            foreach (var workspace in group) workspace.Active = workspace == active;
-        }
+        var primary = monitors.Values.OrderBy(monitor => monitor.Bounds.X == 0 && monitor.Bounds.Y == 0 ? 0 : 1)
+            .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase).ThenBy(monitor => monitor.Id).FirstOrDefault();
+        return primary?.Id ?? Guid.Empty;
+    }
+
+    private Guid PrimaryWorkspaceId()
+    {
+        var monitorId = PrimaryMonitorId();
+        return monitorId != Guid.Empty ? views.GetValueOrDefault(monitorId) : Guid.Empty;
     }
 
     private void ReconcileTrees()

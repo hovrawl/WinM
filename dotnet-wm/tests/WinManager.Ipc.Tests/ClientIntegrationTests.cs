@@ -8,6 +8,26 @@ namespace WinManager.Ipc.Tests;
 public sealed class ClientIntegrationTests
 {
     [Fact]
+    public async Task SdkTransmitsWorkspaceViewTargetAndReadsDeskViewSnapshot()
+    {
+        await using var host = await PipeHost.StartAsync(workspaceDefinitions: [new("One"), new("Two")]);
+        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        var initial = await client.QuerySnapshotAsync(host.Token);
+        var monitorId = Assert.Single(initial.Desktop.Monitors).Id;
+        var target = initial.Workspaces!.Single(workspace => workspace.Name == "Two");
+        Assert.Single(initial.WorkspaceViews!);
+
+        var result = await client.ExecuteAsync(new(CommandKind.ActivateWorkspace,
+            WorkspaceId: target.Id, MonitorId: monitorId), host.Token);
+
+        Assert.True(result.Success);
+        var updated = await client.QuerySnapshotAsync(host.Token);
+        Assert.Equal(new WorkspaceViewInfo(monitorId, target.Id), Assert.Single(updated.WorkspaceViews!));
+        Assert.Equal(monitorId, updated.Workspaces!.Single(workspace => workspace.Id == target.Id).MonitorId);
+        Assert.Equal(Guid.Empty, updated.Workspaces!.Single(workspace => workspace.Name == "One").MonitorId);
+    }
+
+    [Fact]
     public async Task SdkCyclesFilteredFocusAndReceivesObservedFocusEvents()
     {
         await using var host = await PipeHost.StartAsync();
