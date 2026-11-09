@@ -25,6 +25,95 @@ public sealed class HostConfigurationTests
     }
 
     [Fact]
+    public void ConfigurationStoreSavesValidatedContentAndRejectsStaleOrInvalidEdits()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "ConfigurationStoreTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "config.json");
+            var initial = new ManagerConfiguration();
+            File.WriteAllText(path, ManagerConfiguration.Serialize(initial));
+            var store = new ConfigurationStore(path);
+            var document = store.Read();
+            Assert.True(document.IsValid);
+            Assert.Equal(Path.GetFullPath(path), document.Path);
+
+            var changedContent = ManagerConfiguration.Serialize(initial with { InnerGap = 19, OuterGap = 23 });
+            var saved = store.Save(document.Revision, changedContent);
+            Assert.True(saved.IsValid);
+            Assert.Equal(19, ManagerConfiguration.Load(path, createDefault: false).InnerGap);
+            Assert.Equal(23, ManagerConfiguration.Load(path, createDefault: false).OuterGap);
+
+            Assert.Throws<ConfigurationConflictException>(() => store.Save(document.Revision, changedContent));
+            var current = store.Read();
+            var beforeInvalidSave = File.ReadAllText(path);
+            Assert.Throws<InvalidDataException>(() => store.Save(current.Revision, "{\"workspaces\":[]}"));
+            Assert.Throws<JsonException>(() => store.Save(current.Revision, "{\"unknownSetting\":true}"));
+            Assert.Throws<InvalidDataException>(() =>
+                store.Save(current.Revision, "{\"innerGap\":8,\"INNERGAP\":9}"));
+            Assert.Equal(beforeInvalidSave, File.ReadAllText(path));
+
+            File.WriteAllText(path, ManagerConfiguration.Serialize(initial with { InnerGap = 21 }));
+            Assert.Throws<ConfigurationConflictException>(() => store.Save(current.Revision, changedContent));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ConfigurationStoreReturnsInvalidDiskTextForRepairAndCanReplaceIt()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "ConfigurationRepairTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "config.json");
+            const string invalid = "{ \"unknown\": true }";
+            File.WriteAllText(path, invalid);
+            var store = new ConfigurationStore(path);
+            var read = store.Read();
+            Assert.False(read.IsValid);
+            Assert.Equal(invalid, read.Content);
+            Assert.NotNull(read.ValidationError);
+
+            var repaired = store.Save(read.Revision, ManagerConfiguration.Serialize(new ManagerConfiguration()));
+            Assert.True(repaired.IsValid);
+            Assert.True(ManagerConfiguration.Load(path, createDefault: false) is not null);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ConfigurationStoreBoundsIpcReadsAndWrites()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "ConfigurationSizeTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "config.json");
+            File.WriteAllText(path, ManagerConfiguration.Serialize(new ManagerConfiguration()));
+            var store = new ConfigurationStore(path);
+            var original = store.Read();
+            var oversizedContent = new string(' ', ConfigurationStore.MaximumIpcConfigurationBytes + 1);
+            Assert.Throws<InvalidDataException>(() => store.Save(original.Revision, oversizedContent));
+            Assert.Equal(original.Content, File.ReadAllText(path));
+
+            File.WriteAllText(path, new string(' ', ConfigurationStore.MaximumIpcConfigurationBytes + 1));
+            Assert.Throws<InvalidDataException>(() => store.Read());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void WorkspaceLayoutDefaultsToLayeredWhenOmittedButAcceptsExplicitSplit()
     {
         using var directory = new TestDirectory();

@@ -6,6 +6,19 @@ not create desks or own a second copy of manager state. Named entries such as
 `Code` and `Chat` are workspaces (window groups), not separate desks. Monitors
 only show exclusive workspace views onto that same desk.
 
+## Configuration
+
+The console's **Edit config** action reads and saves the host-selected JSON file,
+showing its path, revision, and current validation status. The editor keeps invalid
+file text available for repair, validates replacements with the host's strict
+configuration rules, detects stale revisions, and requires confirmation before
+discarding unsaved text during reload. It writes atomically and never changes the
+running manager configuration; restart the manager to apply saves. **Use current
+workspace settings** stages names, layouts, layered options, and positions from
+the latest snapshot while preserving unrelated configuration fields and monitor
+placement hints. IPC editing is limited to 128 KiB; larger configurations can be
+edited directly on disk.
+
 ## Run
 
 From the repository root, against an already-running manager in the same Windows
@@ -72,5 +85,6 @@ Do not use development inspection tools to invoke live manager controls during
 safe UI verification; use `--demo` or a separate fake-platform test pipe.
 
 The spatial switcher is a separate [companion app](../WinManager.SpatialSwitcher/README.md).
-The draggable/zoomable full desk overview and persistence of runtime position
-changes remain future work.
+The draggable/zoomable full desk overview and automatic persistence of runtime
+desk state remain future work. Save workspace layouts and positions explicitly
+through the configuration editor when they should seed a later manager restart.

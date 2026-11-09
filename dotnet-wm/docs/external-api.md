@@ -33,6 +33,15 @@ and [spatial switcher](../src/WinManager.SpatialSwitcher/README.md) use this
 SDK/IPC contract for their display and explicit controls. Neither creates desks
 or owns manager state.
 
+The Debug console can edit the host-selected configuration file through the SDK.
+`WinManagerClient.ReadConfigurationAsync()` returns the absolute path, raw file
+content, SHA-256 revision, and validation status; `SaveConfigurationAsync()`
+validates and atomically replaces that same file only when the revision matches.
+The editor can explicitly merge the current snapshot's workspace names, layouts,
+layered options, and positions while preserving other configuration fields and
+monitor placement hints. Saves are disk-only and require a manager restart; live
+view assignments, window membership, and native geometry are not persisted.
+
 View activation, logical workspace positions, per-workspace `split`/`layered`
 layout selection and layered width/spacing rules, and the spatial switcher are implemented. Workspace bounds,
 columns/rows/Fibonacci rules, persistence of runtime desk state, and the full desk
@@ -472,7 +481,9 @@ to 64. Here is a command envelope before framing:
 ```
 
 Generate a fresh nonempty request GUID for each request. The available operations
-are `query.snapshot` (`{}`), `command` (a command object), `subscribe`
+are `query.snapshot` (`{}`), `configuration.read` (`{}`),
+`configuration.save` (`{"revision":"<sha256>","content":"<configuration-json>"}`),
+`command` (a command object), `subscribe`
 (`{"eventTypes":["layout.changed"]}` or `{}` for all), and `unsubscribe`
 (`{"subscriptionId":"<subscription-guid>"}`). Subscribe returns a
 `SubscriptionResult` with the subscription ID.
@@ -518,7 +529,8 @@ Drain event feeds promptly: bounded server/SDK queues disconnect lagging
 consumers rather than silently dropping events. Dispatch UI updates separately
 from reading the stream.
 
-Common errors include `invalid_argument`, `not_found`, `not_ready`, `busy`,
+Common errors include `invalid_argument`, `configuration_conflict`,
+`configuration_io`, `not_found`, `not_ready`, `busy`,
 `exiting`, `unsupported_version`, `unknown_operation`, `already_subscribed`, and
 native-action errors. On missing targets, refresh the snapshot before choosing
 another target. Commands commit logical intent; native actions are best-effort,

@@ -3,8 +3,17 @@
 The host runs on the logged-in user's Windows desktop, not as a Session-0
 service. It requests normal privilege and per-monitor-v2 DPI awareness.
 Default configuration is created at `%LOCALAPPDATA%\WinManager\config.json`.
-Use `--config ABSOLUTE_PATH` for an existing alternate JSON file. Changes take
-effect on restart; live reload and YAML import are deferred.
+Use `--config ABSOLUTE_PATH` for an existing alternate JSON file. The Debug
+console's **Edit config** action reads and saves this same host-selected file;
+clients cannot choose a different path. Saving validates the complete JSON
+against host rules, writes a same-directory temporary file, and atomically
+replaces the configuration. The manager does not hot-reload: restart it for saved
+settings to take effect. You can also edit the file directly while the manager is
+running, then reload it in the editor; save detects a file revision change and
+requires an explicit reload instead of overwriting newer content. Reloading after
+unsaved edits requires confirmation. Configuration editing over IPC is limited
+to 128 KiB; larger files can be edited directly and the manager accepts files up
+to the 1 MiB protocol configuration limit.
 
 `monitorDeviceName` is an initial placement hint, not workspace ownership. A
 matching connected display receives that workspace during reconciliation. Other
@@ -17,8 +26,11 @@ Each connected monitor shows one workspace. A workspace can have no view. The
 current view map is exposed in `ManagerSnapshot.WorkspaceViews`; the older
 `WorkspaceInfo.MonitorId` and `Active` fields are projections, with `Guid.Empty`
 and `false` for an unviewed workspace. View assignments are not saved across
-manager restarts. See [the project goal](project-goal.md) and
-[the migration plan](desk-model-plan.md) for the remaining overview and persistence work.
+manager restarts. Runtime workspace names, layouts, layered options, and logical
+positions can be explicitly captured into the configuration editor and saved;
+this does not persist live window membership, monitor views, or native window
+geometry. See [the project goal](project-goal.md) and
+[the migration plan](desk-model-plan.md) for remaining desk-state work.
 
 New workspaces use the horizontal `layered` page-stack layout by default. Set
 `layout` to `split` explicitly to use the split-tree layout; existing configuration

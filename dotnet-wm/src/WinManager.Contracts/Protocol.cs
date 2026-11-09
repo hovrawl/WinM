@@ -42,10 +42,16 @@ public sealed record UnsubscribeRequest(Guid SubscriptionId);
 
 public sealed record SubscriptionResult(bool Success, Guid? SubscriptionId, string? ErrorCode, long StateRevision);
 
+public sealed record ConfigurationDocument(string Path, string Content, string Revision, bool IsValid,
+    string? ValidationError);
+
+public sealed record SaveConfigurationRequest(string Revision, string Content);
+
 public static class Protocol
 {
     public const int Version = 1;
     public const int MaximumFrameBytes = 1024 * 1024;
+    public const int MaximumConfigurationContentBytes = MaximumFrameBytes / 8;
     public static JsonSerializerOptions JsonOptions { get; } = CreateOptions();
 
     [UnconditionalSuppressMessage("Trimming", "IL2026",

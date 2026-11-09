@@ -188,4 +188,36 @@ public sealed class DebugUiTests
         Assert.Contains("tiling override", overridden);
         Assert.DoesNotContain("default ignored", overridden);
     }
+
+    [Fact]
+    public void WorkspaceSettingsMergePreservesOtherConfigurationAndMonitorHints()
+    {
+        const string configuration = """
+            {
+              "innerGap": 17,
+              "ignoredProcessNames": ["editor.exe"],
+              "workspaces": [
+                { "name": "Code", "monitorDeviceName": "DISPLAY-CODE", "layout": "split" },
+                { "name": "Chat", "monitorDeviceName": "DISPLAY-CHAT" },
+                { "name": "Removed", "monitorDeviceName": "DISPLAY-OLD" }
+              ]
+            }
+            """;
+        var snapshot = DemoSnapshot.Create();
+
+        var merged = ConfigurationEditorPresentation.MergeWorkspaceSettings(configuration, snapshot);
+        using var document = JsonDocument.Parse(merged);
+        var root = document.RootElement;
+        Assert.Equal(17, root.GetProperty("innerGap").GetInt32());
+        Assert.Equal("editor.exe", root.GetProperty("ignoredProcessNames")[0].GetString());
+        var workspaces = root.GetProperty("workspaces");
+        Assert.Equal(new[] { "Code", "Chat", "Unviewed" },
+            workspaces.EnumerateArray().Select(workspace => workspace.GetProperty("name").GetString()).ToArray());
+        Assert.Equal("DISPLAY-CODE", workspaces[0].GetProperty("monitorDeviceName").GetString());
+        Assert.Equal("DISPLAY-CHAT", workspaces[1].GetProperty("monitorDeviceName").GetString());
+        Assert.Equal("layered", workspaces[0].GetProperty("layout").GetString());
+        Assert.Equal(1, workspaces[0].GetProperty("layeredLayoutOptions").GetProperty("windowWidthRatio").GetDouble());
+        Assert.Equal(0, workspaces[0].GetProperty("position").GetProperty("x").GetDouble());
+        Assert.False(workspaces[2].TryGetProperty("monitorDeviceName", out _));
+    }
 }

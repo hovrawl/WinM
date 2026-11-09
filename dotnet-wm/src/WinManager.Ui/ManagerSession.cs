@@ -54,6 +54,13 @@ public sealed class ManagerSession : IAsyncDisposable
     public Task<CommandResult> ExecuteAsync(ManagerCommand command, CancellationToken cancellationToken = default) =>
         client.ExecuteAsync(command, cancellationToken);
 
+    public Task<ConfigurationDocument> ReadConfigurationAsync(CancellationToken cancellationToken = default) =>
+        client.ReadConfigurationAsync(cancellationToken);
+
+    public Task<ConfigurationDocument> SaveConfigurationAsync(string revision, string content,
+        CancellationToken cancellationToken = default) =>
+        client.SaveConfigurationAsync(revision, content, cancellationToken);
+
     private async Task PumpAsync(Action<ManagerSnapshot, string> snapshotReceived,
         Action<Exception?> disconnected, CancellationTokenSource cancellation)
     {

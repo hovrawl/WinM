@@ -14,13 +14,15 @@ public sealed class PipeServer : IAsyncDisposable
     private readonly string pipeName;
     private readonly int maximumClients;
     private readonly int outputCapacity;
+    private readonly ConfigurationStore? configurationStore;
     private readonly CancellationTokenSource shutdown = new();
     private readonly ConcurrentDictionary<long, Task> clients = new();
     private Task? run;
     private int started;
     private int disposed;
 
-    public PipeServer(ManagerEngine manager, string? pipeName = null, int maximumClients = 16, int outputCapacity = 128)
+    public PipeServer(ManagerEngine manager, string? pipeName = null, int maximumClients = 16, int outputCapacity = 128,
+        ConfigurationStore? configurationStore = null)
     {
         ArgumentNullException.ThrowIfNull(manager);
         ArgumentOutOfRangeException.ThrowIfLessThan(maximumClients, 1);
@@ -31,6 +33,7 @@ public sealed class PipeServer : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(this.pipeName);
         this.maximumClients = maximumClients;
         this.outputCapacity = outputCapacity;
+        this.configurationStore = configurationStore;
     }
 
     public Task RunAsync(CancellationToken cancellationToken)
@@ -57,7 +60,7 @@ public sealed class PipeServer : IAsyncDisposable
                     pipe = LocalPipeServer.Create(pipeName, maximumClients, 4096);
                     await pipe.WaitForConnectionAsync(stop.Token);
                     var id = ++nextClient;
-                    var connection = new Connection(manager, pipe, outputCapacity, stop.Token);
+                    var connection = new Connection(manager, configurationStore, pipe, outputCapacity, stop.Token);
                     pipe = null;
                     clients[id] = ServeAsync(connection, slots);
                     foreach (var finished in clients.Where(entry => entry.Value.IsCompletedSuccessfully))
@@ -104,16 +107,19 @@ public sealed class PipeServer : IAsyncDisposable
     private sealed class Connection : IManagerEventSink
     {
         private readonly ManagerEngine manager;
+        private readonly ConfigurationStore? configurationStore;
         private readonly NamedPipeServerStream pipe;
         private readonly Channel<object> output;
         private readonly CancellationTokenSource stop;
         private readonly CancellationTokenSource writerAbort = new();
         private Guid? subscriptionId;
 
-        internal Connection(ManagerEngine manager, NamedPipeServerStream pipe, int capacity,
+        internal Connection(ManagerEngine manager, ConfigurationStore? configurationStore,
+            NamedPipeServerStream pipe, int capacity,
             CancellationToken cancellationToken)
         {
             this.manager = manager;
+            this.configurationStore = configurationStore;
             this.pipe = pipe;
             stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             output = Channel.CreateBounded<object>(new BoundedChannelOptions(capacity)
@@ -249,6 +255,20 @@ public sealed class PipeServer : IAsyncDisposable
                         if (snapshot is null) Error(requestId, "not_ready", "Manager has no committed snapshot.");
                         else Respond(requestId, true, null, null, snapshot.StateRevision, Protocol.Payload(snapshot));
                         break;
+                    case "configuration.read":
+                        CheckObject(payload);
+                        var configuration = RequireConfigurationStore().Read();
+                        Respond(requestId, true, null, null, manager.Current?.StateRevision ?? 0,
+                            Protocol.Payload(configuration));
+                        break;
+                    case "configuration.save":
+                        CheckObject(payload, "revision", "content");
+                        var save = payload.Deserialize<SaveConfigurationRequest>(Protocol.JsonOptions) ??
+                                   throw new ArgumentException("Configuration save request is required.");
+                        var saved = RequireConfigurationStore().Save(save.Revision, save.Content);
+                        Respond(requestId, true, null, null, manager.Current?.StateRevision ?? 0,
+                            Protocol.Payload(saved));
+                        break;
                     case "command":
                         CheckObject(payload, "kind", "windowId", "direction", "amount", "orientation", "mode", "paused",
                             "workspaceId", "monitorId", "workspaceName", "nodeId", "navigation", "cycleDirection",
@@ -302,6 +322,26 @@ public sealed class PipeServer : IAsyncDisposable
                         break;
                 }
             }
+            catch (ConfigurationConflictException error)
+            {
+                Respond(requestId, false, "configuration_conflict", error.Message, manager.Current?.StateRevision ?? 0);
+            }
+            catch (InvalidDataException error)
+            {
+                Respond(requestId, false, "invalid_argument", error.Message, manager.Current?.StateRevision ?? 0);
+            }
+            catch (JsonException error)
+            {
+                Respond(requestId, false, "invalid_argument", error.Message, manager.Current?.StateRevision ?? 0);
+            }
+            catch (IOException)
+            {
+                Error(requestId, "configuration_io", "The configuration file could not be read or written.");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Error(requestId, "configuration_io", "Access to the configuration file was denied.");
+            }
             catch (Exception error) when (error is JsonException or ArgumentException or InvalidOperationException
                                               or FormatException)
             {
@@ -317,6 +357,9 @@ public sealed class PipeServer : IAsyncDisposable
                 if (!allowed.Contains(property.Name, StringComparer.Ordinal) || !seen.Add(property.Name))
                     throw new ArgumentException("Unknown or duplicate property.");
         }
+
+        private ConfigurationStore RequireConfigurationStore() => configurationStore ??
+            throw new InvalidOperationException("Configuration editing is unavailable on this host.");
 
         private void Error(Guid id, string code, string message) =>
             Respond(id, false, code, message, manager.Current?.StateRevision ?? 0);

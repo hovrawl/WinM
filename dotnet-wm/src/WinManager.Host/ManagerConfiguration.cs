@@ -6,6 +6,12 @@ namespace WinManager.Host;
 
 public sealed record ManagerConfiguration
 {
+    private static readonly JsonSerializerOptions ConfigurationJsonOptions = new(Protocol.JsonOptions)
+    {
+        WriteIndented = true,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
+    };
+
     public IReadOnlyList<WorkspaceDefinition> Workspaces { get; init; } = [new("1"), new("2"), new("3")];
     public int InnerGap { get; init; } = 8;
     public int OuterGap { get; init; } = 8;
@@ -219,25 +225,36 @@ public sealed record ManagerConfiguration
 
     public static ManagerConfiguration Load(string path, bool createDefault)
     {
-        var options = new JsonSerializerOptions(Protocol.JsonOptions)
-        {
-            WriteIndented = true, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
-        };
         if (!File.Exists(path) && createDefault)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-            File.WriteAllText(path, JsonSerializer.Serialize(new ManagerConfiguration(), options));
+            File.WriteAllText(path, Serialize(new ManagerConfiguration()));
         }
 
         if (new FileInfo(path).Length > Protocol.MaximumFrameBytes)
             throw new InvalidDataException("Configuration is too large.");
-        using var stream = File.OpenRead(path);
-        using var document = JsonDocument.Parse(stream, new JsonDocumentOptions { MaxDepth = 64 });
+        return Parse(File.ReadAllText(path));
+    }
+
+    public static ManagerConfiguration Parse(string content)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        if (System.Text.Encoding.UTF8.GetByteCount(content) > Protocol.MaximumFrameBytes)
+            throw new InvalidDataException("Configuration is too large.");
+        if (content.StartsWith('\uFEFF')) content = content[1..];
+        using var document = JsonDocument.Parse(content, new JsonDocumentOptions { MaxDepth = 64 });
         RejectDuplicateProperties(document.RootElement);
-        var result = document.RootElement.Deserialize<ManagerConfiguration>(options) ??
+        var result = document.RootElement.Deserialize<ManagerConfiguration>(ConfigurationJsonOptions) ??
                      throw new InvalidDataException("Configuration is null.");
         result.Validate();
         return result;
+    }
+
+    public static string Serialize(ManagerConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        configuration.Validate();
+        return JsonSerializer.Serialize(configuration, ConfigurationJsonOptions);
     }
 
     private static void RejectDuplicateProperties(JsonElement element)

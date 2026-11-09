@@ -91,6 +91,25 @@ public sealed class WinManagerClient : IAsyncDisposable
         return result;
     }
 
+    public async Task<ConfigurationDocument> ReadConfigurationAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await RequestAsync("configuration.read", Protocol.EmptyPayload, cancellationToken);
+        return ReadPayload<ConfigurationDocument>(response);
+    }
+
+    public async Task<ConfigurationDocument> SaveConfigurationAsync(string revision, string content,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(revision);
+        ArgumentNullException.ThrowIfNull(content);
+        if (System.Text.Encoding.UTF8.GetByteCount(content) > Protocol.MaximumConfigurationContentBytes)
+            throw new ArgumentException($"Configuration must be no larger than {Protocol.MaximumConfigurationContentBytes} UTF-8 bytes.",
+                nameof(content));
+        var response = await RequestAsync("configuration.save",
+            Protocol.Payload(new SaveConfigurationRequest(revision, content)), cancellationToken);
+        return ReadPayload<ConfigurationDocument>(response);
+    }
+
     public async Task<ManagerSubscription> SubscribeAsync(IReadOnlyList<string>? eventTypes = null,
         CancellationToken cancellationToken = default)
     {

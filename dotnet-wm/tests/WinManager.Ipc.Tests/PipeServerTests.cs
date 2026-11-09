@@ -4,6 +4,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using WinManager.Client;
 using WinManager.Contracts;
 using WinManager.Core;
 using WinManager.Host;
@@ -13,6 +14,37 @@ namespace WinManager.Ipc.Tests;
 
 public sealed class PipeServerTests
 {
+    [Fact]
+    public async Task SdkReadsAndSavesTheValidatedHostConfigurationOverIpc()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "ConfigurationIpcTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "config.json");
+            File.WriteAllText(path, ManagerConfiguration.Serialize(new ManagerConfiguration()));
+            await using var host = await PipeHost.StartAsync(configurationStore: new ConfigurationStore(path));
+            await using var client = await WinManagerClient.ConnectAsync(host.Name, TimeSpan.FromSeconds(5), host.Token);
+
+            var document = await client.ReadConfigurationAsync(host.Token);
+            Assert.Equal(Path.GetFullPath(path), document.Path);
+            Assert.True(document.IsValid);
+            var replacement = ManagerConfiguration.Serialize(new ManagerConfiguration { OuterGap = 29 });
+            var saved = await client.SaveConfigurationAsync(document.Revision, replacement, host.Token);
+            Assert.True(saved.IsValid);
+            Assert.NotEqual(document.Revision, saved.Revision);
+            Assert.Equal(replacement, File.ReadAllText(path));
+            Assert.Equal(29, ManagerConfiguration.Load(path, createDefault: false).OuterGap);
+            var conflict = await Assert.ThrowsAsync<WinManagerRemoteException>(async () =>
+                await client.SaveConfigurationAsync(document.Revision, replacement, host.Token));
+            Assert.Equal("configuration_conflict", conflict.ErrorCode);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task ManagerAdmissionOverloadReturnsBusyAndSnapshotIsNotReadyBeforeStartup()
     {
@@ -532,21 +564,23 @@ internal sealed class PipeHost : IAsyncDisposable
     public CancellationToken Token => timeout.Token;
 
     private PipeHost(string? name, int maximumClients, int outputCapacity, int titleLength, bool popup,
-        IEnumerable<WorkspaceDefinition>? workspaceDefinitions)
+        IEnumerable<WorkspaceDefinition>? workspaceDefinitions, ConfigurationStore? configurationStore)
     {
         Name = name ?? "WinManager.test." + Guid.NewGuid().ToString("N");
         platform = new TestWindowPlatform(titleLength, popup);
         Engine = new(platform, workspaceDefinitions: workspaceDefinitions);
         EngineRun = Engine.RunAsync(Token);
-        Server = new(Engine, Name, maximumClients, outputCapacity);
+        Server = new(Engine, Name, maximumClients, outputCapacity, configurationStore);
         ServerRun = Server.RunAsync(Token);
     }
 
     internal static async Task<PipeHost> StartAsync(string? name = null, int maximumClients = 16,
         int outputCapacity = 128,
-        int titleLength = 8, bool popup = false, IEnumerable<WorkspaceDefinition>? workspaceDefinitions = null)
+        int titleLength = 8, bool popup = false, IEnumerable<WorkspaceDefinition>? workspaceDefinitions = null,
+        ConfigurationStore? configurationStore = null)
     {
-        var host = new PipeHost(name, maximumClients, outputCapacity, titleLength, popup, workspaceDefinitions);
+        var host = new PipeHost(name, maximumClients, outputCapacity, titleLength, popup, workspaceDefinitions,
+            configurationStore);
         Assert.True((await host.Engine.ExecuteAsync(new(CommandKind.Redraw), host.Token)).Success);
         return host;
     }

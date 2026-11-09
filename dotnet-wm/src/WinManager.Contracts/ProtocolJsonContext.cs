@@ -10,6 +10,8 @@ namespace WinManager.Contracts;
 [JsonSerializable(typeof(SubscribeRequest))]
 [JsonSerializable(typeof(UnsubscribeRequest))]
 [JsonSerializable(typeof(SubscriptionResult))]
+[JsonSerializable(typeof(ConfigurationDocument))]
+[JsonSerializable(typeof(SaveConfigurationRequest))]
 [JsonSerializable(typeof(ManagerCommand))]
 [JsonSerializable(typeof(CommandResult))]
 [JsonSerializable(typeof(ManagerSnapshot))]

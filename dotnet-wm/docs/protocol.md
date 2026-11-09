@@ -39,9 +39,20 @@ ID receives `Guid.Empty` as its response ID. Errors do not mutate manager state.
 | Operation | Payload | Successful response payload |
 | --- | --- | --- |
 | `query.snapshot` | `{}` or `null` | Complete committed `ManagerSnapshot` |
+| `configuration.read` | `{}` | `ConfigurationDocument` with the host-selected file path, raw UTF-8 content, SHA-256 revision, and validation status |
+| `configuration.save` | `{"revision":"<sha256>","content":"<configuration-json>"}` | Updated `ConfigurationDocument`; invalid or stale writes return `invalid_argument` or `configuration_conflict` |
 | `command` | Typed `ManagerCommand` object; `kind` is required | `CommandResult`; also reflected in response fields |
 | `subscribe` | `{"eventTypes": null}` or `{}` for all events; otherwise an array of known event names | `SubscriptionResult`, including `subscriptionId` |
 | `unsubscribe` | `{"subscriptionId": "<GUID>"}` | None |
+
+Configuration operations are restricted to the path selected by the host's
+`--config` option or its default `%LOCALAPPDATA%\WinManager\config.json`;
+clients cannot provide paths. The host validates the complete replacement and
+atomically replaces the file only when the submitted revision still matches.
+External edits can race the final replace because ordinary editors do not share
+the host's lock. IPC configuration content is limited to 128 KiB so its escaped
+JSON remains within the frame limit. Saving does not update running host services;
+restart the manager to apply the file.
 
 Commands support `focus`, `focusMonitor`, `moveSpatial`, `move`, `resize`, `setSplit`, `setMode`, `setWorkspaceLayout`, `setWorkspacePosition`, `pause`,
 `redraw`, `exit`, `activateWorkspace`, `moveToWorkspace`, `moveToMonitor`, `toggleMode`,

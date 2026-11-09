@@ -35,6 +35,7 @@ internal sealed class MainWindow : Window
     private readonly TextBox positionX = new();
     private readonly TextBox positionY = new();
     private Button connectButton = null!;
+    private Button configurationButton = null!;
     private Button positionButton = null!;
     private Button activateButton = null!;
     private Button moveButton = null!;
@@ -61,6 +62,7 @@ internal sealed class MainWindow : Window
     private Guid? positionInputWorkspaceId;
     private DeskPosition? displayedPosition;
     private int selectedSection;
+    private ConfigurationEditorWindow? configurationEditor;
 
     public MainWindow(bool demoMode, string? pipeName = null)
     {
@@ -120,6 +122,9 @@ internal sealed class MainWindow : Window
         connectButton = DeskTheme.Action(demoMode ? "Demo mode" : "Connect / reconnect");
         connectButton.Click += async (_, _) => await ConnectAsync();
         connection.Children.Add(connectButton);
+        configurationButton = DeskTheme.Action("Edit config");
+        configurationButton.Click += async (_, _) => await OpenConfigurationEditorAsync();
+        connection.Children.Add(configurationButton);
         Grid.SetColumn(connection, 1);
         header.Children.Add(connection);
         root.Children.Add(DeskTheme.Card(header, new Thickness(18, 14)));
@@ -530,6 +535,7 @@ internal sealed class MainWindow : Window
     {
         var canCommand = connected && snapshot is not null && !demoMode && !connecting && !commandBusy;
         connectButton.IsEnabled = !demoMode && !connecting && !connected && !commandBusy;
+        configurationButton.IsEnabled = connected && !demoMode && !connecting && !commandBusy;
         activateButton.IsEnabled = canCommand && SelectedWorkspaceId() is not null && SelectedMonitorId() is not null;
         moveButton.IsEnabled = canCommand && SelectedWindowId() is not null && SelectedWorkspaceId() is not null;
         focusButton.IsEnabled = canCommand && SelectedWindowId() is not null;
@@ -603,6 +609,44 @@ internal sealed class MainWindow : Window
         {
             if (nextSession is not null) await nextSession.DisposeAsync();
             connecting = false;
+            UpdateActionStates();
+        }
+    }
+
+    private async Task OpenConfigurationEditorAsync()
+    {
+        if (demoMode || !connected || session is not { } activeSession || commandBusy) return;
+        if (configurationEditor is { } existing)
+        {
+            existing.Activate();
+            return;
+        }
+
+        commandBusy = true;
+        lastMessage = "Reading the host configuration…";
+        UpdateActionStates();
+        try
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+            deadline.CancelAfter(TimeSpan.FromSeconds(10));
+            var document = await activeSession.ReadConfigurationAsync(deadline.Token);
+            if (!ReferenceEquals(session, activeSession)) return;
+            var window = new ConfigurationEditorWindow(activeSession, document, () => snapshot);
+            configurationEditor = window;
+            window.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(configurationEditor, window)) configurationEditor = null;
+            };
+            window.Show(this);
+            lastMessage = "Configuration editor opened. Saving requires a manager restart to take effect.";
+        }
+        catch (Exception error)
+        {
+            lastMessage = $"Configuration could not be opened: {error.Message}";
+        }
+        finally
+        {
+            commandBusy = false;
             UpdateActionStates();
         }
     }
