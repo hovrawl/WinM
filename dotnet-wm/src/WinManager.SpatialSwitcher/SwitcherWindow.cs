@@ -17,12 +17,7 @@ internal sealed class SwitcherWindow : Window
         public override string ToString() => Label;
     }
 
-    private static readonly IBrush[] WindowCardBrushes =
-    [
-        new SolidColorBrush(Color.Parse("#DCE7DE")),
-        new SolidColorBrush(Color.Parse("#E9E2D6")),
-        new SolidColorBrush(Color.Parse("#DCE4E9"))
-    ];
+    private static readonly IReadOnlyList<SolidColorBrush> WindowCardBrushes = SwitcherTheme.WindowCardPalette;
 
     private readonly bool demoMode;
     private readonly string? pipeName;
@@ -36,6 +31,7 @@ internal sealed class SwitcherWindow : Window
     private readonly TextBlock shortcutStatus = new();
     private readonly ComboBox monitorTarget = new();
     private readonly CurrentWorkspaceWindow currentWorkspaceWindow;
+    private Task? connectionRetry;
     private Button activateButton = null!;
     private Button reconnectButton = null!;
     private readonly Dictionary<Guid, Button> workspaceTiles = [];
@@ -66,7 +62,9 @@ internal sealed class SwitcherWindow : Window
         MinHeight = 480;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         ShowInTaskbar = false;
-        Background = DeskTheme.Canvas;
+        WindowDecorations = WindowDecorations.None;
+        TransparencyLevelHint = [WindowTransparencyLevel.Transparent];
+        Background = Brushes.Transparent;
         Content = BuildContent();
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
         Deactivated += (_, _) =>
@@ -98,7 +96,7 @@ internal sealed class SwitcherWindow : Window
         else
         {
             shortcutStatus.Text = "Waiting for a manager snapshot before enabling shortcuts";
-            _ = ConnectAsync();
+            connectionRetry = RunConnectionRetryAsync();
         }
 
         UpdateActions();
@@ -179,8 +177,7 @@ internal sealed class SwitcherWindow : Window
                 new(new GridLength(1, GridUnitType.Star)), new(GridLength.Auto), new(GridLength.Auto),
                 new(GridLength.Auto), new(GridLength.Auto)
             },
-            RowSpacing = 8,
-            Margin = new Thickness(16)
+            RowSpacing = 8
         };
 
         var header = new Grid
@@ -188,15 +185,15 @@ internal sealed class SwitcherWindow : Window
             ColumnDefinitions = new ColumnDefinitions
                 { new(new GridLength(1, GridUnitType.Star)), new(GridLength.Auto) }
         };
-        header.Children.Add(DeskTheme.Heading("Spatial switcher", 19));
+        header.Children.Add(SwitcherTheme.Heading("Spatial switcher", 19));
         var keys = new StackPanel
             { Orientation = Orientation.Horizontal, Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
         keys.Children.Add(KeyChip("Alt+Tab"));
-        keys.Children.Add(DeskTheme.Caption("windows"));
+        keys.Children.Add(SwitcherTheme.Caption("windows"));
         keys.Children.Add(KeyChip("Win+Tab / Space"));
-        keys.Children.Add(DeskTheme.Caption("workspaces"));
+        keys.Children.Add(SwitcherTheme.Caption("workspaces"));
         keys.Children.Add(KeyChip("Enter / Space"));
-        keys.Children.Add(DeskTheme.Caption("commit"));
+        keys.Children.Add(SwitcherTheme.Caption("commit"));
         Grid.SetColumn(keys, 1);
         header.Children.Add(keys);
         Grid.SetRow(header, 0);
@@ -212,7 +209,7 @@ internal sealed class SwitcherWindow : Window
         search.FontSize = 14;
         search.TextChanged += (_, _) => RenderMap();
         searchGrid.Children.Add(search);
-        var clearButton = DeskTheme.Action("Clear");
+        var clearButton = SwitcherTheme.Action("Clear");
         clearButton.Margin = new Thickness(8, 0, 0, 0);
         clearButton.Click += (_, _) => search.Text = "";
         Grid.SetColumn(clearButton, 1);
@@ -226,14 +223,14 @@ internal sealed class SwitcherWindow : Window
                 { new(new GridLength(1, GridUnitType.Star)), new(GridLength.Auto) }
         };
         explanation.Children.Add(
-            DeskTheme.Caption("Desk positions are shared logical space · search dims, never rearranges"));
+            SwitcherTheme.Caption("Desk positions are shared logical space · search dims, never rearranges"));
         resultCount.HorizontalAlignment = HorizontalAlignment.Right;
-        resultCount.Foreground = DeskTheme.MutedText;
+        resultCount.Foreground = SwitcherTheme.MutedText;
         explanation.Children.Add(resultCount);
         Grid.SetRow(explanation, 2);
         root.Children.Add(explanation);
 
-        var mapBorder = DeskTheme.Card(map, new Thickness(0));
+        var mapBorder = SwitcherTheme.Card(map, new Thickness(0));
         mapBorder.ClipToBounds = true;
         map.SizeChanged += (_, _) => RenderMap();
         Grid.SetRow(mapBorder, 3);
@@ -248,7 +245,7 @@ internal sealed class SwitcherWindow : Window
         selectedDetails.TextWrapping = TextWrapping.Wrap;
         preview.Children.Add(selectedDetails);
         var destination = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
-        destination.Children.Add(DeskTheme.Caption("Activate on monitor"));
+        destination.Children.Add(SwitcherTheme.Caption("Activate on monitor"));
         monitorTarget.MinWidth = 190;
         monitorTarget.SelectionChanged += (_, _) =>
         {
@@ -256,12 +253,12 @@ internal sealed class SwitcherWindow : Window
             UpdateActions();
         };
         destination.Children.Add(monitorTarget);
-        activateButton = DeskTheme.Action("Activate workspace", primary: true);
+        activateButton = SwitcherTheme.Action("Activate workspace", primary: true);
         activateButton.Click += async (_, _) => await CommitSelectionAsync();
         destination.Children.Add(activateButton);
         Grid.SetColumn(destination, 1);
         preview.Children.Add(destination);
-        var previewCard = DeskTheme.Card(preview, new Thickness(12, 9));
+        var previewCard = SwitcherTheme.Card(preview, new Thickness(12, 9));
         Grid.SetRow(previewCard, 4);
         root.Children.Add(previewCard);
 
@@ -273,7 +270,7 @@ internal sealed class SwitcherWindow : Window
         root.Children.Add(hints);
 
         shortcutStatus.TextWrapping = TextWrapping.Wrap;
-        shortcutStatus.Foreground = DeskTheme.MutedText;
+        shortcutStatus.Foreground = SwitcherTheme.MutedText;
         Grid.SetRow(shortcutStatus, 6);
         root.Children.Add(shortcutStatus);
 
@@ -282,33 +279,41 @@ internal sealed class SwitcherWindow : Window
             ColumnDefinitions = new ColumnDefinitions
                 { new(new GridLength(1, GridUnitType.Star)), new(GridLength.Auto) }
         };
-        status.Foreground = DeskTheme.MutedText;
+        status.Foreground = SwitcherTheme.MutedText;
         status.TextWrapping = TextWrapping.Wrap;
         connectionStatus.Children.Add(status);
-        reconnectButton = DeskTheme.Action("Connect / reconnect");
+        reconnectButton = SwitcherTheme.Action("Connect / reconnect");
         reconnectButton.Click += async (_, _) => await ConnectAsync();
         Grid.SetColumn(reconnectButton, 1);
         connectionStatus.Children.Add(reconnectButton);
         Grid.SetRow(connectionStatus, 7);
         root.Children.Add(connectionStatus);
-        return root;
+        return new Border
+        {
+            Background = SwitcherTheme.Canvas,
+            BorderBrush = SwitcherTheme.Border,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(16),
+            Child = root
+        };
     }
 
     private static Control KeyChip(string text) => new Border
     {
-        Background = DeskTheme.SoftSurface,
-        BorderBrush = DeskTheme.Border,
+        Background = SwitcherTheme.SoftSurface,
+        BorderBrush = SwitcherTheme.Border,
         BorderThickness = new Thickness(1),
         CornerRadius = new CornerRadius(4),
         Padding = new Thickness(5, 2),
-        Child = new TextBlock { Text = text, FontSize = 11, Foreground = DeskTheme.Text }
+        Child = new TextBlock { Text = text, FontSize = 11, Foreground = SwitcherTheme.Text }
     };
 
     private static Control Hint(string key, string label)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         row.Children.Add(KeyChip(key));
-        row.Children.Add(DeskTheme.Caption(label));
+        row.Children.Add(SwitcherTheme.Caption(label));
         return row;
     }
 
@@ -324,6 +329,18 @@ internal sealed class SwitcherWindow : Window
         catch (Exception error)
         {
             shortcutStatus.Text = $"Keyboard shortcuts unavailable · {error.Message}";
+        }
+    }
+
+    private async Task RunConnectionRetryAsync()
+    {
+        try
+        {
+            await ConnectionRetry.RunAsync(_ => ConnectAsync(), () => connected, TimeSpan.FromSeconds(5),
+                static (interval, token) => Task.Delay(interval, token), lifetime.Token);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
         }
     }
 
@@ -429,7 +446,7 @@ internal sealed class SwitcherWindow : Window
         if (snapshot?.Workspaces is not { Count: > 0 } workspaces)
         {
             resultCount.Text = "0 workspaces";
-            map.Children.Add(DeskTheme.Caption("Waiting for workspace state…"));
+            map.Children.Add(SwitcherTheme.Caption("Waiting for workspace state…"));
             return;
         }
 
@@ -441,7 +458,7 @@ internal sealed class SwitcherWindow : Window
                 Text =
                     "Spatial positions are not available from this manager snapshot. The map is disabled rather than inventing local workspace locations.",
                 TextWrapping = TextWrapping.Wrap,
-                Foreground = DeskTheme.Warning,
+                Foreground = SwitcherTheme.Warning,
                 MaxWidth = Math.Max(240, map.Bounds.Width - 32),
                 Margin = new Thickness(16)
             });
@@ -460,7 +477,7 @@ internal sealed class SwitcherWindow : Window
             {
                 Width = 2,
                 Height = 2,
-                Fill = DeskTheme.Border,
+                Fill = SwitcherTheme.Border,
                 Opacity = 0.75
             };
             Canvas.SetLeft(point, x);
@@ -490,8 +507,8 @@ internal sealed class SwitcherWindow : Window
             Width = 141,
             Height = 112,
             Padding = new Thickness(0),
-            Background = workspace.Id == selectedWorkspaceId ? DeskTheme.AccentSoft : DeskTheme.Surface,
-            BorderBrush = workspace.Id == selectedWorkspaceId ? DeskTheme.Accent : DeskTheme.Border,
+            Background = workspace.Id == selectedWorkspaceId ? SwitcherTheme.AccentSoft : SwitcherTheme.Surface,
+            BorderBrush = workspace.Id == selectedWorkspaceId ? SwitcherTheme.Accent : SwitcherTheme.Border,
             BorderThickness = new Thickness(workspace.Id == selectedWorkspaceId ? 2 : 1),
             CornerRadius = new CornerRadius(8),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
@@ -519,8 +536,8 @@ internal sealed class SwitcherWindow : Window
                 Width = tileWidth,
                 Height = tileHeight,
                 Background =
-                    WindowCardBrushes[(int)(Math.Abs((long)window.Id.GetHashCode()) % WindowCardBrushes.Length)],
-                BorderBrush = DeskTheme.Border,
+                    WindowCardBrushes[(int)(Math.Abs((long)window.Id.GetHashCode()) % WindowCardBrushes.Count)],
+                BorderBrush = SwitcherTheme.Border,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(2)
             };
@@ -535,13 +552,13 @@ internal sealed class SwitcherWindow : Window
             Text = workspace.Name,
             FontSize = 12,
             FontWeight = FontWeight.SemiBold,
-            Foreground = DeskTheme.Text,
+            Foreground = SwitcherTheme.Text,
             TextTrimming = TextTrimming.CharacterEllipsis
         });
         var view = workspace.Active
             ? $"{workspace.Layout} · {workspace.WindowIds.Count} windows · on {MonitorName(workspace.MonitorId)}"
             : $"{workspace.Layout} · {workspace.WindowIds.Count} windows · unviewed";
-        content.Children.Add(new TextBlock { Text = view, FontSize = 9, Foreground = DeskTheme.MutedText });
+        content.Children.Add(new TextBlock { Text = view, FontSize = 9, Foreground = SwitcherTheme.MutedText });
         card.Content = content;
         card.Click += (_, _) => SelectWorkspace(workspace.Id);
         return card;
@@ -571,8 +588,8 @@ internal sealed class SwitcherWindow : Window
         foreach (var (id, tile) in workspaceTiles)
         {
             var selected = id == workspace.Id;
-            tile.BorderBrush = selected ? DeskTheme.Accent : DeskTheme.Border;
-            tile.Background = selected ? DeskTheme.AccentSoft : DeskTheme.Surface;
+            tile.BorderBrush = selected ? SwitcherTheme.Accent : SwitcherTheme.Border;
+            tile.Background = selected ? SwitcherTheme.AccentSoft : SwitcherTheme.Surface;
             tile.BorderThickness = new Thickness(selected ? 2 : 1);
         }
 
@@ -841,6 +858,7 @@ internal sealed class SwitcherWindow : Window
     private async Task CloseConnectionAsync()
     {
         await lifetime.CancelAsync();
+        if (connectionRetry is not null) await connectionRetry;
         var current = session;
         session = null;
         if (current is not null) await current.DisposeAsync();

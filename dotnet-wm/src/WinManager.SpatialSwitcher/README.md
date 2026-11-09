@@ -28,6 +28,18 @@ process. Only Quit ends the tray app. The app never starts the manager.
 `WinManager.SpatialSwitcher` is automatically excluded from
 window-management actions by the host, independent of configured ignore lists.
 
+## Appearance and connection
+
+- The tray menu's **Appearance** options choose **System**, **Light**, or **Dark**.
+  System is the default and follows the current Windows theme; Light uses the
+  warm workspace palette, while Dark preserves the switcher's existing dark colors.
+- If the manager is unavailable or the connection drops, the app retries
+  connecting every five seconds after each attempt completes. The tray reconnect
+  action remains available for an immediate attempt.
+- Reconnection only restores the snapshot/subscription. Workspace activation and
+  window focus commands are never replayed automatically; inspect fresh state and
+  explicitly submit a command if needed.
+
 ## Select and activate
 
 - Workspace cards are positioned from `WorkspaceInfo.Position`, in logical desk
@@ -60,8 +72,9 @@ window-management actions by the host, independent of configured ignore lists.
   a live manager snapshot is available. If hook installation fails or the manager
   disconnects, the tray status reports shortcuts unavailable and the key chords
   pass through. `Ctrl+Tab` and unrelated shortcuts remain untouched.
-- Activation is sent once. A failure remains visible without an automatic retry;
-  reconnect and inspect the fresh state before sending another command.
+- Activation is sent once. A command failure or disconnect outcome is never
+  automatically retried; reconnect and inspect the fresh state before sending
+  another command.
 - If a snapshot omits or contains invalid workspace positions, the map and
   activation are disabled and the app explains that spatial state is unavailable.
   The client does not invent local positions for older hosts.

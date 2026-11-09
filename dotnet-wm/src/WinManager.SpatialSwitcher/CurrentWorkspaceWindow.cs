@@ -10,18 +10,14 @@ namespace WinManager.SpatialSwitcher;
 
 internal sealed class CurrentWorkspaceWindow : Window
 {
-    private static readonly IBrush CanvasBrush = Brush("#171A1D");
-    private static readonly IBrush SurfaceBrush = Brush("#22272B");
-    private static readonly IBrush SelectedBrush = Brush("#2E3A34");
-    private static readonly IBrush CardBorderBrush = Brush("#394146");
-    private static readonly IBrush AccentBrush = Brush("#98B69F");
-    private static readonly IBrush TextBrush = Brush("#F2F1EC");
-    private static readonly IBrush MutedBrush = Brush("#9BA5A8");
-
-    private static readonly IBrush[] ShapeBrushes =
-    [
-        Brush("#A9C6B0"), Brush("#D0B99A"), Brush("#AABDD1"), Brush("#C2AFCB")
-    ];
+    private static readonly IBrush CanvasBrush = SwitcherTheme.Canvas;
+    private static readonly IBrush SurfaceBrush = SwitcherTheme.Surface;
+    private static readonly IBrush SelectedBrush = SwitcherTheme.AccentSoft;
+    private static readonly IBrush CardBorderBrush = SwitcherTheme.Border;
+    private static readonly IBrush AccentBrush = SwitcherTheme.Accent;
+    private static readonly IBrush TextBrush = SwitcherTheme.Text;
+    private static readonly IBrush MutedBrush = SwitcherTheme.MutedText;
+    private static readonly IReadOnlyList<SolidColorBrush> ShapeBrushes = SwitcherTheme.WindowShapePalette;
 
     private readonly Func<Guid, Task<CommandResult>> focusWindow;
     private readonly StackPanel activeCards = new() { Orientation = Orientation.Horizontal, Spacing = 12 };
@@ -215,7 +211,7 @@ internal sealed class CurrentWorkspaceWindow : Window
             Content = "Focus selected",
             Padding = new Thickness(17, 9),
             Background = AccentBrush,
-            Foreground = Brush("#17201A"),
+            Foreground = SwitcherTheme.AccentText,
             BorderThickness = new Thickness(0),
             CornerRadius = new CornerRadius(8),
             FontWeight = FontWeight.SemiBold
@@ -324,13 +320,13 @@ internal sealed class CurrentWorkspaceWindow : Window
         var top = area is null
             ? (height - shapeHeight) / 2
             : Math.Clamp((window.Bounds.Y - area.Y) / (double)areaHeight * height, 3, height - shapeHeight - 3);
-        var fill = ShapeBrushes[(int)(Math.Abs((long)window.Id.GetHashCode()) % ShapeBrushes.Length)];
+        var fill = ShapeBrushes[(int)(Math.Abs((long)window.Id.GetHashCode()) % ShapeBrushes.Count)];
         var shape = new Border
         {
             Width = shapeWidth,
             Height = shapeHeight,
             Background = fill,
-            BorderBrush = Brush("#D9E5DC"),
+            BorderBrush = SwitcherTheme.ShapeBorder,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(4)
         };
@@ -341,7 +337,7 @@ internal sealed class CurrentWorkspaceWindow : Window
         {
             Width = width,
             Height = height,
-            Background = Brush("#141719"),
+            Background = SwitcherTheme.ShapeCanvas,
             BorderBrush = CardBorderBrush,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(7),
@@ -445,5 +441,4 @@ internal sealed class CurrentWorkspaceWindow : Window
         VerticalAlignment = VerticalAlignment.Center
     };
 
-    private static SolidColorBrush Brush(string color) => new(Color.Parse(color));
 }

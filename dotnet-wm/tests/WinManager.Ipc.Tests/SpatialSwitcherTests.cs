@@ -1,6 +1,8 @@
+using System.Threading.Channels;
 using Avalonia;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Styling;
 using WinManager.Contracts;
 using WinManager.SpatialSwitcher;
 using Xunit;
@@ -9,6 +11,79 @@ namespace WinManager.Ipc.Tests;
 
 public sealed class SpatialSwitcherTests
 {
+    [Fact]
+    public void SwitcherThemeResolvesSystemPaletteAndUpdatesSharedBrushes()
+    {
+        var light = SwitcherTheme.ResolvePalette(SwitcherThemeMode.System, ThemeVariant.Light);
+        var dark = SwitcherTheme.ResolvePalette(SwitcherThemeMode.System, ThemeVariant.Dark);
+        var forcedLight = SwitcherTheme.ResolvePalette(SwitcherThemeMode.Light, ThemeVariant.Dark);
+        var forcedDark = SwitcherTheme.ResolvePalette(SwitcherThemeMode.Dark, ThemeVariant.Light);
+        var sharedCanvas = SwitcherTheme.Canvas;
+        var sharedShape = SwitcherTheme.WindowShapePalette[0];
+
+        Assert.Equal(Color.Parse("#F4F1EB"), light.Canvas);
+        Assert.Equal(Color.Parse("#171A1D"), dark.Canvas);
+        Assert.Equal(light.Canvas, forcedLight.Canvas);
+        Assert.Equal(dark.Canvas, forcedDark.Canvas);
+
+        try
+        {
+            SwitcherTheme.ApplyPalette(dark);
+            Assert.Same(sharedCanvas, SwitcherTheme.Canvas);
+            Assert.Equal(dark.Canvas, sharedCanvas.Color);
+            Assert.Equal(dark.WindowShapes[0], sharedShape.Color);
+
+            SwitcherTheme.ApplyPalette(light);
+            Assert.Equal(light.Canvas, sharedCanvas.Color);
+            Assert.Equal(light.WindowShapes[0], sharedShape.Color);
+        }
+        finally
+        {
+            SwitcherTheme.ApplyPalette(SwitcherTheme.ResolvePalette(SwitcherThemeMode.System, ThemeVariant.Light));
+        }
+    }
+
+    [Fact]
+    public async Task ConnectionRetryRepeatsFailuresRecoversSkipsConnectedAndCancels()
+    {
+        var delays = Channel.CreateUnbounded<TaskCompletionSource<bool>>();
+        using var cancellation = new CancellationTokenSource();
+        var connected = false;
+        var attempts = 0;
+        var retry = ConnectionRetry.RunAsync(_ =>
+        {
+            attempts++;
+            if (attempts == 2) connected = true;
+            return Task.CompletedTask;
+        }, () => connected, TimeSpan.FromSeconds(5), (interval, token) =>
+        {
+            Assert.Equal(TimeSpan.FromSeconds(5), interval);
+            var wait = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            delays.Writer.TryWrite(wait);
+            return wait.Task.WaitAsync(token);
+        }, cancellation.Token);
+
+        var firstDelay = await delays.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(1, attempts);
+        firstDelay.SetResult(true);
+
+        var secondDelay = await delays.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(2, attempts);
+        Assert.True(connected);
+        secondDelay.SetResult(true);
+
+        var connectedDelay = await delays.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(2, attempts);
+        connected = false;
+        connectedDelay.SetResult(true);
+
+        var recoveryDelay = await delays.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(3, attempts);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => retry);
+        recoveryDelay.SetResult(true);
+    }
+
     [Fact]
     public void CurrentWorkspaceLabelsUseValidNormalFontWeightByDefault()
     {

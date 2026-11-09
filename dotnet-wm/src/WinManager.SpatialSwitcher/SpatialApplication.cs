@@ -11,7 +11,11 @@ internal sealed class SpatialApplication : Application
 {
     private WindowIcon? trayWindowIcon;
 
-    public SpatialApplication() => DeskTheme.Apply(this);
+    public SpatialApplication()
+    {
+        DeskTheme.Apply(this);
+        SwitcherTheme.Initialize(this);
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {
@@ -30,6 +34,27 @@ internal sealed class SpatialApplication : Application
             var menu = new NativeMenu();
             menu.Items.Add(connectionStatus);
             menu.Items.Add(shortcutStatus);
+            menu.Items.Add(new NativeMenuItemSeparator());
+
+            var appearanceMenu = new NativeMenu();
+            var appearanceItems = new Dictionary<SwitcherThemeMode, NativeMenuItem>();
+            foreach (var mode in Enum.GetValues<SwitcherThemeMode>())
+            {
+                var item = new NativeMenuItem(mode.ToString())
+                {
+                    ToggleType = MenuItemToggleType.Radio,
+                    IsChecked = mode == SwitcherTheme.Preference
+                };
+                item.Click += (_, _) =>
+                {
+                    SwitcherTheme.SetPreference(this, mode);
+                    foreach (var (itemMode, themeItem) in appearanceItems)
+                        themeItem.IsChecked = itemMode == mode;
+                };
+                appearanceItems.Add(mode, item);
+                appearanceMenu.Items.Add(item);
+            }
+            menu.Items.Add(new NativeMenuItem("Appearance") { Menu = appearanceMenu });
             menu.Items.Add(new NativeMenuItemSeparator());
 
             var showWindows = new NativeMenuItem("Show window switcher");
