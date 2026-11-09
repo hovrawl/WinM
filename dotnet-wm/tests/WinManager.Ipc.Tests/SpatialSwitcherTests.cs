@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Media;
 using WinManager.Contracts;
 using WinManager.SpatialSwitcher;
 using Xunit;
@@ -7,6 +8,23 @@ namespace WinManager.Ipc.Tests;
 
 public sealed class SpatialSwitcherTests
 {
+    [Fact]
+    public void CurrentWorkspaceLabelsUseValidNormalFontWeightByDefault()
+    {
+        var label = CurrentWorkspaceWindow.Label("Window", 12, Brushes.White);
+
+        Assert.Equal(FontWeight.Normal, label.FontWeight);
+        _ = new Typeface(FontFamily.Default, FontStyle.Normal, label.FontWeight, FontStretch.Normal);
+    }
+
+    [Fact]
+    public void CurrentWorkspaceLabelsPreserveExplicitFontWeight()
+    {
+        var label = CurrentWorkspaceWindow.Label("Window", 12, Brushes.White, FontWeight.SemiBold);
+
+        Assert.Equal(FontWeight.SemiBold, label.FontWeight);
+    }
+
     [Fact]
     public void SearchMatchesWorkspaceNamesWithoutChangingDeskCoordinates()
     {
@@ -69,7 +87,7 @@ public sealed class SpatialSwitcherTests
     }
 
     [Fact]
-    public void KeyboardPolicyCapturesReadyAltTabAndWinTabChords()
+    public void KeyboardPolicyCapturesAltTabWinTabAndWinSpaceChords()
     {
         var policy = new SwitcherKeyboardPolicy();
 
@@ -78,9 +96,18 @@ public sealed class SpatialSwitcherTests
         Assert.Equal(SwitcherKeyboardAction.CycleWindowForward, altTab.Action);
         Assert.True(policy.Process(0, 0x09, false, false, false, false, false, false, false).Suppress);
 
-        var winTab = policy.Process(0, 0x09, true, false, true, true, false, false, true);
+        var winSpace = policy.Process(0, 0x20, true, false, true, true, false, false, true);
+        Assert.True(winSpace.Suppress);
+        Assert.Equal(SwitcherKeyboardAction.CycleWorkspaceBackward, winSpace.Action);
+        Assert.True(policy.Process(0, 0x20, false, false, false, false, false, false, false).Suppress);
+
+        var winTab = policy.Process(0, 0x09, true, false, true, false, false, false, true);
         Assert.True(winTab.Suppress);
-        Assert.Equal(SwitcherKeyboardAction.CycleWorkspaceBackward, winTab.Action);
+        Assert.Equal(SwitcherKeyboardAction.CycleWorkspaceForward, winTab.Action);
+        Assert.True(policy.Process(0, 0x09, false, false, false, false, false, false, false).Suppress);
+
+        var reverseWinTab = policy.Process(0, 0x09, true, false, true, true, false, false, true);
+        Assert.Equal(SwitcherKeyboardAction.CycleWorkspaceBackward, reverseWinTab.Action);
 
         var controlTabPolicy = new SwitcherKeyboardPolicy();
         Assert.False(controlTabPolicy.Process(0, 0x09, true, true, false, false, false, false, true).Suppress);
@@ -97,6 +124,7 @@ public sealed class SpatialSwitcherTests
         Assert.False(policy.Process(0, 0x09, true, false, false, false, true, false, false).Suppress);
         Assert.False(policy.Process(0, 0x09, true, false, false, false, true, true, true).Suppress);
         Assert.False(policy.Process(0, 0x41, true, false, false, false, true, false, true).Suppress);
+        Assert.False(policy.Process(0, 0x09, true, false, true, false, false, true, true).Suppress);
 
         Assert.True(policy.Process(0, 0x09, true, false, false, false, true, false, true).Suppress);
         Assert.True(policy.Process(0, 0x09, false, false, false, false, false, false, false).Suppress);
@@ -114,6 +142,29 @@ public sealed class SpatialSwitcherTests
             policy.Process(0, 0x09, true, false, false, false, true, false, true).Action);
         Assert.True(policy.Process(0, 0x09, false, false, false, false, false, false, true).Suppress);
         Assert.False(policy.Process(0, 0x09, true, false, false, false, false, false, true).Suppress);
+
+        var workspacePolicy = new SwitcherKeyboardPolicy();
+        Assert.Equal(SwitcherKeyboardAction.CycleWorkspaceForward,
+            workspacePolicy.Process(0, 0x09, true, false, true, false, false, false, true).Action);
+        Assert.Equal(SwitcherKeyboardAction.CycleWorkspaceForward,
+            workspacePolicy.Process(0, 0x09, true, false, true, false, false, false, true).Action);
+        Assert.True(workspacePolicy.Process(0, 0x09, false, false, false, false, false, false, true).Suppress);
+    }
+
+    [Fact]
+    public void KeyboardPolicyPairsWindowAndWorkspaceShortcutReleasesIndependently()
+    {
+        var policy = new SwitcherKeyboardPolicy();
+
+        Assert.Equal(SwitcherKeyboardAction.CycleWindowForward,
+            policy.Process(0, 0x09, true, false, false, false, true, false, true).Action);
+        Assert.Equal(SwitcherKeyboardAction.CycleWorkspaceForward,
+            policy.Process(0, 0x20, true, false, true, false, false, false, true).Action);
+        Assert.Equal(SwitcherKeyboardAction.CycleWorkspaceForward,
+            policy.Process(0, 0x09, true, false, true, false, false, false, true).Action);
+        Assert.True(policy.Process(0, 0x09, false, false, false, false, false, false, true).Suppress);
+        Assert.True(policy.Process(0, 0x20, false, false, false, false, false, false, true).Suppress);
+        Assert.False(policy.Process(0, 0x09, false, false, false, false, false, false, true).Suppress);
     }
 
     [Fact]
@@ -159,6 +210,71 @@ public sealed class SpatialSwitcherTests
 
         snapshot = snapshot with { Desktop = snapshot.Desktop with { FocusedWindowId = null } };
         Assert.Equal(chat.Id, SpatialSwitcherPresentation.CurrentWorkspaceId(snapshot));
+    }
+
+    [Fact]
+    public void CurrentWorkspaceContextFollowsForegroundMonitorEvenWhenItsViewIsEmpty()
+    {
+        var left = Guid.NewGuid();
+        var right = Guid.NewGuid();
+        var editor = Window("Editor") with { MonitorId = left };
+        var code = Workspace("Code", new(0, 0)) with
+            { MonitorId = left, Active = true, WindowIds = [editor.Id] };
+        var empty = Workspace("Empty", new(200, 0)) with
+            { MonitorId = right, Active = true };
+        var snapshot = new ManagerSnapshot(Guid.NewGuid(), 1,
+            new DesktopSnapshot([Monitor(left), Monitor(right)], [editor], editor.Id),
+            new Dictionary<Guid, SplitNodeInfo?>(), false, [code, empty], null,
+            [new(left, code.Id), new(right, empty.Id)]);
+
+        Assert.Equal(empty.Id, SpatialSwitcherPresentation.CurrentWorkspaceId(snapshot, right));
+        Assert.Equal(new SwitcherContext(empty.Id, null, right),
+            SpatialSwitcherPresentation.CaptureContext(snapshot, right));
+    }
+
+    [Fact]
+    public void WindowGroupsSeparateVisibleWindowsFromMinimizedAndOverflowWindows()
+    {
+        var active = Window("Active");
+        var minimized = Window("Minimized", visible: false, minimized: true);
+        var overflow = Window("Overflow", visible: false, minimized: true, overflow: true);
+        var ignored = Window("Ignored", ignored: true);
+        var workspace = Workspace("Code", new(0, 0)) with
+            { WindowIds = [active.Id, minimized.Id, overflow.Id, ignored.Id] };
+
+        var groups = SpatialSwitcherPresentation.WindowGroupsForWorkspace(workspace,
+            [active, minimized, overflow, ignored]);
+
+        Assert.Equal([active.Id], groups.Active.Select(window => window.Id));
+        Assert.Equal([minimized.Id, overflow.Id], groups.Inactive.Select(window => window.Id));
+    }
+
+    [Fact]
+    public void PopupCenteringUsesMonitorDpiAndKeepsNegativeCoordinates()
+    {
+        var position = PopupPlacement.Center(new(-1920, -120, 1920, 1080), 400, 200, 144);
+
+        Assert.Equal(new PixelPoint(-1260, 270), position);
+    }
+
+    [Fact]
+    public void PopupCenteringClampsOversizedWindowToWorkArea()
+    {
+        var position = PopupPlacement.Center(new(100, 50, 500, 300), 1000, 1000, 96);
+
+        Assert.Equal(new PixelPoint(100, 50), position);
+    }
+
+    [Fact]
+    public void PopupMonitorFallbackPrefersRequestedMonitorThenStablePrimary()
+    {
+        var primary = Monitor(Guid.NewGuid());
+        var secondary = Monitor(Guid.NewGuid()) with
+            { DeviceName = "DISPLAY-Z", Bounds = new(1920, 0, 1920, 1080) };
+
+        Assert.Equal(secondary.Id, PopupPlacement.FromSnapshot([primary, secondary], secondary.Id)?.MonitorId);
+        Assert.Equal(primary.Id, PopupPlacement.FromSnapshot([secondary, primary])?.MonitorId);
+        Assert.Null(PopupPlacement.FromSnapshot([]));
     }
 
     [Fact]

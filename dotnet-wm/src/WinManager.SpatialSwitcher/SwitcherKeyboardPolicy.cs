@@ -13,29 +13,41 @@ public readonly record struct SwitcherKeyboardDecision(bool Suppress, SwitcherKe
 public sealed class SwitcherKeyboardPolicy
 {
     private const int TabKey = 0x09;
+    private const int SpaceKey = 0x20;
     private bool tabSuppressed;
+    private bool spaceSuppressed;
 
     public SwitcherKeyboardDecision Process(int hookCode, int virtualKey, bool keyDown, bool controlDown,
         bool windowsDown, bool shiftDown, bool altDown, bool injected, bool enabled)
     {
         if (hookCode < 0) return default;
-        if (virtualKey != TabKey) return default;
+        if (virtualKey is not (TabKey or SpaceKey)) return default;
 
+        var isTab = virtualKey == TabKey;
+        var suppressed = isTab ? tabSuppressed : spaceSuppressed;
         if (!keyDown)
         {
-            if (!tabSuppressed) return default;
-            tabSuppressed = false;
+            if (!suppressed) return default;
+            if (isTab) tabSuppressed = false;
+            else spaceSuppressed = false;
             return new(true);
         }
 
-        if (tabSuppressed)
+        if (suppressed)
         {
-            if (!enabled || injected || controlDown || altDown == windowsDown) return new(true);
-            return new(true, ActionFor(windowsDown, shiftDown));
+            var repeatsChord = isTab
+                ? enabled && !injected && !controlDown && (altDown != windowsDown)
+                : enabled && !injected && !controlDown && windowsDown && !altDown;
+            return new(true, repeatsChord ? ActionFor(windowsDown, shiftDown) : null);
         }
 
-        if (!enabled || injected || controlDown || altDown == windowsDown) return default;
-        tabSuppressed = true;
+        var matchesChord = isTab
+            ? enabled && !injected && !controlDown && (altDown != windowsDown)
+            : enabled && !injected && !controlDown && windowsDown && !altDown;
+        if (!matchesChord) return default;
+
+        if (isTab) tabSuppressed = true;
+        else spaceSuppressed = true;
         return new(true, ActionFor(windowsDown, shiftDown));
     }
 

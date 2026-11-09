@@ -11,6 +11,7 @@ internal sealed class SwitcherKeyboardHook : IDisposable
     private const int WmSysKeyDown = 0x0104;
     private const int WmSysKeyUp = 0x0105;
     private const uint LlkhfInjected = 0x10;
+    private const int VkSpace = 0x20;
     private const int VkControl = 0x11;
     private const int VkShift = 0x10;
     private const int VkMenu = 0x12;
@@ -55,6 +56,8 @@ internal sealed class SwitcherKeyboardHook : IDisposable
                 return CallNextHookEx(hook, code, wParam, lParam);
 
             var key = Marshal.PtrToStructure<KeyboardHookData>(lParam);
+            if (key.VirtualKey is not (0x09 or VkSpace))
+                return CallNextHookEx(hook, code, wParam, lParam);
             decision = policy.Process(code, unchecked((int)key.VirtualKey), keyDown,
                 IsDown(VkControl), IsDown(VkLwin) || IsDown(VkRwin), IsDown(VkShift), IsDown(VkMenu),
                 (key.Flags & LlkhfInjected) != 0, enabled: true);

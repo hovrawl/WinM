@@ -4,6 +4,8 @@ using WinManager.Contracts;
 namespace WinManager.SpatialSwitcher;
 
 public readonly record struct SwitcherContext(Guid? WorkspaceId, Guid? WindowId, Guid? MonitorId);
+public readonly record struct WorkspaceWindowGroups(IReadOnlyList<WindowInfo> Active,
+    IReadOnlyList<WindowInfo> Inactive);
 
 public static class SpatialSwitcherPresentation
 {
@@ -69,9 +71,23 @@ public static class SpatialSwitcherPresentation
         return new ManagerCommand(CommandKind.ActivateWorkspace, WorkspaceId: workspaceId, MonitorId: monitorId);
     }
 
-    public static Guid? CurrentWorkspaceId(ManagerSnapshot snapshot)
+    public static Guid? CurrentWorkspaceId(ManagerSnapshot snapshot, Guid? monitorId = null)
     {
         var workspaces = snapshot.Workspaces ?? [];
+        if (monitorId is { } targetMonitor && snapshot.Desktop.Monitors.Any(monitor => monitor.Id == targetMonitor))
+        {
+            var view = snapshot.WorkspaceViews?.FirstOrDefault(candidate => candidate.MonitorId == targetMonitor);
+            if (view is not null && workspaces.Any(workspace => workspace.Id == view.WorkspaceId))
+                return view.WorkspaceId;
+            var active = workspaces.FirstOrDefault(workspace => workspace.Active && workspace.MonitorId == targetMonitor);
+            if (active is not null) return active.Id;
+            var focusedOnMonitor = snapshot.Desktop.Windows.FirstOrDefault(window =>
+                window.Id == snapshot.Desktop.FocusedWindowId && window.MonitorId == targetMonitor);
+            return focusedOnMonitor is null
+                ? null
+                : workspaces.FirstOrDefault(workspace => workspace.WindowIds.Contains(focusedOnMonitor.Id))?.Id;
+        }
+
         var focused = snapshot.Desktop.Windows.FirstOrDefault(window =>
             window.Id == snapshot.Desktop.FocusedWindowId);
         return (focused is null ? null : workspaces.FirstOrDefault(workspace =>
@@ -79,9 +95,13 @@ public static class SpatialSwitcherPresentation
                workspaces.FirstOrDefault(workspace => workspace.Active)?.Id ?? workspaces.FirstOrDefault()?.Id;
     }
 
-    public static SwitcherContext CaptureContext(ManagerSnapshot snapshot)
+    public static SwitcherContext CaptureContext(ManagerSnapshot snapshot, Guid? foregroundMonitorId = null)
     {
-        var workspaceId = CurrentWorkspaceId(snapshot);
+        var requestedMonitorId = foregroundMonitorId is { } requested &&
+                                 snapshot.Desktop.Monitors.Any(monitor => monitor.Id == requested)
+            ? foregroundMonitorId
+            : null;
+        var workspaceId = CurrentWorkspaceId(snapshot, requestedMonitorId);
         var workspace = snapshot.Workspaces?.FirstOrDefault(candidate => candidate.Id == workspaceId);
         var focused = snapshot.Desktop.Windows.FirstOrDefault(window =>
             window.Id == snapshot.Desktop.FocusedWindowId && workspace?.WindowIds.Contains(window.Id) == true);
@@ -90,25 +110,33 @@ public static class SpatialSwitcherPresentation
             ? focused
             : windows.FirstOrDefault();
         var monitors = snapshot.Desktop.Monitors;
-        var monitorId = selectedWindow is not null && monitors.Any(monitor => monitor.Id == selectedWindow.MonitorId)
+        var monitorId = requestedMonitorId ?? (selectedWindow is not null && monitors.Any(monitor => monitor.Id == selectedWindow.MonitorId)
             ? selectedWindow.MonitorId
             : workspace is { Active: true } && monitors.Any(monitor => monitor.Id == workspace.MonitorId)
                 ? workspace.MonitorId
                 : monitors.OrderBy(monitor => monitor.Bounds.X == 0 && monitor.Bounds.Y == 0 ? 0 : 1)
                     .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(monitor => monitor.Id).Select(monitor => (Guid?)monitor.Id).FirstOrDefault();
+                    .ThenBy(monitor => monitor.Id).Select(monitor => (Guid?)monitor.Id).FirstOrDefault());
         return new SwitcherContext(workspaceId, selectedWindow?.Id, monitorId);
+    }
+
+    public static WorkspaceWindowGroups WindowGroupsForWorkspace(WorkspaceInfo? workspace,
+        IReadOnlyList<WindowInfo> windows)
+    {
+        if (workspace is null) return new WorkspaceWindowGroups([], []);
+        var byId = windows.ToDictionary(window => window.Id);
+        var candidates = workspace.WindowIds.Where(byId.ContainsKey).Select(id => byId[id])
+            .Where(window => !window.IsIgnored && !window.ManagerHidden).ToArray();
+        return new WorkspaceWindowGroups(
+            candidates.Where(window => window.Visible && !window.Minimized && !window.LayoutOverflow).ToArray(),
+            candidates.Where(window => !window.Visible || window.Minimized || window.LayoutOverflow).ToArray());
     }
 
     public static IReadOnlyList<WindowInfo> WindowsForWorkspace(WorkspaceInfo? workspace,
         IReadOnlyList<WindowInfo> windows)
     {
-        if (workspace is null) return [];
-        var membership = workspace.WindowIds.ToHashSet();
-        return windows.Where(window => membership.Contains(window.Id) && !window.IsIgnored &&
-                                       !window.ManagerHidden && window.Bounds.Width > 0 && window.Bounds.Height > 0 &&
-                                       (window.LayoutOverflow || window.Visible && !window.Minimized))
-            .ToArray();
+        var groups = WindowGroupsForWorkspace(workspace, windows);
+        return groups.Active.Concat(groups.Inactive).ToArray();
     }
 
     public static Guid? CycleWindow(Guid? currentId, IReadOnlyList<WindowInfo> candidates, bool previous)
