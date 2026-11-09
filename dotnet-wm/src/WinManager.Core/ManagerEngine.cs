@@ -50,6 +50,7 @@ public sealed class ManagerEngine
     private readonly HashSet<Guid> managerMinimizedWindowIds = [];
     private readonly Dictionary<Guid, HashSet<Guid>> stagedWindowIds = [];
     private readonly Dictionary<Guid, Guid> lastFocusedWindowByWorkspace = [];
+    private readonly Dictionary<Guid, Guid[]> appliedLayeredStackOrders = [];
     private readonly Guid instanceId = Guid.NewGuid();
     private readonly int innerGap;
     private readonly int outerGap;
@@ -317,6 +318,9 @@ public sealed class ManagerEngine
         foreach (var staged in stagedWindowIds.Values) staged.IntersectWith(existing);
         resizingWindows.IntersectWith(movingWindows.Keys);
         workspaces.Reconcile(desktop);
+        var workspaceIds = workspaces.Snapshot.Select(workspace => workspace.Id).ToHashSet();
+        foreach (var workspaceId in appliedLayeredStackOrders.Keys.Where(id => !workspaceIds.Contains(id)).ToArray())
+            appliedLayeredStackOrders.Remove(workspaceId);
         foreach (var (workspaceId, windowId) in lastFocusedWindowByWorkspace.ToArray())
             if (workspaces.WorkspaceFor(windowId) != workspaceId)
                 lastFocusedWindowByWorkspace.Remove(workspaceId);
@@ -395,6 +399,8 @@ public sealed class ManagerEngine
 
         List<NativeActionFailure> failures = [];
         List<WindowPlacement> placements = [];
+        List<Guid> stackingOrderWindowIds = [];
+        Dictionary<Guid, Guid[]> changedLayeredStackOrders = [];
         var restoreTargetStaged = false;
         if (!paused)
         {
@@ -424,6 +430,16 @@ public sealed class ManagerEngine
                         if (displacedFocus is { } displaced) priority.Add(displaced);
                     }
 
+                    var preferredFocus = restoreTarget is { } && workspace.WindowIds.Contains(restoreTarget.Value)
+                        ? restoreTarget
+                        : focus ?? desktop.FocusedWindowId;
+                    var layeredFocus = preferredFocus is { } preferredId && workspace.WindowIds.Contains(preferredId) &&
+                                       windowsById.TryGetValue(preferredId, out var preferredWindow) &&
+                                       preferredWindow.Mode == WindowMode.Tiling && !preferredWindow.IsIgnored &&
+                                       (preferredWindow.Visible && !preferredWindow.Minimized ||
+                                        preferredWindow.LayoutOverflow)
+                        ? preferredId
+                        : PreviouslyFocusedTile(workspace, desktop);
                     var plan = Layout(workspace, monitor, windowsById, priority);
                     if (restoreTarget is { } target && workspace.WindowIds.Contains(target) &&
                         plan.Placements.Any(placement => placement.WindowId == target))
@@ -440,6 +456,21 @@ public sealed class ManagerEngine
                     }
 
                     placements.AddRange(plan.Placements);
+                    if (workspace.Layout == WorkspaceLayout.Layered)
+                    {
+                        var stackOrder = OrderLayeredStack(plan.Placements, layeredFocus,
+                            appliedLayeredStackOrders.GetValueOrDefault(workspace.Id));
+                        if (stackOrder.Length == 0)
+                            appliedLayeredStackOrders.Remove(workspace.Id);
+                        else if (!appliedLayeredStackOrders.TryGetValue(workspace.Id, out var applied) ||
+                            !applied.SequenceEqual(stackOrder))
+                        {
+                            stackingOrderWindowIds.AddRange(stackOrder);
+                            changedLayeredStackOrders[workspace.Id] = stackOrder;
+                        }
+                    }
+                    else
+                        appliedLayeredStackOrders.Remove(workspace.Id);
                     nextOverflow.ExceptWith(workspace.WindowIds);
                     nextOverflow.UnionWith(plan.OverflowWindowIds ?? []);
                     stagedWindowIds[workspace.Id] = plan.Placements.Select(placement => placement.WindowId).ToHashSet();
@@ -508,10 +539,17 @@ public sealed class ManagerEngine
             return managerMinimizedWindowIds.Contains(window.Id) && window.Minimized;
         }).Select(window => new WindowMinimization(window.Id, overflowWindowIds.Contains(window.Id))).ToArray();
         if (changes.Length > 0 || focus is not null || visibility.Length > 0 || minimizations.Length > 0 ||
-            droppedWindowId is not null)
+            droppedWindowId is not null || stackingOrderWindowIds.Count > 0)
         {
-            failures.AddRange((await platform.ApplyAsync(new(changes, focus, visibility,
-                droppedWindowId is { } completed ? [completed] : null, minimizations), cancellationToken)).Failures);
+            var applyResult = await platform.ApplyAsync(new(changes, focus, visibility,
+                droppedWindowId is { } completed ? [completed] : null, minimizations,
+                StackingOrderWindowIds: stackingOrderWindowIds.Count == 0 ? null : stackingOrderWindowIds),
+                cancellationToken);
+            failures.AddRange(applyResult.Failures);
+            foreach (var (workspaceId, stackOrder) in changedLayeredStackOrders)
+                if (!applyResult.Failures.Any(failure => failure.WindowId is null ||
+                        stackOrder.Contains(failure.WindowId.Value)))
+                    appliedLayeredStackOrders[workspaceId] = stackOrder;
             desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
             var observed = desktop.Windows.ToDictionary(window => window.Id);
             foreach (var minimization in minimizations)
@@ -617,6 +655,30 @@ public sealed class ManagerEngine
                 workspace.LayeredLayoutOptions),
             _ => throw new InvalidOperationException("Workspace layout is not supported.")
         };
+    }
+
+    private static Guid[] OrderLayeredStack(IReadOnlyList<WindowPlacement> placements, Guid? focusedWindowId,
+        IReadOnlyList<Guid>? previousOrder)
+    {
+        var windowIds = placements.Select(placement => placement.WindowId).ToArray();
+        if (windowIds.Length == 0) return windowIds;
+
+        var focusedIndex = Array.IndexOf(windowIds, focusedWindowId);
+        if (focusedIndex >= 0)
+            return windowIds.Select((windowId, index) => (windowId, index))
+                .OrderBy(item => Math.Abs(item.index - focusedIndex))
+                .ThenBy(item => item.index)
+                .Select(item => item.windowId).ToArray();
+
+        if (previousOrder is null) return windowIds;
+        var previousIndices = previousOrder.Select((windowId, index) => (windowId, index))
+            .ToDictionary(item => item.windowId, item => item.index);
+        return windowIds.Select((windowId, index) => (windowId, index))
+            .OrderBy(item => previousIndices.TryGetValue(item.windowId, out var previousIndex)
+                ? previousIndex
+                : int.MaxValue)
+            .ThenBy(item => item.index)
+            .Select(item => item.windowId).ToArray();
     }
 
     private static double DistanceToTile(PixelRect bounds, double x, double y)

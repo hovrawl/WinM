@@ -47,12 +47,14 @@ try
     builder.Services.AddSingleton(configuration);
     builder.Services.AddSingleton(configurationStore);
     builder.Services.AddSingleton<HostRuntimeState>();
+    builder.Services.AddSingleton<IHostTray, WindowsHostTray>();
     HostComposition.AddNativeServices(builder.Services, configuration, recoveryPath);
     builder.Services.AddSingleton(services => new ManagerEngine(services.GetRequiredService<IWindowPlatform>(),
         configuration.InnerGap, configuration.OuterGap, configuration.InputCapacity, configuration.Workspaces,
         configuration.MonitorOrder));
     builder.Services.AddSingleton(services => new PipeServer(services.GetRequiredService<ManagerEngine>(), pipeName,
         configuration.MaximumClients, configuration.OutputCapacity, configurationStore));
+    builder.Services.AddHostedService<HostTrayService>();
     builder.Services.AddHostedService<ObservationService>();
     builder.Services.AddHostedService<PipeService>();
     builder.Services.AddHostedService<ShortcutService>();

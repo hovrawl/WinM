@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WinManager.Contracts;
 using WinManager.Host;
@@ -427,6 +428,22 @@ public sealed class HostConfigurationTests
     }
 
     [Fact]
+    public async Task HostTrayQuitRequestsGracefulShutdownAndStopsTrayLoop()
+    {
+        var lifetime = new TestHostApplicationLifetime();
+        var tray = new FakeHostTray();
+        using var service = new HostTrayService(lifetime, tray);
+
+        await service.StartAsync(CancellationToken.None);
+        await tray.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        tray.RequestQuit();
+
+        Assert.Equal(1, lifetime.StopRequests);
+        await service.StopAsync(CancellationToken.None);
+        Assert.True(tray.StopObserved);
+    }
+
+    [Fact]
     public void LogsRotateAndBoundLargeMessages()
     {
         using var directory = new TestDirectory();
@@ -450,5 +467,43 @@ public sealed class HostConfigurationTests
 
         public TestDirectory() => Directory.CreateDirectory(Path);
         public void Dispose() => Directory.Delete(Path, recursive: true);
+    }
+
+    private sealed class FakeHostTray : IHostTray
+    {
+        private Action? requestShutdown;
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool StopObserved { get; private set; }
+
+        public async Task RunAsync(Action stopApplication, CancellationToken stoppingToken)
+        {
+            requestShutdown = stopApplication;
+            Started.TrySetResult();
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                StopObserved = true;
+            }
+        }
+
+        public void RequestQuit() => requestShutdown!();
+    }
+
+    private sealed class TestHostApplicationLifetime : IHostApplicationLifetime
+    {
+        private readonly CancellationTokenSource started = new();
+        private readonly CancellationTokenSource stopping = new();
+        private readonly CancellationTokenSource stopped = new();
+
+        public CancellationToken ApplicationStarted => started.Token;
+        public CancellationToken ApplicationStopping => stopping.Token;
+        public CancellationToken ApplicationStopped => stopped.Token;
+        public int StopRequests { get; private set; }
+
+        public void StopApplication()
+        {
+            StopRequests++;
+            stopping.Cancel();
+        }
     }
 }

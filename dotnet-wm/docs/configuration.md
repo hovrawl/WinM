@@ -88,7 +88,14 @@ are replaced by custom bindings rather than registered twice.
   horizontal offset is compressed when a larger stack would exceed the available
   width; a zero offset completely overlays pages. Only a page whose own minimum
   size exceeds the work area overflows. Runtime layout/option changes last until
-  the manager restarts; configure these values to select restart defaults.
+  the manager restarts; configure these values to select restart defaults. On a
+  Layered workspace, focus changes only the native Z-order: the selected page is
+  brought to the front, then its immediately adjacent left and right pages are
+  shown underneath it, followed by the next pair outward, and so on. Equal-distance
+  ties follow saved page order. For example, focusing page 4 in a seven-page stack
+  gives the front-to-back order `4, 3, 5, 2, 6, 1, 7`. Page bounds and horizontal
+  positions remain unchanged, and the workspace tree is not reordered. With no
+  eligible focused page, the last successful stack order is retained.
 - Each workspace can seed an optional logical `position` with finite `x` and `y`
   coordinates in `[-100000,100000]`. If omitted, the manager assigns stable
   defaults in workspace creation order, four columns at 480 desk units by 360
@@ -235,3 +242,8 @@ Logon registration is explicit through CLI `install-startup`/`uninstall-startup`
 using only the current user's Run entry. No service, elevation, scheduled task,
 or visualization process is required for the current manager. Real logon and mixed-DPI/hotplug hardware
 validation should accompany deployment to a new machine.
+
+The host runs without a visible main window and places a WinManager icon in the
+Windows notification area. Choose **Quit WinManager** from its context menu to
+request graceful shutdown; the host then completes the normal recovery-protected
+restore and cleanup path.

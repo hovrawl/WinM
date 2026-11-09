@@ -162,7 +162,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         ArgumentNullException.ThrowIfNull(plan);
         return DispatchApplyAsync(new LayoutPlan(plan.Placements.ToArray(), plan.FocusWindowId,
             plan.Visibility?.ToArray(), plan.CompletedMoves?.ToArray(), plan.Minimizations?.ToArray(),
-            plan.OverflowWindowIds?.ToArray()), false, cancellationToken);
+            plan.OverflowWindowIds?.ToArray(), plan.StackingOrderWindowIds?.ToArray()), false, cancellationToken);
     }
 
     public Task<ApplyResult> RestoreAsync(CancellationToken cancellationToken) =>
@@ -712,6 +712,28 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                     SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER |
                     SET_WINDOW_POS_FLAGS.SWP_ASYNCWINDOWPOS))
                 failures.Add(ActionError(placement.WindowId, "SetWindowPos"));
+        }
+
+        var insertAfter = new HWND(0);
+        foreach (var windowId in plan.StackingOrderWindowIds ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (movingWindows.ContainsValue(windowId) || pendingDrops.Contains(windowId)) continue;
+            if (!ValidateTarget(windowId, out var window, out _, out var failure))
+            {
+                failures.Add(failure!);
+                continue;
+            }
+
+            Marshal.SetLastPInvokeError(0);
+            if (!PInvoke.SetWindowPos(window, insertAfter, 0, 0, 0, 0,
+                    SET_WINDOW_POS_FLAGS.SWP_NOMOVE | SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
+                    SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE))
+            {
+                failures.Add(ActionError(windowId, "SetWindowPos(z-order)"));
+                continue;
+            }
+            insertAfter = window;
         }
 
         if (plan.FocusWindowId is { } focusId)

@@ -984,4 +984,116 @@ public sealed class WorkspaceManagerTests
             await run;
         }
     }
+
+    [Fact]
+    public async Task LayeredFocusReordersFrontPageWithoutChangingTreeAndRetriesFailedRestack()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var monitor = fake.Desktop.Monitors.Single();
+        var windows = Enumerable.Range(0, 7).Select(index => new WindowInfo(Guid.NewGuid(), monitor.Id,
+            $"Page {index}", "test", "test", new(-900 + index * 240, 50, 200, 200), true, false, false,
+            WindowMode.Tiling, 100, 100)).ToArray();
+        fake.Desktop = new([monitor], windows, null);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One", Layout: WorkspaceLayout.Layered)]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var workspace = Assert.Single(engine.Current!.Workspaces!);
+            var savedTree = engine.Current.Trees[workspace.Id];
+            var treeOrder = workspace.WindowIds.ToArray();
+            var originalBounds = fake.Desktop.Windows.ToDictionary(window => window.Id, window => window.Bounds);
+            Assert.Equal(treeOrder, fake.Plans[^1].Placements.Select(placement => placement.WindowId));
+            Assert.Equal(treeOrder, fake.Plans[^1].StackingOrderWindowIds);
+
+            var expectedOrders = new[]
+            {
+                new[] { 0, 1, 2, 3, 4, 5, 6 },
+                new[] { 1, 0, 2, 3, 4, 5, 6 },
+                new[] { 2, 1, 3, 0, 4, 5, 6 },
+                new[] { 3, 2, 4, 1, 5, 0, 6 },
+                new[] { 4, 3, 5, 2, 6, 1, 0 },
+                new[] { 5, 4, 6, 3, 2, 1, 0 },
+                new[] { 6, 5, 4, 3, 2, 1, 0 }
+            };
+            void AssertUnchangedGeometryAndTree()
+            {
+                foreach (var windowId in treeOrder)
+                    Assert.Equal(originalBounds[windowId],
+                        fake.Desktop.Windows.Single(window => window.Id == windowId).Bounds);
+                Assert.Equal(savedTree, engine.Current!.Trees[workspace.Id]);
+            }
+
+            for (var focusedIndex = 0; focusedIndex < treeOrder.Length; focusedIndex++)
+            {
+                fake.Desktop = fake.Desktop with { FocusedWindowId = treeOrder[focusedIndex] };
+                Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+                Assert.Equal(expectedOrders[focusedIndex].Select(index => treeOrder[index]),
+                    fake.Plans[^1].StackingOrderWindowIds);
+                AssertUnchangedGeometryAndTree();
+            }
+
+            var focused = await engine.ExecuteAsync(new(CommandKind.Focus, WindowId: treeOrder[3]), timeout.Token);
+            Assert.True(focused.Success);
+            Assert.Equal(treeOrder[3], fake.Plans[^1].FocusWindowId);
+            Assert.Equal(expectedOrders[3].Select(index => treeOrder[index]), fake.Plans[^1].StackingOrderWindowIds);
+            AssertUnchangedGeometryAndTree();
+
+            var planCount = fake.Plans.Count;
+            fake.Desktop = fake.Desktop with { FocusedWindowId = null };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            Assert.Equal(planCount, fake.Plans.Count);
+            Assert.Equal(expectedOrders[3].Select(index => treeOrder[index]), fake.Plans[^1].StackingOrderWindowIds);
+
+            fake.Desktop = fake.Desktop with { FocusedWindowId = treeOrder[1] };
+            fake.FailActions = true;
+            var failed = await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token);
+            Assert.False(failed.Success);
+            Assert.Equal(expectedOrders[1].Select(index => treeOrder[index]), fake.Plans[^1].StackingOrderWindowIds);
+            AssertUnchangedGeometryAndTree();
+
+            fake.FailActions = false;
+            planCount = fake.Plans.Count;
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            Assert.Equal(planCount + 1, fake.Plans.Count);
+            Assert.Equal(expectedOrders[1].Select(index => treeOrder[index]), fake.Plans[^1].StackingOrderWindowIds);
+            AssertUnchangedGeometryAndTree();
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task SplitLayoutDoesNotRequestFocusRelativeStackingOrder()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var monitor = fake.Desktop.Monitors.Single();
+        var windows = Enumerable.Range(0, 3).Select(index => new WindowInfo(Guid.NewGuid(), monitor.Id,
+            $"Window {index}", "test", "test", new(-900 + index * 240, 50, 200, 200), true, false, false,
+            WindowMode.Tiling, 100, 100)).ToArray();
+        fake.Desktop = new([monitor], windows, null);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One", Layout: WorkspaceLayout.Split)]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var workspace = Assert.Single(engine.Current!.Workspaces!);
+            var focusedWindow = workspace.WindowIds[^1];
+            fake.Desktop = fake.Desktop with { FocusedWindowId = focusedWindow };
+
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            Assert.All(fake.Plans, plan => Assert.Null(plan.StackingOrderWindowIds));
+            Assert.Equal(workspace.WindowIds, engine.Current!.Workspaces!.Single().WindowIds);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
 }

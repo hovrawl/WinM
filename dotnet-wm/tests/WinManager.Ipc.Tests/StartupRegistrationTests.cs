@@ -144,7 +144,7 @@ public sealed class StartupRegistrationTests
     [InlineData("uninstall-startup", "--registration-name", "Other")]
     public async Task CliRejectsInvalidStartupArgumentsWithoutConnectingOrRegistering(params string[] args)
     {
-        Assert.Equal(2, await Program.Main(args));
+        Assert.Equal(2, await WinManager.Cli.Program.Main(args));
     }
 
     private sealed class RegistrationFixture : IDisposable
