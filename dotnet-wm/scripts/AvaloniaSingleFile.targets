@@ -1,0 +1,20 @@
+﻿<Project>
+  <Target Name="ValidateAvaloniaSingleFileAot" BeforeTargets="PrepareForPublish"
+          Condition="'$(AvaloniaSingleFileAot)' == 'true'">
+    <Error Condition="'$(RuntimeIdentifier)' != 'win-x64'"
+           Text="Avalonia static single-file NativeAOT is currently supported only for win-x64." />
+    <Error Condition="'$(PublishAot)' != 'true' or '$(SelfContained)' != 'true'"
+           Text="Avalonia static single-file publishing requires self-contained NativeAOT." />
+  </Target>
+
+  <Target Name="RemoveRedundantAvaloniaNativePublishFiles" BeforeTargets="_ComputeResolvedFilesToPublishTypes"
+          Condition="'$(AvaloniaSingleFileAot)' == 'true'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="('%(Filename)' == 'av_libglesv2' or '%(Filename)' == 'libSkiaSharp' or '%(Filename)' == 'libHarfBuzzSharp') and '%(Extension)' == '.dll'" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="('%(Filename)' == 'libANGLE_static' or '%(Filename)' == 'libGLESv2_static' or '%(Filename)' == 'libHarfBuzzSharp' or '%(Filename)' == 'skia' or '%(Filename)' == 'SkiaSharp') and '%(Extension)' == '.lib'" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+</Project>

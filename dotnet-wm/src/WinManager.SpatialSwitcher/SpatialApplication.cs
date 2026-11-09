@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using WinManager.Ui;
 
 namespace WinManager.SpatialSwitcher;
@@ -84,6 +85,17 @@ internal sealed class SpatialApplication : Application
             TrayIcon.SetIcons(this, trayIcons);
 
             switcher.Initialize();
+            if (Program.SmokeMode)
+            {
+                switcher.ShowWorkspaceSwitcher();
+                var smokeExitTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+                smokeExitTimer.Tick += async (_, _) =>
+                {
+                    smokeExitTimer.Stop();
+                    await QuitAsync(desktop, switcher);
+                };
+                smokeExitTimer.Start();
+            }
             desktop.Exit += (_, _) => TrayIcon.SetIcons(this, new TrayIcons());
         }
         base.OnFrameworkInitializationCompleted();

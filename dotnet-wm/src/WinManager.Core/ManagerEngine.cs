@@ -699,7 +699,7 @@ public sealed class ManagerEngine
         var next = new ManagerSnapshot(instanceId, 0, desktop,
             workspaces.Trees.ToDictionary(pair => pair.Key, pair => pair.Value.Snapshot), paused,
             workspaces.Snapshot, selection, workspaces.Views);
-        var signature = JsonSerializer.Serialize(next);
+        var signature = JsonSerializer.Serialize(next, Protocol.TypeInfo<ManagerSnapshot>());
         if (signature == committedSignature) return;
         committedSignature = signature;
         next = next with { StateRevision = ++revision };
@@ -784,7 +784,9 @@ public sealed class ManagerEngine
             if (old?.Active != true && workspace.Active) Publish(ManagerEventTypes.WorkspaceActivated, next);
         }
 
-        if (previous is null || JsonSerializer.Serialize(previous.Trees) != JsonSerializer.Serialize(next.Trees) ||
+        if (previous is null || JsonSerializer.Serialize(previous.Trees,
+                Protocol.TypeInfo<IReadOnlyDictionary<Guid, SplitNodeInfo?>>()) !=
+            JsonSerializer.Serialize(next.Trees, Protocol.TypeInfo<IReadOnlyDictionary<Guid, SplitNodeInfo?>>()) ||
             newWindows.Any(pair => !oldWindows.TryGetValue(pair.Key, out var old) || old.Bounds != pair.Value.Bounds))
             Publish(ManagerEventTypes.LayoutChanged, next);
         if (previous?.Paused != next.Paused) Publish(ManagerEventTypes.PauseChanged, next);

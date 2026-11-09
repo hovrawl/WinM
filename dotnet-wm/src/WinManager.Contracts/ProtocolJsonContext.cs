@@ -15,6 +15,11 @@ namespace WinManager.Contracts;
 [JsonSerializable(typeof(ManagerCommand))]
 [JsonSerializable(typeof(CommandResult))]
 [JsonSerializable(typeof(ManagerSnapshot))]
+[JsonSerializable(typeof(WorkspaceDefinition))]
+[JsonSerializable(typeof(WorkspaceLayout))]
+[JsonSerializable(typeof(DeskPosition))]
+[JsonSerializable(typeof(LayeredLayoutOptions))]
+[JsonSerializable(typeof(IReadOnlyDictionary<Guid, SplitNodeInfo?>))]
 [JsonSerializable(typeof(JsonElement))]
 public partial class ProtocolJsonContext : JsonSerializerContext
 {

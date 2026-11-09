@@ -25,14 +25,15 @@ internal static class ConfigurationEditorPresentation
             var item = new JsonObject
             {
                 ["name"] = workspace.Name,
-                ["layout"] = JsonSerializer.SerializeToNode(workspace.Layout, Protocol.JsonOptions),
-                ["position"] = JsonSerializer.SerializeToNode(workspace.Position, Protocol.JsonOptions),
+                ["layout"] = JsonSerializer.SerializeToNode(workspace.Layout, Protocol.TypeInfo<WorkspaceLayout>()),
+                ["position"] = JsonSerializer.SerializeToNode(workspace.Position, Protocol.TypeInfo<DeskPosition?>()),
                 ["layeredLayoutOptions"] = JsonSerializer.SerializeToNode(
-                    workspace.LayeredLayoutOptions ?? LayeredLayoutOptions.Default, Protocol.JsonOptions)
+                    workspace.LayeredLayoutOptions ?? LayeredLayoutOptions.Default,
+                    Protocol.TypeInfo<LayeredLayoutOptions>())
             };
             if (monitorHints.TryGetValue(workspace.Name, out var monitorDeviceName))
                 item["monitorDeviceName"] = monitorDeviceName;
-            merged.Add(item);
+            merged.Add((JsonNode?)item);
         }
 
         root["workspaces"] = merged;

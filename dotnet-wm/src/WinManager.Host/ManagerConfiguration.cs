@@ -1,16 +1,27 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using WinManager.Contracts;
 
 namespace WinManager.Host;
 
 public sealed record ManagerConfiguration
 {
-    private static readonly JsonSerializerOptions ConfigurationJsonOptions = new(Protocol.JsonOptions)
+    private static readonly JsonSerializerOptions ConfigurationJsonOptions = CreateJsonOptions();
+
+    private static JsonSerializerOptions CreateJsonOptions()
     {
-        WriteIndented = true,
-        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
-    };
+        var options = new JsonSerializerOptions(Protocol.JsonOptions)
+        {
+            WriteIndented = true,
+            UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+            TypeInfoResolver = JsonTypeInfoResolver.Combine(ManagerConfigurationJsonContext.Default,
+                Protocol.JsonOptions.TypeInfoResolver!)
+        };
+        options.MakeReadOnly();
+        return options;
+    }
 
     public IReadOnlyList<WorkspaceDefinition> Workspaces { get; init; } = [new("1"), new("2"), new("3")];
     public int InnerGap { get; init; } = 8;
@@ -244,7 +255,10 @@ public sealed record ManagerConfiguration
         if (content.StartsWith('\uFEFF')) content = content[1..];
         using var document = JsonDocument.Parse(content, new JsonDocumentOptions { MaxDepth = 64 });
         RejectDuplicateProperties(document.RootElement);
-        var result = document.RootElement.Deserialize<ManagerConfiguration>(ConfigurationJsonOptions) ??
+        var typeInfo = (JsonTypeInfo<ManagerConfiguration>)ConfigurationJsonOptions.GetTypeInfo(typeof(ManagerConfiguration));
+        var input = JsonNode.Parse(document.RootElement.GetRawText()) as JsonObject ??
+                    throw new JsonException("Configuration must be a JSON object.");
+        var result = MergeDefaults(input).Deserialize(typeInfo) ??
                      throw new InvalidDataException("Configuration is null.");
         result.Validate();
         return result;
@@ -254,7 +268,8 @@ public sealed record ManagerConfiguration
     {
         ArgumentNullException.ThrowIfNull(configuration);
         configuration.Validate();
-        return JsonSerializer.Serialize(configuration, ConfigurationJsonOptions);
+        return JsonSerializer.Serialize(configuration,
+            (JsonTypeInfo<ManagerConfiguration>)ConfigurationJsonOptions.GetTypeInfo(typeof(ManagerConfiguration)));
     }
 
     private static void RejectDuplicateProperties(JsonElement element)
@@ -271,5 +286,39 @@ public sealed record ManagerConfiguration
         else if (element.ValueKind == JsonValueKind.Array)
             foreach (var value in element.EnumerateArray())
                 RejectDuplicateProperties(value);
+    }
+
+    private static JsonObject MergeDefaults(JsonObject input)
+    {
+        var configurationTypeInfo = (JsonTypeInfo<ManagerConfiguration>)ConfigurationJsonOptions.GetTypeInfo(
+            typeof(ManagerConfiguration));
+        var defaults = JsonSerializer.SerializeToNode(new ManagerConfiguration(), configurationTypeInfo)!.AsObject();
+        Overlay(defaults, input);
+
+        if (defaults["workspaces"] is JsonArray workspaces)
+        {
+            var workspaceTypeInfo = Protocol.TypeInfo<WorkspaceDefinition>();
+            for (var index = 0; index < workspaces.Count; index++)
+            {
+                if (workspaces[index] is not JsonObject workspace) continue;
+                var workspaceDefaults = JsonSerializer.SerializeToNode(new WorkspaceDefinition(string.Empty),
+                    workspaceTypeInfo)!.AsObject();
+                workspaceDefaults.Remove("name");
+                Overlay(workspaceDefaults, workspace);
+                workspaces[index] = workspaceDefaults;
+            }
+        }
+
+        return defaults;
+    }
+
+    private static void Overlay(JsonObject destination, JsonObject source)
+    {
+        foreach (var property in source)
+        {
+            var existingName = destination.Select(pair => pair.Key).FirstOrDefault(name =>
+                string.Equals(name, property.Key, StringComparison.OrdinalIgnoreCase));
+            destination[existingName ?? property.Key] = property.Value?.DeepClone();
+        }
     }
 }

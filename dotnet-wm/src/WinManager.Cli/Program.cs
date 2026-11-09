@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using WinManager.Client;
 using WinManager.Contracts;
 
@@ -80,13 +81,13 @@ public static class Program
             if (options.Verb == "install-startup")
             {
                 var commandLine = StartupRegistration.Write(options.Host!, options.Config);
-                Print(new { success = true, registrationName = StartupRegistration.DefaultRegistrationName, commandLine });
+                Print(new StartupRegistrationResult(true, StartupRegistration.DefaultRegistrationName, commandLine));
                 return 0;
             }
             if (options.Verb == "uninstall-startup")
             {
                 StartupRegistration.Remove();
-                Print(new { success = true, registrationName = StartupRegistration.DefaultRegistrationName });
+                Print(new StartupRemovalResult(true, StartupRegistration.DefaultRegistrationName));
                 return 0;
             }
             if (options.Verb == "watch")
@@ -109,7 +110,7 @@ public static class Program
             {
                 var json = options.CommandJson == "-"
                     ? await Console.In.ReadToEndAsync(cancellation.Token) : options.CommandJson!;
-                command = JsonSerializer.Deserialize<ManagerCommand>(json, CommandJsonOptions)
+                command = JsonSerializer.Deserialize(json, CommandJsonTypeInfo)
                     ?? throw new ArgumentException("Command JSON must be an object.");
                 if (!Enum.IsDefined(command.Kind)) throw new ArgumentException("Unknown command kind.");
                 using var document = JsonDocument.Parse(json);
@@ -153,6 +154,9 @@ public static class Program
     }
 
     private static readonly JsonSerializerOptions CommandJsonOptions = CreateCommandJsonOptions();
+    private static readonly JsonTypeInfo<ManagerCommand> CommandJsonTypeInfo =
+        (JsonTypeInfo<ManagerCommand>)CommandJsonOptions.GetTypeInfo(typeof(ManagerCommand));
+    private static readonly JsonSerializerOptions OutputJsonOptions = CreateOutputJsonOptions();
 
     private static JsonSerializerOptions CreateCommandJsonOptions()
     {
@@ -160,12 +164,25 @@ public static class Program
         {
             UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow
         };
+        options.MakeReadOnly();
         return options;
     }
 
-    private static void Print<T>(T value) => Console.WriteLine(JsonSerializer.Serialize(value, Protocol.JsonOptions));
+    private static JsonSerializerOptions CreateOutputJsonOptions()
+    {
+        var options = new JsonSerializerOptions(Protocol.JsonOptions)
+        {
+            TypeInfoResolver = JsonTypeInfoResolver.Combine(CliJsonContext.Default, Protocol.JsonOptions.TypeInfoResolver!)
+        };
+        options.MakeReadOnly();
+        return options;
+    }
+
+    private static void Print<T>(T value) => Console.WriteLine(JsonSerializer.Serialize(value,
+        (JsonTypeInfo<T>)OutputJsonOptions.GetTypeInfo(typeof(T))));
     private static void PrintError(string errorCode, string message) =>
-        Console.Error.WriteLine(JsonSerializer.Serialize(new { errorCode, message }, Protocol.JsonOptions));
+        Console.Error.WriteLine(JsonSerializer.Serialize(new CliError(errorCode, message),
+            OutputJsonOptions.GetTypeInfo(typeof(CliError))));
 
     private sealed record Options(string Verb, string? Pipe, string? CommandJson, string[]? EventTypes, bool Reconnect,
         string? Host = null, string? Config = null);

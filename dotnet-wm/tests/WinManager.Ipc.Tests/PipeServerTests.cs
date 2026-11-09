@@ -61,12 +61,12 @@ public sealed class PipeServerTests
         var busy = await Response(client, timeout.Token);
         Assert.False(busy.Success);
         Assert.Equal("busy", busy.ErrorCode);
-        await Send(client, Request("query.snapshot", new { }), timeout.Token);
+        await Send(client, Request("query.snapshot", Protocol.EmptyPayload), timeout.Token);
         Assert.Equal("not_ready", (await Response(client, timeout.Token)).ErrorCode);
         var engineRun = engine.RunAsync(timeout.Token);
         Assert.True((await admitted).Success);
         Assert.False(engine.Current!.Paused);
-        await Send(client, Request("query.snapshot", new { }), timeout.Token);
+        await Send(client, Request("query.snapshot", Protocol.EmptyPayload), timeout.Token);
         Assert.True((await Response(client, timeout.Token)).Success);
         await server.DisposeAsync();
         Assert.True((await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token)).Success);
@@ -95,7 +95,7 @@ public sealed class PipeServerTests
 
         Assert.False(host.Engine.Current!.Paused);
         await using var permitted = await host.ConnectAsync();
-        await Send(permitted, Request("query.snapshot", new { }), host.Token);
+        await Send(permitted, Request("query.snapshot", Protocol.EmptyPayload), host.Token);
         Assert.True((await Response(permitted, host.Token)).Success);
     }
 
@@ -104,7 +104,7 @@ public sealed class PipeServerTests
     {
         await using var host = await PipeHost.StartAsync();
         await using var client = await host.ConnectAsync();
-        var request = Request("query.snapshot", new { });
+        var request = Request("query.snapshot", Protocol.EmptyPayload);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(request, Protocol.JsonOptions);
         var prefix = new byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(prefix, bytes.Length);
@@ -130,7 +130,7 @@ public sealed class PipeServerTests
         var commandResponse = await Response(client, host.Token);
         Assert.True(commandResponse.Success);
         Assert.True(commandResponse.Payload!.Value.Deserialize<CommandResult>(Protocol.JsonOptions)!.Success);
-        await Send(client, Request("query.snapshot", new { }), host.Token);
+        await Send(client, Request("query.snapshot", Protocol.EmptyPayload), host.Token);
 
         var snapshotResponse = await Response(client, host.Token);
         var snapshot = snapshotResponse.Payload!.Value.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!;
@@ -150,7 +150,7 @@ public sealed class PipeServerTests
         await client.WriteAsync(prefix, host.Token);
         await Disconnected(client, host.Token);
         await using var replacement = await host.ConnectAsync();
-        await Send(replacement, Request("query.snapshot", new { }), host.Token);
+        await Send(replacement, Request("query.snapshot", Protocol.EmptyPayload), host.Token);
         Assert.True((await Response(replacement, host.Token)).Success);
     }
 
@@ -188,7 +188,7 @@ public sealed class PipeServerTests
         }
 
         await using var next = await host.ConnectAsync();
-        await Send(next, Request("query.snapshot", new { }), host.Token);
+        await Send(next, Request("query.snapshot", Protocol.EmptyPayload), host.Token);
         Assert.True((await Response(next, host.Token)).Success);
     }
 
@@ -233,7 +233,7 @@ public sealed class PipeServerTests
         Assert.False(response.Success);
         Assert.Equal(code, response.ErrorCode);
         Assert.Equal(revision, host.Engine.Current.StateRevision);
-        await Send(client, Request("query.snapshot", new { }), host.Token);
+        await Send(client, Request("query.snapshot", Protocol.EmptyPayload), host.Token);
         Assert.True((await Response(client, host.Token)).Success);
     }
 
@@ -268,7 +268,7 @@ public sealed class PipeServerTests
 
         var commandResponse = await Response(client, host.Token);
         Assert.True(commandResponse.Success);
-        await Send(client, Request("query.snapshot", new { }), host.Token);
+        await Send(client, Request("query.snapshot", Protocol.EmptyPayload), host.Token);
         var snapshotResponse = await Response(client, host.Token);
         Assert.True(snapshotResponse.Success);
         var snapshot = snapshotResponse.Payload!.Value.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!;
@@ -364,7 +364,7 @@ public sealed class PipeServerTests
         var events = new List<EventEnvelope> { first };
         var responseSeen = false;
         await changes;
-        var barrier = Request("query.snapshot", new { });
+        var barrier = Request("query.snapshot", Protocol.EmptyPayload);
         await Send(client, barrier, host.Token);
         while (true)
         {
@@ -404,14 +404,14 @@ public sealed class PipeServerTests
         await using var owner = await host.ConnectAsync();
         await using var other = await host.ConnectAsync();
         var subscribed = await Subscribe(owner, host.Token, ["pause.changed"]);
-        await Send(other, Request("unsubscribe", new { subscriptionId = subscribed.Id }), host.Token);
+        await Send(other, Request("unsubscribe", new UnsubscribeRequest(subscribed.Id)), host.Token);
         Assert.Equal("not_found", (await Response(other, host.Token)).ErrorCode);
         await Send(owner, Request("subscribe", new SubscribeRequest()), host.Token);
         Assert.Equal("already_subscribed", (await Response(owner, host.Token)).ErrorCode);
-        await Send(owner, Request("unsubscribe", new { subscriptionId = subscribed.Id }), host.Token);
+        await Send(owner, Request("unsubscribe", new UnsubscribeRequest(subscribed.Id)), host.Token);
         Assert.True((await Response(owner, host.Token)).Success);
         await host.Engine.ExecuteAsync(new(CommandKind.Pause, Paused: true), host.Token);
-        await Send(owner, Request("query.snapshot", new { }), host.Token);
+        await Send(owner, Request("query.snapshot", Protocol.EmptyPayload), host.Token);
         Assert.True((await Response(owner, host.Token)).Success);
         Assert.Equal("snapshot", (await Subscribe(owner, host.Token)).Event.EventType);
     }
@@ -421,14 +421,14 @@ public sealed class PipeServerTests
     {
         await using var host = await PipeHost.StartAsync(maximumClients: 1);
         var first = await host.ConnectAsync();
-        await Send(first, Request("query.snapshot", new { }), host.Token);
+        await Send(first, Request("query.snapshot", Protocol.EmptyPayload), host.Token);
         Assert.True((await Response(first, host.Token)).Success);
         await using var extra = PipeHost.CreateClient(host.Name);
         using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => extra.ConnectAsync(timeout.Token));
         first.Dispose();
         await using var next = await host.ConnectAsync();
-        await Send(next, Request("query.snapshot", new { }), host.Token);
+        await Send(next, Request("query.snapshot", Protocol.EmptyPayload), host.Token);
         Assert.True((await Response(next, host.Token)).Success);
     }
 

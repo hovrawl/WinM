@@ -8,12 +8,14 @@ namespace WinManager.SpatialSwitcher;
 internal static class Program
 {
     public static bool DemoMode { get; private set; }
+    public static bool SmokeMode { get; private set; }
     public static string? PipeName { get; private set; }
 
     [STAThread]
     public static void Main(string[] args)
     {
-        DemoMode = args.Contains("--demo", StringComparer.OrdinalIgnoreCase);
+        SmokeMode = args.Contains("--smoke", StringComparer.OrdinalIgnoreCase);
+        DemoMode = SmokeMode || args.Contains("--demo", StringComparer.OrdinalIgnoreCase);
         var pipeArgument = Array.IndexOf(args, "--pipe");
         if (pipeArgument >= 0)
         {

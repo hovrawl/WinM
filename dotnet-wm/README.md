@@ -87,21 +87,25 @@ Use `dotnet restore --locked-mode` to enforce the resolved dependency graph.
 ## Publish and run
 
 ```powershell
-dotnet publish src\WinManager.Host\WinManager.Host.csproj -c Release -r win-x64 --self-contained false -o publish\host
-dotnet publish src\WinManager.Cli\WinManager.Cli.csproj -c Release -r win-x64 --self-contained false -o publish\cli
-& '.\publish\host\WinManager.Host.exe'
-& '.\publish\cli\WinManager.Cli.exe' 'snapshot'
-& '.\publish\cli\WinManager.Cli.exe' 'watch' '--reconnect'
-& '.\publish\cli\WinManager.Cli.exe' 'status'
-'{"kind":"pause","paused":true}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
-'{"kind":"activateWorkspace","workspaceName":"2","monitorId":"<monitor-guid>"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
-'{"kind":"exit"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'
+.\scripts\Publish.ps1 -Mode Release
+.\scripts\Publish.ps1 -Mode Release -SelfContained
+.\scripts\Publish.ps1 -Mode NativeAot
+& '.\artifacts\win-x64\framework-dependent\host\WinManager.Host.exe'
+& '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'snapshot'
+& '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'watch' '--reconnect'
+& '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'status'
+'{"kind":"pause","paused":true}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
+'{"kind":"activateWorkspace","workspaceName":"2","monitorId":"<monitor-guid>"}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
+'{"kind":"exit"}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
 ```
 
-The framework-dependent deployment requires the .NET 10 x64 runtime. Keep the
-entire host publish directory together, including the recovery executable,
-assembly, runtime configuration, and dependencies. Startup registration is
-opt-in; see `src\WinManager.Cli\README.md`.
+The script publishes all apps by default. Host and Recovery are published into
+the same folder and must remain together. Framework-dependent output requires the
+.NET 10 x64 runtime; `-SelfContained` includes the runtime. Avalonia NativeAOT
+publishing statically links the rendering dependencies into one executable for
+each companion app; see the [publishing guide](docs/publishing.md) for
+prerequisites, smoke checks, output details, and the Host AOT limitation. Startup
+registration is opt-in; see `src\WinManager.Cli\README.md`.
 
 Default configuration: `%LOCALAPPDATA%\WinManager\config.json`, created on first
 launch. Logs: `%LOCALAPPDATA%\WinManager\Logs`. Recovery journals:

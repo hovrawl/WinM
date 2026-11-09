@@ -2,6 +2,18 @@
   "version": 1,
   "dependencies": {
     "net10.0-windows7.0": {
+      "2ndLAB.ANGLE.Static": {
+        "type": "Direct",
+        "requested": "[7151.0.0-10.0.26100.0-1.79e529b, )",
+        "resolved": "7151.0.0-10.0.26100.0-1.79e529b",
+        "contentHash": "cPdqpUTDLk6HugiXi8NHvtjkNqO5yOa530xcZMmVNnEHqLWnfxZvsGyD3Z0FQBqtl6lJ5tD6foLBpU2wIzwreg=="
+      },
+      "2ndLAB.SkiaSharp.Static": {
+        "type": "Direct",
+        "requested": "[3.119.0-10.0.26100.0-1.1c7d845, )",
+        "resolved": "3.119.0-10.0.26100.0-1.1c7d845",
+        "contentHash": "Pjl5X7qWQf3AHOCWVJkEzqd6T2yXYJF2f0rMOyPGhgiP+dWx3WNzQ/TCbUhbB+w+GidkvVZ6PUOMnlZYODp7lw=="
+      },
       "Avalonia": {
         "type": "Direct",
         "requested": "[12.1.5, )",

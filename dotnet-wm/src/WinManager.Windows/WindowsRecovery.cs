@@ -53,7 +53,8 @@ public static class WindowsRecovery
             while (!death.IsCancellationRequested)
             {
                 var text = await RecoveryProtocol.ReadAsync(pipe, death.Token).ConfigureAwait(false);
-                var command = JsonSerializer.Deserialize<RecoveryCommand>(text) ?? throw new IOException("Invalid recovery command.");
+                var command = JsonSerializer.Deserialize(text, RecoveryJsonContext.Default.RecoveryCommand) ??
+                              throw new IOException("Invalid recovery command.");
                 if (command.Kind == "register" && command.Record is { } record)
                 {
                     if (journal.Records.Count >= 4096 || !ValidRecord(record) || !RecoveryNative.Matches(record)) throw new IOException("Invalid recovery target.");
@@ -120,7 +121,7 @@ public static class WindowsRecovery
 
     private static void Save(string path, RecoveryJournal journal)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(journal);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(journal, RecoveryJsonContext.Default.RecoveryJournal);
         using (var file = new FileStream(path + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None))
         {
             file.Write(bytes);
@@ -152,7 +153,7 @@ public static class WindowsRecovery
             {
                 using var lease = new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
                 if (new FileInfo(path).Length > 2 * 1024 * 1024) continue;
-                var journal = JsonSerializer.Deserialize<RecoveryJournal>(File.ReadAllBytes(path));
+                var journal = JsonSerializer.Deserialize(File.ReadAllBytes(path), RecoveryJsonContext.Default.RecoveryJournal);
                 if (journal is null || journal.HostId == 0 || journal.HostId > int.MaxValue || journal.HostCreationTime == 0 || journal.Records is null ||
                     journal.Records.Count > 4096 || journal.Records.Any(record => !ValidRecord(record)) ||
                     RecoveryNative.HostAlive(journal)) continue;

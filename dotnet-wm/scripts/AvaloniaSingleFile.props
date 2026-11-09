@@ -1,0 +1,30 @@
+﻿<Project>
+  <ItemGroup>
+    <PackageReference Include="2ndLAB.ANGLE.Static" Version="7151.0.0-10.0.26100.0-1.79e529b"
+                      IncludeAssets="build;buildTransitive" PrivateAssets="all" />
+    <PackageReference Include="2ndLAB.SkiaSharp.Static" Version="3.119.0-10.0.26100.0-1.1c7d845"
+                      IncludeAssets="build;buildTransitive" PrivateAssets="all" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(AvaloniaSingleFileAot)' == 'true'">
+    <PublishAot>true</PublishAot>
+    <SelfContained>true</SelfContained>
+    <TrimMode>full</TrimMode>
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <StaticExecutable>true</StaticExecutable>
+    <StripSymbols>true</StripSymbols>
+    <CopyOutputSymbolsToPublishDirectory>false</CopyOutputSymbolsToPublishDirectory>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(AvaloniaSingleFileAot)' == 'true' and '$(RuntimeIdentifier)' == 'win-x64'">
+    <DirectPInvoke Include="libHarfBuzzSharp" />
+    <DirectPInvoke Include="libSkiaSharp" />
+    <DirectPInvoke Include="av_libglesv2" />
+    <LinkerArg Include="d3d9.lib;dxguid.lib" />
+    <LinkerArg Include="dxgi.lib" />
+    <LinkerArg Include="Gdi32.lib;User32.lib" />
+    <LinkerArg Include="synchronization.lib" />
+    <LinkerArg Include="fontsub.lib;Ole32.lib;USP10.lib" />
+    <LinkerArg Include="d3d12.lib;d3dcompiler.lib" />
+  </ItemGroup>
+</Project>

@@ -62,7 +62,8 @@ internal sealed class RecoveryConnection : IDisposable
         {
             if (!Healthy) throw new IOException("Recovery helper is unavailable.");
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            RecoveryProtocol.WriteAsync(pipe!, JsonSerializer.Serialize(command), timeout.Token).GetAwaiter().GetResult();
+            RecoveryProtocol.WriteAsync(pipe!, JsonSerializer.Serialize(command, RecoveryJsonContext.Default.RecoveryCommand),
+                timeout.Token).GetAwaiter().GetResult();
             if (RecoveryProtocol.ReadAsync(pipe!, timeout.Token).GetAwaiter().GetResult() != "ACK")
                 throw new IOException("Recovery registration was not acknowledged.");
         }

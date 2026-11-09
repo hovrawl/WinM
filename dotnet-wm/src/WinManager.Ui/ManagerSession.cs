@@ -69,7 +69,7 @@ public sealed class ManagerSession : IAsyncDisposable
         {
             await foreach (var envelope in subscription.ReadEventsAsync(cancellation.Token))
             {
-                var snapshot = envelope.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)
+                var snapshot = envelope.Payload.Deserialize(Protocol.TypeInfo<ManagerSnapshot>())
                                ?? throw new InvalidDataException("Manager event did not contain a snapshot.");
                 snapshotReceived(snapshot, envelope.EventType);
             }

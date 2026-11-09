@@ -26,6 +26,29 @@ public sealed class HostConfigurationTests
     }
 
     [Fact]
+    public void GeneratedConfigurationMetadataRoundTripsNestedWorkspaceSettings()
+    {
+        var configuration = new ManagerConfiguration
+        {
+            Workspaces = [new("Research", Layout: WorkspaceLayout.Layered,
+                Position: new DeskPosition(-125, 64),
+                LayeredLayoutOptions: new LayeredLayoutOptions(0.75, 48))]
+        };
+
+        var json = ManagerConfiguration.Serialize(configuration);
+        var loaded = ManagerConfiguration.Parse(json);
+
+        Assert.Equal(configuration.Workspaces, loaded.Workspaces);
+        Assert.Contains("\"layout\": \"layered\"", json);
+
+        var sparse = ManagerConfiguration.Parse("""{"workspaces":[{"name":"Only"}]}""");
+        Assert.Equal(256, sparse.InputCapacity);
+        Assert.Equal(16, sparse.MaximumClients);
+        Assert.Equal(128, sparse.OutputCapacity);
+        Assert.Equal(WorkspaceLayout.Layered, Assert.Single(sparse.Workspaces).Layout);
+    }
+
+    [Fact]
     public void ConfigurationStoreSavesValidatedContentAndRejectsStaleOrInvalidEdits()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "ConfigurationStoreTests", Guid.NewGuid().ToString("N"));
@@ -183,8 +206,7 @@ public sealed class HostConfigurationTests
             Shortcuts = [new(5, 0x32, new(CommandKind.MoveToWorkspace, WorkspaceNumber: 2))]
         };
         config.Validate();
-        var roundTrip = JsonSerializer.Deserialize<ManagerConfiguration>(
-            JsonSerializer.Serialize(config, Protocol.JsonOptions), Protocol.JsonOptions)!;
+        var roundTrip = ManagerConfiguration.Parse(ManagerConfiguration.Serialize(config));
         Assert.Equal(config.MonitorOrder, roundTrip.MonitorOrder);
         Assert.Equal(config.Shortcuts, roundTrip.Shortcuts);
         Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration
@@ -246,7 +268,7 @@ public sealed class HostConfigurationTests
         };
 
         config.Validate();
-        var json = JsonSerializer.Serialize(config, Protocol.JsonOptions);
+        var json = ManagerConfiguration.Serialize(config);
         using var document = JsonDocument.Parse(json);
         var serializedPosition = document.RootElement.GetProperty("workspaces")[0].GetProperty("position");
         Assert.Equal(2, serializedPosition.EnumerateObject().Count());
@@ -268,9 +290,8 @@ public sealed class HostConfigurationTests
     [Fact]
     public void ToggleModeShortcutRequiresNoModeOrWindowId()
     {
-        var config = JsonSerializer.Deserialize<ManagerConfiguration>(
-            """{"shortcuts":[{"modifiers":16390,"virtualKey":84,"command":{"kind":"toggleMode"}}]}""",
-            Protocol.JsonOptions)!;
+        var config = ManagerConfiguration.Parse(
+            """{"shortcuts":[{"modifiers":16390,"virtualKey":84,"command":{"kind":"toggleMode"}}]}""");
         config.Validate();
         var command = Assert.Single(config.Shortcuts).Command;
         Assert.Equal(CommandKind.ToggleMode, command.Kind);
