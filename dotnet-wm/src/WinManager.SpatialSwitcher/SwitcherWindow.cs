@@ -26,51 +26,122 @@ internal sealed class SwitcherWindow : Window
 
     private readonly bool demoMode;
     private readonly string? pipeName;
+    private readonly Action<string, string>? trayStatusChanged;
     private readonly CancellationTokenSource lifetime = new();
     private readonly Canvas map = new() { ClipToBounds = true };
     private readonly TextBox search = new();
     private readonly TextBlock resultCount = new();
     private readonly TextBlock selectedDetails = new();
     private readonly TextBlock status = new();
+    private readonly TextBlock shortcutStatus = new();
     private readonly ComboBox monitorTarget = new();
     private Button activateButton = null!;
     private Button reconnectButton = null!;
     private readonly Dictionary<Guid, Button> workspaceTiles = [];
+    private SwitcherKeyboardHook? keyboardHook;
     private ManagerSession? session;
     private ManagerSnapshot? snapshot;
     private Guid? selectedWorkspaceId;
+    private Guid? capturedWorkspaceId;
+    private Guid? selectedWindowId;
     private Guid? selectedMonitorId;
+    private bool windowSelectionMode;
+    private bool keyboardHookAttempted;
     private bool connected;
     private bool connecting;
     private bool commandBusy;
+    private bool allowClose;
     private string? lastMessage;
 
-    public SwitcherWindow(bool demoMode, string? pipeName = null)
+    public SwitcherWindow(bool demoMode, string? pipeName = null, Action<string, string>? trayStatusChanged = null)
     {
         this.demoMode = demoMode;
         this.pipeName = pipeName;
+        this.trayStatusChanged = trayStatusChanged;
         Title = "Spatial switcher — One desk";
         Width = 716;
         Height = 592;
         MinWidth = 560;
         MinHeight = 480;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        ShowInTaskbar = false;
         Background = DeskTheme.Canvas;
         Content = BuildContent();
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
-        Opened += (_, _) =>
+        Closing += (_, args) =>
         {
-            if (demoMode)
-            {
-                ApplySnapshot(CreateDemoSnapshot());
-                status.Text = "DEMO · sample state only · activation disabled";
-            }
-            else
-            {
-                _ = ConnectAsync();
-            }
+            if (allowClose) return;
+            args.Cancel = true;
+            Hide();
         };
-        Closed += (_, _) => _ = CloseConnectionAsync();
+        Closed += (_, _) =>
+        {
+            keyboardHook?.Dispose();
+            keyboardHook = null;
+            _ = CloseConnectionAsync();
+        };
+    }
+
+    public void Initialize()
+    {
+        if (demoMode)
+        {
+            ApplySnapshot(CreateDemoSnapshot());
+            status.Text = "DEMO · sample state only · activation disabled";
+            shortcutStatus.Text = "Demo mode · native keyboard interception disabled";
+        }
+        else
+        {
+            shortcutStatus.Text = "Waiting for a manager snapshot before enabling shortcuts";
+            _ = ConnectAsync();
+        }
+        UpdateActions();
+    }
+
+    public void ShowWorkspaceSwitcher()
+    {
+        if (snapshot is not null) CaptureCurrentContext();
+        windowSelectionMode = false;
+        UpdateSelectedDetails();
+        UpdateActions();
+        ShowPopup();
+    }
+
+    public void ShowWindowSwitcher()
+    {
+        if (snapshot is not null) CaptureCurrentContext();
+        windowSelectionMode = true;
+        UpdateSelectedDetails();
+        UpdateActions();
+        ShowPopup();
+    }
+
+    public async Task PrepareForShutdownAsync()
+    {
+        allowClose = true;
+        keyboardHook?.Dispose();
+        keyboardHook = null;
+        await CloseConnectionAsync();
+    }
+
+    private void CaptureCurrentContext()
+    {
+        if (snapshot is null) return;
+        var context = SpatialSwitcherPresentation.CaptureContext(snapshot);
+        capturedWorkspaceId = context.WorkspaceId;
+        selectedWorkspaceId = context.WorkspaceId ?? snapshot.Workspaces?.FirstOrDefault()?.Id;
+        selectedWindowId = context.WindowId;
+        selectedMonitorId = context.MonitorId;
+        monitorTarget.SelectedItem = monitorTarget.Items.OfType<MonitorChoice>()
+            .FirstOrDefault(choice => choice.Id == selectedMonitorId);
+        RenderMap();
+    }
+
+    private void ShowPopup()
+    {
+        Show();
+        Activate();
+        search.Focus();
     }
 
     private Control BuildContent()
@@ -81,7 +152,7 @@ internal sealed class SwitcherWindow : Window
             {
                 new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Auto),
                 new(new GridLength(1, GridUnitType.Star)), new(GridLength.Auto), new(GridLength.Auto),
-                new(GridLength.Auto)
+                new(GridLength.Auto), new(GridLength.Auto)
             },
             RowSpacing = 8,
             Margin = new Thickness(16)
@@ -95,10 +166,12 @@ internal sealed class SwitcherWindow : Window
         header.Children.Add(DeskTheme.Heading("Spatial switcher", 19));
         var keys = new StackPanel
             { Orientation = Orientation.Horizontal, Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
-        keys.Children.Add(KeyChip("↑↓←→"));
-        keys.Children.Add(DeskTheme.Caption("navigate"));
+        keys.Children.Add(KeyChip("Alt+Tab"));
+        keys.Children.Add(DeskTheme.Caption("windows"));
+        keys.Children.Add(KeyChip("Win+Tab"));
+        keys.Children.Add(DeskTheme.Caption("workspaces"));
         keys.Children.Add(KeyChip("Enter"));
-        keys.Children.Add(DeskTheme.Caption("select"));
+        keys.Children.Add(DeskTheme.Caption("commit"));
         Grid.SetColumn(keys, 1);
         header.Children.Add(keys);
         Grid.SetRow(header, 0);
@@ -159,7 +232,7 @@ internal sealed class SwitcherWindow : Window
         };
         destination.Children.Add(monitorTarget);
         activateButton = DeskTheme.Action("Activate workspace", primary: true);
-        activateButton.Click += async (_, _) => await ActivateSelectedAsync();
+        activateButton.Click += async (_, _) => await CommitSelectionAsync();
         destination.Children.Add(activateButton);
         Grid.SetColumn(destination, 1);
         preview.Children.Add(destination);
@@ -169,10 +242,15 @@ internal sealed class SwitcherWindow : Window
 
         var hints = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 24 };
         hints.Children.Add(Hint("↑ ↓ ← →", "move across desk"));
-        hints.Children.Add(Hint("Enter", "activate on selected monitor"));
+        hints.Children.Add(Hint("Shift", "reverse tab"));
         hints.Children.Add(Hint("Esc", "dismiss"));
         Grid.SetRow(hints, 5);
         root.Children.Add(hints);
+
+        shortcutStatus.TextWrapping = TextWrapping.Wrap;
+        shortcutStatus.Foreground = DeskTheme.MutedText;
+        Grid.SetRow(shortcutStatus, 6);
+        root.Children.Add(shortcutStatus);
 
         var connectionStatus = new Grid
         {
@@ -186,7 +264,7 @@ internal sealed class SwitcherWindow : Window
         reconnectButton.Click += async (_, _) => await ConnectAsync();
         Grid.SetColumn(reconnectButton, 1);
         connectionStatus.Children.Add(reconnectButton);
-        Grid.SetRow(connectionStatus, 6);
+        Grid.SetRow(connectionStatus, 7);
         root.Children.Add(connectionStatus);
         return root;
     }
@@ -209,7 +287,23 @@ internal sealed class SwitcherWindow : Window
         return row;
     }
 
-    private async Task ConnectAsync()
+    private void StartKeyboardHook()
+    {
+        if (keyboardHookAttempted) return;
+        keyboardHookAttempted = true;
+        try
+        {
+            keyboardHook = new SwitcherKeyboardHook(
+                action => Dispatcher.UIThread.Post(() => HandleShortcut(action)));
+            shortcutStatus.Text = "Alt+Tab cycles windows · Win+Tab cycles workspaces · Shift reverses";
+        }
+        catch (Exception error)
+        {
+            shortcutStatus.Text = $"Keyboard shortcuts unavailable · {error.Message}";
+        }
+    }
+
+    public async Task ConnectAsync()
     {
         if (connected || connecting || demoMode) return;
         connecting = true;
@@ -255,6 +349,10 @@ internal sealed class SwitcherWindow : Window
         if (!ReferenceEquals(session, source)) return;
         session = null;
         connected = false;
+        keyboardHook?.Dispose();
+        keyboardHook = null;
+        keyboardHookAttempted = false;
+        shortcutStatus.Text = "Keyboard shortcuts unavailable while disconnected";
         lastMessage = failure is null
             ? "Connection closed · snapshot is stale · reconnect before activating."
             : $"Connection lost · {failure.Message} · command outcome may be unknown.";
@@ -266,15 +364,22 @@ internal sealed class SwitcherWindow : Window
     private void ApplySnapshot(ManagerSnapshot next)
     {
         snapshot = next;
+        if (!demoMode) StartKeyboardHook();
         var workspaces = next.Workspaces ?? [];
-        if (selectedWorkspaceId is null || workspaces.All(workspace => workspace.Id != selectedWorkspaceId))
+        capturedWorkspaceId ??= SpatialSwitcherPresentation.CurrentWorkspaceId(next);
+        if (capturedWorkspaceId is { } capturedId && workspaces.All(workspace => workspace.Id != capturedId))
         {
-            var focused = next.Desktop.Windows.FirstOrDefault(window => window.Id == next.Desktop.FocusedWindowId);
-            selectedWorkspaceId = focused is null
-                ? workspaces.FirstOrDefault()?.Id
-                : workspaces.FirstOrDefault(workspace => workspace.WindowIds.Contains(focused.Id))?.Id
-                  ?? workspaces.FirstOrDefault()?.Id;
+            capturedWorkspaceId = SpatialSwitcherPresentation.CurrentWorkspaceId(next);
+            selectedWindowId = null;
         }
+        if (selectedWorkspaceId is null || workspaces.All(workspace => workspace.Id != selectedWorkspaceId))
+            selectedWorkspaceId = capturedWorkspaceId ?? workspaces.FirstOrDefault()?.Id;
+
+        var capturedWorkspace = workspaces.FirstOrDefault(workspace => workspace.Id == capturedWorkspaceId);
+        var windowCandidates = SpatialSwitcherPresentation.WindowsForWorkspace(capturedWorkspace, next.Desktop.Windows);
+        if (selectedWindowId is null || windowCandidates.All(window => window.Id != selectedWindowId))
+            selectedWindowId = windowCandidates.FirstOrDefault(window => window.Id == next.Desktop.FocusedWindowId)?.Id ??
+                               windowCandidates.FirstOrDefault()?.Id;
 
         var currentMonitorId = (monitorTarget.SelectedItem as MonitorChoice)?.Id;
         var monitors = next.Desktop.Monitors.OrderBy(monitor => monitor.Bounds.X == 0 && monitor.Bounds.Y == 0 ? 0 : 1)
@@ -425,6 +530,7 @@ internal sealed class SwitcherWindow : Window
     private void SelectWorkspace(Guid workspaceId)
     {
         selectedWorkspaceId = workspaceId;
+        windowSelectionMode = false;
         RenderMap();
         UpdateSelectedDetails();
         UpdateActions();
@@ -439,11 +545,6 @@ internal sealed class SwitcherWindow : Window
             return;
         }
 
-        var view = workspace.Active
-            ? $"Currently viewed on {MonitorName(workspace.MonitorId)}"
-            : "Not currently viewed";
-        selectedDetails.Text =
-            $"{workspace.Name}  ·  {workspace.Layout}\n{workspace.WindowIds.Count} windows  ·  {view}";
         foreach (var (id, tile) in workspaceTiles)
         {
             var selected = id == workspace.Id;
@@ -451,19 +552,46 @@ internal sealed class SwitcherWindow : Window
             tile.Background = selected ? DeskTheme.AccentSoft : DeskTheme.Surface;
             tile.BorderThickness = new Thickness(selected ? 2 : 1);
         }
+
+        if (windowSelectionMode)
+        {
+            var window = snapshot?.Desktop.Windows.FirstOrDefault(candidate => candidate.Id == selectedWindowId);
+            selectedDetails.Text = window is null
+                ? $"{workspace.Name}  ·  No switchable windows in this workspace"
+                : $"{window.Title}\n{workspace.Name}  ·  {window.Mode}" +
+                  (window.LayoutOverflow ? "  ·  overflow, Enter restores and focuses" : "");
+            return;
+        }
+
+        var view = workspace.Active
+            ? $"Currently viewed on {MonitorName(workspace.MonitorId)}"
+            : "Not currently viewed";
+        selectedDetails.Text =
+            $"{workspace.Name}  ·  {workspace.Layout}\n{workspace.WindowIds.Count} windows  ·  {view}";
     }
 
     private void UpdateActions()
     {
         var workspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == selectedWorkspaceId);
+        var capturedWorkspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == capturedWorkspaceId);
+        var selectedWindow = snapshot?.Desktop.Windows.FirstOrDefault(candidate => candidate.Id == selectedWindowId);
         var hasMap = SpatialSwitcherPresentation.HasSpatialState(snapshot?.Workspaces);
         var canActivate = connected && !demoMode && !commandBusy && workspace is not null &&
                           selectedMonitorId is { } monitorId && monitorId != Guid.Empty &&
                           snapshot?.Desktop.Monitors.Any(monitor => monitor.Id == monitorId) == true && hasMap;
-        activateButton.IsEnabled = canActivate;
-        monitorTarget.IsEnabled = !commandBusy && snapshot?.Desktop.Monitors.Count > 0;
+        var canFocus = connected && !demoMode && !commandBusy && capturedWorkspace?.Active == true &&
+                       selectedWindow is not null &&
+                       CurrentWindowCandidates().Any(window => window.Id == selectedWindow.Id);
+        activateButton.Content = windowSelectionMode ? "Focus selected window" : "Activate workspace";
+        activateButton.IsEnabled = windowSelectionMode ? canFocus : canActivate;
+        monitorTarget.IsEnabled = !windowSelectionMode && !commandBusy && snapshot?.Desktop.Monitors.Count > 0;
         reconnectButton.IsEnabled = !demoMode && !connecting && !connected && !commandBusy;
         if (demoMode) status.Text = lastMessage ?? "DEMO · sample state only · activation disabled";
+        var connection = demoMode ? "Demo mode" : connected ? "Manager connected" :
+            connecting ? "Connecting to manager" : "Manager disconnected";
+        var shortcuts = demoMode ? "Alt+Tab / Win+Tab disabled in demo" : keyboardHook is not null
+            ? "Alt+Tab windows · Win+Tab workspaces" : "Alt+Tab / Win+Tab unavailable";
+        trayStatusChanged?.Invoke(connection, shortcuts);
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs args)
@@ -471,14 +599,14 @@ internal sealed class SwitcherWindow : Window
         if (args.Key == Key.Escape)
         {
             args.Handled = true;
-            Close();
+            Hide();
             return;
         }
 
         if (args.Key == Key.Enter)
         {
             args.Handled = true;
-            _ = ActivateSelectedAsync();
+            _ = CommitSelectionAsync();
             return;
         }
 
@@ -497,6 +625,94 @@ internal sealed class SwitcherWindow : Window
         {
             SelectWorkspace(target);
             args.Handled = true;
+        }
+    }
+
+    private void HandleShortcut(SwitcherKeyboardAction action)
+    {
+        if (demoMode || !connected || keyboardHook is null || snapshot is null) return;
+        if (!IsVisible)
+        {
+            CaptureCurrentContext();
+            windowSelectionMode = action is SwitcherKeyboardAction.CycleWindowForward or
+                SwitcherKeyboardAction.CycleWindowBackward;
+            ShowPopup();
+        }
+
+        switch (action)
+        {
+            case SwitcherKeyboardAction.CycleWindowForward:
+            case SwitcherKeyboardAction.CycleWindowBackward:
+                windowSelectionMode = true;
+                selectedWindowId = SpatialSwitcherPresentation.CycleWindow(selectedWindowId,
+                    CurrentWindowCandidates(), action == SwitcherKeyboardAction.CycleWindowBackward);
+                UpdateSelectedDetails();
+                UpdateActions();
+                break;
+            case SwitcherKeyboardAction.CycleWorkspaceForward:
+            case SwitcherKeyboardAction.CycleWorkspaceBackward:
+                windowSelectionMode = false;
+                selectedWorkspaceId = SpatialSwitcherPresentation.CycleWorkspace(selectedWorkspaceId,
+                    snapshot.Workspaces ?? [], action == SwitcherKeyboardAction.CycleWorkspaceBackward);
+                RenderMap();
+                UpdateSelectedDetails();
+                UpdateActions();
+                break;
+        }
+    }
+
+    private IReadOnlyList<WindowInfo> CurrentWindowCandidates()
+    {
+        var workspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == capturedWorkspaceId);
+        return SpatialSwitcherPresentation.WindowsForWorkspace(workspace, snapshot?.Desktop.Windows ?? []);
+    }
+
+    private async Task CommitSelectionAsync()
+    {
+        if (windowSelectionMode) await FocusSelectedWindowAsync();
+        else await ActivateSelectedAsync();
+    }
+
+    private async Task FocusSelectedWindowAsync()
+    {
+        if (!connected || demoMode || commandBusy || selectedWindowId is not { } windowId ||
+            session is not { } activeSession || !CurrentWindowCandidates().Any(window => window.Id == windowId))
+            return;
+        if (snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == capturedWorkspaceId)?.Active != true)
+            return;
+
+        var window = snapshot?.Desktop.Windows.FirstOrDefault(candidate => candidate.Id == windowId);
+        if (window is null) return;
+        commandBusy = true;
+        status.Text = $"Focusing {window.Title}…";
+        UpdateActions();
+        try
+        {
+            var result = await activeSession.ExecuteAsync(SpatialSwitcherPresentation.FocusCommand(windowId),
+                lifetime.Token);
+            if (result.Success)
+            {
+                lastMessage = $"Focused {window.Title} · revision {result.StateRevision}";
+                status.Text = lastMessage;
+                Hide();
+            }
+            else
+            {
+                lastMessage = $"Focus failed · {result.ErrorCode}: {result.Message}";
+                status.Text = lastMessage;
+            }
+        }
+        catch (Exception error)
+        {
+            lastMessage = activeSession.IsConnected
+                ? $"Focus failed · {error.Message}"
+                : $"Connection lost during focus · outcome may be unknown. Reconnect and inspect state. {error.Message}";
+            status.Text = lastMessage;
+        }
+        finally
+        {
+            commandBusy = false;
+            UpdateActions();
         }
     }
 
@@ -520,7 +736,7 @@ internal sealed class SwitcherWindow : Window
                 lastMessage =
                     $"Activated {workspace.Name} on {MonitorName(monitorId)} · revision {result.StateRevision}";
                 status.Text = lastMessage;
-                Close();
+                Hide();
             }
             else
             {
@@ -588,6 +804,8 @@ internal sealed class SwitcherWindow : Window
     private async Task CloseConnectionAsync()
     {
         await lifetime.CancelAsync();
-        if (session is { } current) await current.DisposeAsync();
+        var current = session;
+        session = null;
+        if (current is not null) await current.DisposeAsync();
     }
 }

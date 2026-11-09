@@ -3,6 +3,8 @@ using WinManager.Contracts;
 
 namespace WinManager.SpatialSwitcher;
 
+public readonly record struct SwitcherContext(Guid? WorkspaceId, Guid? WindowId, Guid? MonitorId);
+
 public static class SpatialSwitcherPresentation
 {
     public static bool HasSpatialState(IReadOnlyList<WorkspaceInfo>? workspaces) =>
@@ -65,5 +67,73 @@ public static class SpatialSwitcherPresentation
             throw new ArgumentException("A workspace target is required.", nameof(workspaceId));
         if (monitorId == Guid.Empty) throw new ArgumentException("A monitor target is required.", nameof(monitorId));
         return new ManagerCommand(CommandKind.ActivateWorkspace, WorkspaceId: workspaceId, MonitorId: monitorId);
+    }
+
+    public static Guid? CurrentWorkspaceId(ManagerSnapshot snapshot)
+    {
+        var workspaces = snapshot.Workspaces ?? [];
+        var focused = snapshot.Desktop.Windows.FirstOrDefault(window =>
+            window.Id == snapshot.Desktop.FocusedWindowId);
+        return (focused is null ? null : workspaces.FirstOrDefault(workspace =>
+                   workspace.WindowIds.Contains(focused.Id))?.Id) ??
+               workspaces.FirstOrDefault(workspace => workspace.Active)?.Id ?? workspaces.FirstOrDefault()?.Id;
+    }
+
+    public static SwitcherContext CaptureContext(ManagerSnapshot snapshot)
+    {
+        var workspaceId = CurrentWorkspaceId(snapshot);
+        var workspace = snapshot.Workspaces?.FirstOrDefault(candidate => candidate.Id == workspaceId);
+        var focused = snapshot.Desktop.Windows.FirstOrDefault(window =>
+            window.Id == snapshot.Desktop.FocusedWindowId && workspace?.WindowIds.Contains(window.Id) == true);
+        var windows = WindowsForWorkspace(workspace, snapshot.Desktop.Windows);
+        var selectedWindow = focused is not null && windows.Any(window => window.Id == focused.Id)
+            ? focused
+            : windows.FirstOrDefault();
+        var monitors = snapshot.Desktop.Monitors;
+        var monitorId = selectedWindow is not null && monitors.Any(monitor => monitor.Id == selectedWindow.MonitorId)
+            ? selectedWindow.MonitorId
+            : workspace is { Active: true } && monitors.Any(monitor => monitor.Id == workspace.MonitorId)
+                ? workspace.MonitorId
+                : monitors.OrderBy(monitor => monitor.Bounds.X == 0 && monitor.Bounds.Y == 0 ? 0 : 1)
+                    .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(monitor => monitor.Id).Select(monitor => (Guid?)monitor.Id).FirstOrDefault();
+        return new SwitcherContext(workspaceId, selectedWindow?.Id, monitorId);
+    }
+
+    public static IReadOnlyList<WindowInfo> WindowsForWorkspace(WorkspaceInfo? workspace,
+        IReadOnlyList<WindowInfo> windows)
+    {
+        if (workspace is null) return [];
+        var membership = workspace.WindowIds.ToHashSet();
+        return windows.Where(window => membership.Contains(window.Id) && !window.IsIgnored &&
+                                       !window.ManagerHidden && window.Bounds.Width > 0 && window.Bounds.Height > 0 &&
+                                       (window.LayoutOverflow || window.Visible && !window.Minimized))
+            .ToArray();
+    }
+
+    public static Guid? CycleWindow(Guid? currentId, IReadOnlyList<WindowInfo> candidates, bool previous)
+    {
+        if (candidates.Count == 0) return null;
+        var index = currentId is { } id ? Array.FindIndex(candidates.ToArray(), window => window.Id == id) : -1;
+        var next = previous
+            ? index < 0 ? candidates.Count - 1 : (index + candidates.Count - 1) % candidates.Count
+            : (index + 1) % candidates.Count;
+        return candidates[next].Id;
+    }
+
+    public static Guid? CycleWorkspace(Guid? currentId, IReadOnlyList<WorkspaceInfo> workspaces, bool previous)
+    {
+        if (workspaces.Count == 0) return null;
+        var index = currentId is { } id ? Array.FindIndex(workspaces.ToArray(), workspace => workspace.Id == id) : -1;
+        var next = previous
+            ? index < 0 ? workspaces.Count - 1 : (index + workspaces.Count - 1) % workspaces.Count
+            : (index + 1) % workspaces.Count;
+        return workspaces[next].Id;
+    }
+
+    public static ManagerCommand FocusCommand(Guid windowId)
+    {
+        if (windowId == Guid.Empty) throw new ArgumentException("A window target is required.", nameof(windowId));
+        return new ManagerCommand(CommandKind.Focus, WindowId: windowId);
     }
 }
