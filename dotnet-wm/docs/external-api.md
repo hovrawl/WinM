@@ -4,7 +4,7 @@ WinManager exposes its running manager through a local Windows named pipe.
 Third-party applications can use the CLI, the .NET client SDK, or implement
 the version 1 pipe protocol directly. There is no HTTP endpoint or browser bridge.
 
-The current API exposes workspace membership and transferable monitor views.
+The current API exposes workspace membership, logical workspace positions, and transferable monitor views.
 `ManagerSnapshot.WorkspaceViews` contains monitor/workspace pairs; older workspace
 `MonitorId` and `Active` values are compatibility projections. An unviewed workspace
 uses `Guid.Empty` and `false`. Older hosts may omit `WorkspaceViews`, so clients
@@ -28,14 +28,15 @@ or null means diagnostics are unavailable on that host; empty means no matching
 candidates were observed. This is not a full native-window inventory. Changes
 produce `window.updated` with the complete snapshot.
 
-The separate [one-desk Avalonia inspector](../src/WinManager.DebugUi/README.md)
-uses this SDK/IPC contract for its display and explicit controls. It does not
-create desks or own manager state.
+The separate [one-desk Avalonia debug console](../src/WinManager.DebugUi/README.md)
+and [spatial switcher](../src/WinManager.SpatialSwitcher/README.md) use this
+SDK/IPC contract for their display and explicit controls. Neither creates desks
+or owns manager state.
 
-View activation and per-workspace `split`/`layered` layout selection are implemented.
-Logical desk positions, workspace bounds, columns/rows/Fibonacci rules, persistence
-of runtime layout and view changes, and the spatial overview/quick switcher are not.
-See [the project goal](project-goal.md) and
+View activation, logical workspace positions, per-workspace `split`/`layered`
+layout selection, and the spatial switcher are implemented. Workspace bounds,
+columns/rows/Fibonacci rules, persistence of runtime desk state, and the full desk
+overview are not. See [the project goal](project-goal.md) and
 [the migration plan](desk-model-plan.md).
 
 ## Choose an integration
@@ -69,7 +70,8 @@ The response is a complete `ManagerSnapshot`:
 - `desktop.focusedWindowId`: the current focused managed window, or `null`.
 - `desktop.monitors`: monitor `id`, device name, bounds, work area, and DPI.
 - `workspaces`: workspace `id`, configured name, `layout` (`split` or `layered`),
-  monitor ID, active flag, and assigned window IDs.
+  logical `position` (`x` and `y`), monitor ID, active flag, and assigned window IDs.
+  Older hosts can omit position; spatial clients should treat its absence as unavailable.
 - `trees`: split trees keyed by **workspace ID**, not monitor ID. Each node has
   an ID, optional window ID, orientation, ratio, and first/second children.
 - `paused`: whether automatic layout application is paused.
@@ -112,6 +114,7 @@ replace `<window-guid>`, `<workspace-guid>`, and
 | `moveToWorkspace` | Exactly one of `workspaceId`, `workspaceName` | Assign the target window to an existing workspace; does not activate the destination. | `{"kind":"moveToWorkspace","windowId":"<window-guid>","workspaceId":"<workspace-guid>"}` |
 | `moveToMonitor` | `monitorId` | Assign the target window to the workspace currently shown by the destination monitor; this does not transfer a workspace view. | `{"kind":"moveToMonitor","monitorId":"<monitor-guid>"}` |
 | `setWorkspaceLayout` | Exactly one of `workspaceId`, `workspaceName`; `layout` | Set a workspace's `split` or `layered` layout and reflow its active view unless paused; native action failure restores the previous layout selection. | `{"kind":"setWorkspaceLayout","workspaceName":"2","layout":"layered"}` |
+| `setWorkspacePosition` | Exactly one of `workspaceId`, `workspaceName`; `position` | Set logical desk coordinates without moving or resizing native windows; commits `workspace.updated`. | `{"kind":"setWorkspacePosition","workspaceName":"2","position":{"x":520,"y":-80}}` |
 
 Argument details:
 
@@ -119,6 +122,8 @@ Argument details:
 - `orientation`: `horizontal` means side-by-side tiles; `vertical` means stacked
   tiles.
 - `mode`: `tiling` or `floating`.
+- `position`: logical `x` and `y` desk units. Both values must be finite and in
+  `[-100000,100000]`; this does not represent monitor pixels or resize a workspace.
 - `layout`: `split` or `layered`. `split` uses the saved split tree and gap settings.
   `layered` overlays every individually fitting tiled window in a large page stack;
   it caps the cascade at 48 DIPs and reduces offsets to respect minimum sizes.

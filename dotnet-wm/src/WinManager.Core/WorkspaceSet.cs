@@ -5,12 +5,17 @@ namespace WinManager.Core;
 
 public sealed class WorkspaceSet
 {
-    private sealed class Workspace(string name, string? initialDeviceName, WorkspaceLayout layout)
+    private sealed class Workspace(
+        string name,
+        string? initialDeviceName,
+        WorkspaceLayout layout,
+        DeskPosition position)
     {
         public Guid Id { get; } = Guid.NewGuid();
         public string Name { get; } = name;
         public string? InitialDeviceName { get; set; } = initialDeviceName;
         public WorkspaceLayout Layout { get; set; } = layout;
+        public DeskPosition Position { get; set; } = position;
     }
 
     private readonly List<Workspace> workspaces = [];
@@ -30,10 +35,13 @@ public sealed class WorkspaceSet
             throw new ArgumentException("Workspace names must not be empty.", nameof(definitions));
         if (configured.Any(d => !Enum.IsDefined(d.Layout)))
             throw new ArgumentException("Workspace layout is not supported.", nameof(definitions));
+        if (configured.Any(d => d.Position is { IsValid: false }))
+            throw new ArgumentException("Workspace positions must be finite and within the supported desk bounds.",
+                nameof(definitions));
         if (configured.Select(d => d.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != configured.Length)
             throw new ArgumentException("Workspace names must be unique.", nameof(definitions));
         foreach (var definition in configured)
-            Add(definition.Name, definition.MonitorDeviceName, definition.Layout);
+            Add(definition.Name, definition.MonitorDeviceName, definition.Layout, definition.Position);
     }
 
     public IReadOnlyList<WorkspaceInfo> Snapshot => workspaces.Select(workspace =>
@@ -41,7 +49,7 @@ public sealed class WorkspaceSet
         var monitorId = views.FirstOrDefault(view => view.Value == workspace.Id).Key;
         return new WorkspaceInfo(workspace.Id, workspace.Name, monitorId, monitorId != Guid.Empty,
             Array.AsReadOnly(assignments.Where(assignment => assignment.Value == workspace.Id)
-                .Select(assignment => assignment.Key).Order().ToArray()), workspace.Layout);
+                .Select(assignment => assignment.Key).Order().ToArray()), workspace.Layout, workspace.Position);
     }).ToList().AsReadOnly();
 
     public IReadOnlyList<WorkspaceViewInfo> Views => views.OrderBy(view => view.Key)
@@ -141,6 +149,15 @@ public sealed class WorkspaceSet
         return true;
     }
 
+    public bool SetPosition(Guid workspaceId, DeskPosition position)
+    {
+        if (!position.IsValid) return false;
+        var workspace = workspaces.FirstOrDefault(candidate => candidate.Id == workspaceId);
+        if (workspace is null) return false;
+        workspace.Position = position;
+        return true;
+    }
+
     public bool MoveWindowToMonitor(Guid windowId, Guid monitorId)
     {
         return views.TryGetValue(monitorId, out var workspaceId) && MoveWindow(windowId, workspaceId);
@@ -148,6 +165,7 @@ public sealed class WorkspaceSet
 
     internal State CaptureState() => new(views.ToDictionary(),
         workspaces.ToDictionary(workspace => workspace.Id, workspace => workspace.InitialDeviceName),
+        workspaces.ToDictionary(workspace => workspace.Id, workspace => workspace.Position),
         workspaces.Select(workspace => workspace.Id).ToHashSet());
 
     internal void RestoreState(State state)
@@ -163,13 +181,18 @@ public sealed class WorkspaceSet
         }
 
         foreach (var workspace in workspaces)
+        {
             if (state.InitialDeviceNames.TryGetValue(workspace.Id, out var deviceName))
                 workspace.InitialDeviceName = deviceName;
+            if (state.Positions.TryGetValue(workspace.Id, out var position))
+                workspace.Position = position;
+        }
     }
 
     internal sealed record State(
         Dictionary<Guid, Guid> Views,
         Dictionary<Guid, string?> InitialDeviceNames,
+        Dictionary<Guid, DeskPosition> Positions,
         HashSet<Guid> WorkspaceIds);
 
     public Guid? WorkspaceFor(Guid windowId) => assignments.TryGetValue(windowId, out var id) ? id : null;
@@ -199,13 +222,16 @@ public sealed class WorkspaceSet
         return result.AsReadOnly();
     }
 
-    private Workspace Add(string name, string? deviceName, WorkspaceLayout layout = WorkspaceLayout.Split)
+    private Workspace Add(string name, string? deviceName, WorkspaceLayout layout = WorkspaceLayout.Split,
+        DeskPosition? position = null)
     {
-        var workspace = new Workspace(name, deviceName, layout);
+        var workspace = new Workspace(name, deviceName, layout, position ?? DefaultPosition(workspaces.Count));
         workspaces.Add(workspace);
         trees.Add(workspace.Id, new SplitTree());
         return workspace;
     }
+
+    private static DeskPosition DefaultPosition(int index) => new(index % 4 * 480, index / 4 * 360);
 
     private string DefaultName(string deviceName)
     {

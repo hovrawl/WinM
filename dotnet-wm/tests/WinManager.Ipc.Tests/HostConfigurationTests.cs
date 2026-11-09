@@ -29,6 +29,7 @@ public sealed class HostConfigurationTests
     [InlineData("{\"innerGap\":1,\"InnerGap\":2}")]
     [InlineData("{\"workspaces\":[{\"name\":\"one\"},{\"name\":\"ONE\"}]}")]
     [InlineData("{\"workspaces\":[{\"name\":\"one\",\"layout\":\"unknown\"}]}")]
+    [InlineData("{\"workspaces\":[{\"name\":\"one\",\"position\":{\"x\":100001,\"y\":0}}]}")]
     [InlineData("{\"workspaces\":null}")]
     [InlineData("{\"ignoredProcessNames\":[\"\"]}")]
     [InlineData("{\"shortcuts\":[{\"modifiers\":16,\"virtualKey\":65,\"command\":{\"kind\":\"redraw\"}}]}")]
@@ -41,6 +42,42 @@ public sealed class HostConfigurationTests
         var error = Record.Exception(() => ManagerConfiguration.Load(file, createDefault: false));
         Assert.NotNull(error);
         Assert.True(error is JsonException or InvalidDataException);
+    }
+
+    [Fact]
+    public void DeskPositionsRoundTripInWorkspaceConfigurationAndPositionShortcutsValidate()
+    {
+        using var directory = new TestDirectory();
+        var file = Path.Combine(directory.Path, "config.json");
+        var position = new DeskPosition(-160, 240);
+        var config = new ManagerConfiguration
+        {
+            Workspaces = [new("One", Position: position)],
+            Shortcuts =
+            [
+                new(2, 65, new(CommandKind.SetWorkspacePosition,
+                    WorkspaceName: "One", Position: position))
+            ]
+        };
+
+        config.Validate();
+        var json = JsonSerializer.Serialize(config, Protocol.JsonOptions);
+        using var document = JsonDocument.Parse(json);
+        var serializedPosition = document.RootElement.GetProperty("workspaces")[0].GetProperty("position");
+        Assert.Equal(2, serializedPosition.EnumerateObject().Count());
+        File.WriteAllText(file, json);
+        var loaded = ManagerConfiguration.Load(file, createDefault: false);
+
+        Assert.Equal(position, Assert.Single(loaded.Workspaces).Position);
+        Assert.Equal(position, Assert.Single(loaded.Shortcuts).Command.Position);
+        Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration
+        {
+            Shortcuts =
+            [
+                new(2, 65, new(CommandKind.SetWorkspacePosition,
+                    WorkspaceName: "One", Position: new(double.PositiveInfinity, 0)))
+            ]
+        }).Validate());
     }
 
     [Fact]

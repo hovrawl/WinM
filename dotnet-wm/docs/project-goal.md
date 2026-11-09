@@ -4,7 +4,7 @@
 
 WinManager manages exactly one logical desk. There is no desk list, desk switching, or separate desk per monitor. Each monitor shows one workspace view onto that same desk. A workspace belongs to the desk, not to a monitor.
 
-This document defines the target model. The system keeps workspace identity independent from monitor views, supports exclusive view transfer, and offers per-workspace split and layered layouts. Current tiling keeps every eligible window managed when minimum sizes exceed available space. Spatial bounds, additional layout rules, persistent desk state, and the spatial overview remain future work; a separate debug/control inspector is available. See [the migration plan](desk-model-plan.md) for the status and next phases.
+This document defines the target model. The system keeps workspace identity independent from monitor views, supports exclusive view transfer, manager-owned logical workspace positions, and per-workspace split and layered layouts. Current tiling keeps every eligible window managed when minimum sizes exceed available space. Workspace bounds, additional layout rules, persistent runtime desk state, and the full desk overview remain future work. The separate debug console and spatial switcher are available; see [the migration plan](desk-model-plan.md) for status and next phases.
 
 ## Confirmed rules
 
@@ -21,11 +21,11 @@ This document defines the target model. The system keeps workspace identity inde
 
 ## Space model
 
-The desk uses logical coordinates. A workspace has a position and bounds on the desk. Its member windows form a group inside those bounds. A workspace layout rule places its windows within the area that a monitor view provides.
+The desk uses logical coordinates. Each workspace has a manager-owned position; workspace bounds and drag placement are not implemented yet. Its member windows form a group at that position. A workspace layout rule places its windows within the area that a monitor view provides.
 
 Desk coordinates do not use monitor pixels, DPI, or a client's zoom level. A monitor view maps the selected workspace layout to that monitor's current work area. The native Windows bounds of a window describe observed placement. They do not define desk position or workspace membership.
 
-A client can zoom out to show the desk. It can show each workspace as a group of its windows. The client can let a user select a workspace view or move a workspace group to a new desk position. A group move changes workspace position. It does not change window membership.
+A client can zoom out to show the desk. It can show each workspace as a group of its windows. The debug console can edit a workspace's logical coordinates; a future draggable overview can move a workspace group. A position change does not change window membership or move/resize native windows.
 
 ## View transfer policy
 
@@ -37,7 +37,7 @@ An activation command can name `monitorId`. If it omits that field, the manager 
 
 ## What the manager owns
 
-The headless system program performs desk operations. It owns workspace membership, view transfer, layout calculation, reflow, native window actions, recovery, commands, and public state events. Persistence of view assignments and spatial workspace data is not implemented yet.
+The headless system program performs desk operations. It owns workspace membership, view transfer, workspace positions, layout calculation, reflow, native window actions, recovery, commands, and public state events. Configuration can seed positions for restart defaults; runtime position and view assignments are not persisted across manager restarts.
 
 A visual client is not required for the core data model or command-based operation. A user can select a workspace with a shortcut, CLI, or another client. The manager must expose enough state and commands for an integration to display and control the desk.
 
@@ -45,15 +45,15 @@ A visual client is not required for the core data model or command-based operati
 
 Visual gestures need a user interface, but they do not belong in the desk model. A separate client can provide these views:
 
-- **Desk overview:** a zoomable view that groups each workspace's windows. A user can move a workspace group around the desk and select a workspace to transfer its view.
-- **Quick switcher:** a floating modal window with workspace groups at desk-like, uneven positions rather than a uniform list. Arrow keys move selection. Enter text to filter workspace names. Enter selects the workspace for the current monitor view.
+- **Spatial switcher:** a separate popup with workspace groups at their manager-owned, desk-like positions. Search dims nonmatches without rearranging them; arrow keys navigate by coordinates and Enter transfers the selected view to an explicitly selected monitor.
+- **Full desk overview:** a future zoomable view that groups workspace windows and supports moving workspace groups around the desk.
 
 Both views use public manager state and commands. The client does not own workspace membership, layout rules, or transfer state. See the [client choices and implementation plan](desk-model-plan.md#visual-client-choices).
 
 ## Implementation status
 
-`WorkspaceSet` now keeps workspaces independent from a monitor-to-workspace view map. `ManagerSnapshot.WorkspaceViews` exposes that map; `WorkspaceInfo.MonitorId` and `Active` remain compatibility projections, with `Guid.Empty` and `false` for an unviewed workspace. The manager transfers views, applies the selected source fallback, releases views on monitor removal, and restores view state after native-action failure. `WorkspaceDefinition.MonitorDeviceName` is used as an initial placement hint.
+`WorkspaceSet` now keeps workspaces independent from a monitor-to-workspace view map. `ManagerSnapshot.WorkspaceViews` exposes that map; `WorkspaceInfo.MonitorId` and `Active` remain compatibility projections, with `Guid.Empty` and `false` for an unviewed workspace. The manager transfers views, applies the selected source fallback, releases views on monitor removal, and restores view state after native-action failure. `WorkspaceDefinition.MonitorDeviceName` is used as an initial placement hint. `WorkspaceInfo.Position` exposes logical coordinates; `WorkspaceDefinition.Position` seeds them, deterministic defaults are assigned when omitted, and `setWorkspacePosition` changes them without native window actions.
 
-The current native tiling offers the split-tree layout and the layered page stack. Both respect window minimum sizes and preserve every workspace member; layered mode overlays pages with a bounded cascade and uses focus cycling to bring pages forward. `layoutOverflow` is exposed in snapshots and the CLI status view; Windows minimizes overflow windows with crash recovery, and focus can promote an overflow window by replacing the focused tile. Logical desk coordinates, workspace bounds, columns/rows/Fibonacci rules, and persistence of runtime layout/view changes are not implemented.
+The current native tiling offers the split-tree layout and the layered page stack. Both respect window minimum sizes and preserve every workspace member; layered mode overlays pages with a bounded cascade and uses focus cycling to bring pages forward. `layoutOverflow` is exposed in snapshots and the CLI status view; Windows minimizes overflow windows with crash recovery, and focus can promote an overflow window by replacing the focused tile. Workspace bounds, columns/rows/Fibonacci rules, and persistence of runtime position/layout/view changes are not implemented.
 
-The separate [Avalonia debug/control companion](../src/WinManager.DebugUi/README.md) is the first visual slice. It inspects the single desk and sends public manager commands; it never creates another desk or owns membership. Safely identifiable configured exclusions are exposed as read-only diagnostics, separate from actionable windows. The spatial overview and quick switcher remain later integration work.
+The separate [Avalonia debug console](../src/WinManager.DebugUi/README.md) and [spatial switcher](../src/WinManager.SpatialSwitcher/README.md) are the visual slices. They inspect or select workspaces on the single desk and send public manager commands; neither creates another desk or owns membership. Safely identifiable configured exclusions are exposed as read-only diagnostics, separate from actionable windows. The draggable full desk overview remains later integration work.

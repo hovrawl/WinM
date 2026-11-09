@@ -71,7 +71,9 @@ public sealed class PipeServer : IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+        }
         finally
         {
             await stop.CancelAsync();
@@ -81,8 +83,14 @@ public sealed class PipeServer : IAsyncDisposable
 
     private static async Task ServeAsync(Connection connection, SemaphoreSlim slots)
     {
-        try { await connection.RunAsync(); }
-        finally { slots.Release(); }
+        try
+        {
+            await connection.RunAsync();
+        }
+        finally
+        {
+            slots.Release();
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -102,7 +110,8 @@ public sealed class PipeServer : IAsyncDisposable
         private readonly CancellationTokenSource writerAbort = new();
         private Guid? subscriptionId;
 
-        internal Connection(ManagerEngine manager, NamedPipeServerStream pipe, int capacity, CancellationToken cancellationToken)
+        internal Connection(ManagerEngine manager, NamedPipeServerStream pipe, int capacity,
+            CancellationToken cancellationToken)
         {
             this.manager = manager;
             this.pipe = pipe;
@@ -115,6 +124,7 @@ public sealed class PipeServer : IAsyncDisposable
         }
 
         public bool TryPublish(EventEnvelope envelope) => Enqueue(envelope);
+
         public void Disconnect(string reason)
         {
             _ = writerAbort.CancelAsync();
@@ -145,18 +155,26 @@ public sealed class PipeServer : IAsyncDisposable
                         validated = true;
                         writer = WriteAsync();
                     }
+
                     await HandleAsync(document.RootElement);
                 }
             }
-            catch (Exception error) when (error is IOException or InvalidDataException or OperationCanceledException or JsonException
-                or UnauthorizedAccessException or System.ComponentModel.Win32Exception or System.Security.SecurityException) { }
+            catch (Exception error) when (error is IOException or InvalidDataException or OperationCanceledException
+                                              or JsonException
+                                              or UnauthorizedAccessException or System.ComponentModel.Win32Exception
+                                              or System.Security.SecurityException)
+            {
+            }
             finally
             {
                 await stop.CancelAsync();
                 output.Writer.TryComplete();
                 try
                 {
-                    try { await writer.WaitAsync(TimeSpan.FromSeconds(2)); }
+                    try
+                    {
+                        await writer.WaitAsync(TimeSpan.FromSeconds(2));
+                    }
                     catch (TimeoutException)
                     {
                         await writerAbort.CancelAsync();
@@ -175,6 +193,7 @@ public sealed class PipeServer : IAsyncDisposable
                             if (result.ErrorCode == "busy") await Task.Delay(10);
                         } while (result.ErrorCode == "busy");
                     }
+
                     writerAbort.Dispose();
                     stop.Dispose();
                 }
@@ -192,7 +211,8 @@ public sealed class PipeServer : IAsyncDisposable
                     await PipeFraming.WriteAsync(pipe, message, timeout.Token);
                 }
             }
-            catch (Exception error) when (error is IOException or InvalidDataException or OperationCanceledException or ObjectDisposedException)
+            catch (Exception error) when (error is IOException or InvalidDataException or OperationCanceledException
+                                              or ObjectDisposedException)
             {
                 Disconnect("write_failed");
             }
@@ -201,7 +221,8 @@ public sealed class PipeServer : IAsyncDisposable
         private async Task HandleAsync(JsonElement root)
         {
             var requestId = Guid.Empty;
-            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("requestId", out var idElement) && idElement.ValueKind == JsonValueKind.String)
+            if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("requestId", out var idElement) &&
+                idElement.ValueKind == JsonValueKind.String)
                 idElement.TryGetGuid(out requestId);
             try
             {
@@ -213,8 +234,11 @@ public sealed class PipeServer : IAsyncDisposable
                     Error(requestId, "unsupported_version", "Unsupported protocol version.");
                     return;
                 }
-                if (requestId == Guid.Empty || !root.TryGetProperty("kind", out var kind) || kind.GetString() != "request" ||
-                    !root.TryGetProperty("operation", out var operation) || operation.ValueKind != JsonValueKind.String ||
+
+                if (requestId == Guid.Empty || !root.TryGetProperty("kind", out var kind) ||
+                    kind.GetString() != "request" ||
+                    !root.TryGetProperty("operation", out var operation) ||
+                    operation.ValueKind != JsonValueKind.String ||
                     !root.TryGetProperty("payload", out var payload))
                     throw new ArgumentException("A request requires kind, requestId, operation and payload.");
                 switch (operation.GetString())
@@ -226,46 +250,60 @@ public sealed class PipeServer : IAsyncDisposable
                         else Respond(requestId, true, null, null, snapshot.StateRevision, Protocol.Payload(snapshot));
                         break;
                     case "command":
-                        CheckObject(payload, "kind", "windowId", "direction", "amount", "orientation", "mode", "paused", "workspaceId", "monitorId", "workspaceName", "nodeId", "navigation", "cycleDirection", "layout");
-                        if (!payload.TryGetProperty("kind", out _)) throw new ArgumentException("Command kind is required.");
-                        var command = payload.Deserialize<ManagerCommand>(Protocol.JsonOptions) ?? throw new ArgumentException("Command is required.");
+                        CheckObject(payload, "kind", "windowId", "direction", "amount", "orientation", "mode", "paused",
+                            "workspaceId", "monitorId", "workspaceName", "nodeId", "navigation", "cycleDirection",
+                            "layout", "position");
+                        if (!payload.TryGetProperty("kind", out _))
+                            throw new ArgumentException("Command kind is required.");
+                        var command = payload.Deserialize<ManagerCommand>(Protocol.JsonOptions) ??
+                                      throw new ArgumentException("Command is required.");
                         var result = await manager.ExecuteAsync(command, stop.Token);
-                        Respond(requestId, result.Success, result.ErrorCode, result.Message, result.StateRevision, Protocol.Payload(result));
+                        Respond(requestId, result.Success, result.ErrorCode, result.Message, result.StateRevision,
+                            Protocol.Payload(result));
                         break;
                     case "subscribe":
                         CheckObject(payload, "eventTypes");
                         var subscribe = payload.Deserialize<SubscribeRequest>(Protocol.JsonOptions)!;
-                        if (subscribe.EventTypes is { } types && (types.Count > ManagerEngine.EventTypes.Count || types.Any(type => type is null || !ManagerEngine.EventTypes.Contains(type))))
+                        if (subscribe.EventTypes is { } types && (types.Count > ManagerEngine.EventTypes.Count ||
+                                                                  types.Any(type =>
+                                                                      type is null ||
+                                                                      !ManagerEngine.EventTypes.Contains(type))))
                             throw new ArgumentException("Unknown event type or too many filters.");
                         if (subscriptionId is not null)
                         {
                             Error(requestId, "already_subscribed", "Only one subscription is allowed per connection.");
                             break;
                         }
+
                         // Do not abandon a successful actor registration before capturing its ID for cleanup.
                         var subscribed = await manager.SubscribeAsync(this, subscribe.EventTypes, stop.Token);
                         subscriptionId = subscribed.SubscriptionId;
-                        Respond(requestId, subscribed.Success, subscribed.ErrorCode, null, subscribed.StateRevision, Protocol.Payload(subscribed));
+                        Respond(requestId, subscribed.Success, subscribed.ErrorCode, null, subscribed.StateRevision,
+                            Protocol.Payload(subscribed));
                         break;
                     case "unsubscribe":
                         CheckObject(payload, "subscriptionId");
-                        if (!payload.TryGetProperty("subscriptionId", out var subscription) || !subscription.TryGetGuid(out var requestedId) || requestedId == Guid.Empty)
+                        if (!payload.TryGetProperty("subscriptionId", out var subscription) ||
+                            !subscription.TryGetGuid(out var requestedId) || requestedId == Guid.Empty)
                             throw new ArgumentException("A nonempty subscriptionId is required.");
                         if (subscriptionId != requestedId)
                         {
                             Error(requestId, "not_found", "Subscription does not belong to this connection.");
                             break;
                         }
+
                         var unsubscribed = await manager.UnsubscribeAsync(requestedId, stop.Token);
                         if (unsubscribed.Success) subscriptionId = null;
-                        Respond(requestId, unsubscribed.Success, unsubscribed.ErrorCode, unsubscribed.Message, unsubscribed.StateRevision);
+                        Respond(requestId, unsubscribed.Success, unsubscribed.ErrorCode, unsubscribed.Message,
+                            unsubscribed.StateRevision);
                         break;
                     default:
                         Error(requestId, "unknown_operation", "Unknown operation.");
                         break;
                 }
             }
-            catch (Exception error) when (error is JsonException or ArgumentException or InvalidOperationException or FormatException)
+            catch (Exception error) when (error is JsonException or ArgumentException or InvalidOperationException
+                                              or FormatException)
             {
                 Error(requestId, "invalid_argument", "Invalid request envelope or operation arguments.");
             }
@@ -283,7 +321,8 @@ public sealed class PipeServer : IAsyncDisposable
         private void Error(Guid id, string code, string message) =>
             Respond(id, false, code, message, manager.Current?.StateRevision ?? 0);
 
-        private void Respond(Guid id, bool success, string? code, string? message, long revision, JsonElement? payload = null) =>
+        private void Respond(Guid id, bool success, string? code, string? message, long revision,
+            JsonElement? payload = null) =>
             Enqueue(new ResponseEnvelope(Protocol.Version, id, success, code, message, revision, payload));
     }
 }

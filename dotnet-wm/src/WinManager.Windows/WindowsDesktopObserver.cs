@@ -26,15 +26,22 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     private readonly object gate = new();
     private readonly HashSet<string> ignoredProcesses;
     private readonly HashSet<string> ignoredClasses;
+
     private readonly Channel<NativeNotification> notifications = Channel.CreateUnbounded<NativeNotification>(
         new UnboundedChannelOptions { SingleReader = true, AllowSynchronousContinuations = false });
+
     private int reconcilePending;
     private readonly Dictionary<nint, Guid> movingWindows = [];
     private readonly HashSet<Guid> pendingDrops = [];
+
     private readonly Channel<CaptureRequest> captures = Channel.CreateBounded<CaptureRequest>(
-        new BoundedChannelOptions(64) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait, AllowSynchronousContinuations = false });
+        new BoundedChannelOptions(64)
+            { SingleReader = true, FullMode = BoundedChannelFullMode.Wait, AllowSynchronousContinuations = false });
+
     private readonly Channel<ApplyRequest> applies = Channel.CreateBounded<ApplyRequest>(
-        new BoundedChannelOptions(64) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait, AllowSynchronousContinuations = false });
+        new BoundedChannelOptions(64)
+            { SingleReader = true, FullMode = BoundedChannelFullMode.Wait, AllowSynchronousContinuations = false });
+
     private readonly Dictionary<Guid, WindowInfo> observedWindows = [];
     private readonly Dictionary<Guid, RecoveryRecord> hiddenWindows = [];
     private readonly Dictionary<Guid, RecoveryRecord> minimizedWindows = [];
@@ -57,12 +64,16 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     private bool measuringDpi;
     internal int? RecoveryHelperProcessId => recovery.HelperProcessId;
 
-    public WindowsDesktopObserver(IEnumerable<string>? ignoredProcessNames = null, IEnumerable<string>? ignoredClassNames = null,
+    public WindowsDesktopObserver(IEnumerable<string>? ignoredProcessNames = null,
+        IEnumerable<string>? ignoredClassNames = null,
         string? recoveryExecutablePath = null)
     {
-        ignoredProcesses = new HashSet<string>((ignoredProcessNames ?? []).Append("WinManager.DebugUi").Select(NormalizeProcessName), StringComparer.OrdinalIgnoreCase);
+        ignoredProcesses = new HashSet<string>((ignoredProcessNames ?? [])
+            .Append("WinManager.DebugUi").Append("WinManager.SpatialSwitcher")
+            .Select(NormalizeProcessName), StringComparer.OrdinalIgnoreCase);
         ignoredClasses = new HashSet<string>(ignoredClassNames ?? [], StringComparer.OrdinalIgnoreCase);
-        this.recoveryExecutablePath = recoveryExecutablePath ?? Path.Combine(AppContext.BaseDirectory, "WinManager.Recovery.exe");
+        this.recoveryExecutablePath =
+            recoveryExecutablePath ?? Path.Combine(AppContext.BaseDirectory, "WinManager.Recovery.exe");
         windowProcedure = WindowProcedure;
         eventProcedure = WinEventProcedure;
     }
@@ -95,7 +106,11 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 }
             }
         }
-        try { await started.Task.WaitAsync(cancellationToken).ConfigureAwait(false); }
+
+        try
+        {
+            await started.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             await DisposeAsync().ConfigureAwait(false);
@@ -108,7 +123,8 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         }
     }
 
-    public async IAsyncEnumerable<NativeNotification> Notifications([EnumeratorCancellation] CancellationToken cancellationToken)
+    public async IAsyncEnumerable<NativeNotification> Notifications(
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         await foreach (var notification in notifications.Reader.ReadAllAsync(cancellationToken))
         {
@@ -125,16 +141,19 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             ObjectDisposedException.ThrowIf(disposing, this);
             if (thread is null) throw new InvalidOperationException("StartAsync must be called before CaptureAsync.");
         }
+
         await started.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         var request = new CaptureRequest(cancellationToken);
         using var registration = cancellationToken.Register(() => request.Completion.TrySetCanceled(cancellationToken));
         await captures.Writer.WriteAsync(request, cancellationToken).ConfigureAwait(false);
         lock (gate)
         {
-            if (disposing) request.Completion.TrySetException(new ObjectDisposedException(nameof(WindowsDesktopObserver)));
+            if (disposing)
+                request.Completion.TrySetException(new ObjectDisposedException(nameof(WindowsDesktopObserver)));
             else if (!PInvoke.PostMessage(notificationWindow, CaptureMessage, default, default))
                 request.Completion.TrySetException(NativeError("PostMessage"));
         }
+
         return await request.Completion.Task.ConfigureAwait(false);
     }
 
@@ -149,7 +168,8 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     public Task<ApplyResult> RestoreAsync(CancellationToken cancellationToken) =>
         DispatchApplyAsync(new LayoutPlan([]), true, cancellationToken);
 
-    private async Task<ApplyResult> DispatchApplyAsync(LayoutPlan plan, bool restore, CancellationToken cancellationToken)
+    private async Task<ApplyResult> DispatchApplyAsync(LayoutPlan plan, bool restore,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         lock (gate)
@@ -157,16 +177,19 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             ObjectDisposedException.ThrowIf(disposing, this);
             if (thread is null) throw new InvalidOperationException("StartAsync must be called before ApplyAsync.");
         }
+
         await started.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         var request = new ApplyRequest(plan, cancellationToken, restore);
         using var registration = cancellationToken.Register(() => request.Completion.TrySetCanceled(cancellationToken));
         await applies.Writer.WriteAsync(request, cancellationToken).ConfigureAwait(false);
         lock (gate)
         {
-            if (disposing) request.Completion.TrySetException(new ObjectDisposedException(nameof(WindowsDesktopObserver)));
+            if (disposing)
+                request.Completion.TrySetException(new ObjectDisposedException(nameof(WindowsDesktopObserver)));
             else if (!PInvoke.PostMessage(notificationWindow, ApplyMessage, default, default))
                 request.Completion.TrySetException(NativeError("PostMessage"));
         }
+
         return await request.Completion.Task.ConfigureAwait(false);
     }
 
@@ -187,10 +210,12 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                     notifications.Writer.TryComplete();
                     stopped.TrySetResult();
                 }
-                else if (notificationWindow != default && !PInvoke.PostMessage(notificationWindow, StopMessage, default, default))
+                else if (notificationWindow != default &&
+                         !PInvoke.PostMessage(notificationWindow, StopMessage, default, default))
                     PInvoke.PostThreadMessage(nativeThreadId, PInvoke.WM_QUIT, default, default);
             }
         }
+
         await stopped.Task.ConfigureAwait(false);
     }
 
@@ -205,7 +230,8 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         try
         {
             nativeThreadId = PInvoke.GetCurrentThreadId();
-            previousDpi = PInvoke.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            previousDpi =
+                PInvoke.SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT.DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             if (previousDpi == default) throw NativeError("SetThreadDpiAwarenessContext");
             instance = PInvoke.GetModuleHandle((string?)null);
             if (instance.IsInvalid) throw NativeError("GetModuleHandle");
@@ -223,6 +249,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 // A message-only window would miss WM_DISPLAYCHANGE and WM_SETTINGCHANGE broadcasts.
                 window = PInvoke.CreateWindowEx(0, windowClass, "", 0, 0, 0, 0, 0, default, default, instance, null);
             }
+
             if (window == default) throw NativeError("CreateWindowEx");
             InstallHook(PInvoke.EVENT_SYSTEM_FOREGROUND, PInvoke.EVENT_SYSTEM_FOREGROUND);
             InstallHook(PInvoke.EVENT_SYSTEM_MOVESIZESTART, PInvoke.EVENT_SYSTEM_MOVESIZEEND);
@@ -231,20 +258,29 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             InstallHook(PInvoke.EVENT_OBJECT_CLOAKED, PInvoke.EVENT_OBJECT_UNCLOAKED);
             // Start recovery before initial capture, so an abandoned journal is recovered even
             // when all managed windows were left hidden by a previous host.
-            try { recovery.Start(recoveryExecutablePath); }
+            try
+            {
+                recovery.Start(recoveryExecutablePath);
+            }
             catch (Exception error) when (error is IOException or Win32Exception or OperationCanceledException or
-                UnauthorizedAccessException or InvalidOperationException or ArgumentException) { }
+                                              UnauthorizedAccessException or InvalidOperationException
+                                              or ArgumentException)
+            {
+            }
+
             lock (gate)
             {
                 notificationWindow = window;
                 if (disposing) throw new ObjectDisposedException(nameof(WindowsDesktopObserver));
                 started.TrySetResult();
             }
+
             Notify();
             recoveryTimer = new Timer(_ =>
             {
                 lock (gate)
-                    if (notificationWindow != default) PInvoke.PostMessage(notificationWindow, RecoveryCheckMessage, default, default);
+                    if (notificationWindow != default)
+                        PInvoke.PostMessage(notificationWindow, RecoveryCheckMessage, default, default);
             }, null, 100, 100);
             while (true)
             {
@@ -257,21 +293,25 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                     ProcessCaptures(window);
                     continue;
                 }
+
                 if (message.hwnd == window && message.message == ApplyMessage)
                 {
                     ProcessApplies(window);
                     continue;
                 }
+
                 if (message.hwnd == window && message.message == RecoveryCheckMessage)
                 {
                     CheckRecovery();
                     continue;
                 }
+
                 if (message.hwnd == window && message.message == RegisterShortcutsMessage)
                 {
                     ProcessShortcutRequests(window);
                     continue;
                 }
+
                 PInvoke.TranslateMessage(message);
                 PInvoke.DispatchMessage(message);
             }
@@ -286,8 +326,15 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             recoveryTimer?.Dispose();
             ReleaseShortcuts(window, []);
             CompleteShortcuts(failure);
-            try { RestoreManaged(CancellationToken.None, true); }
-            catch { /* Leave the durable helper journal intact on a failed final restore. */ }
+            try
+            {
+                RestoreManaged(CancellationToken.None, true);
+            }
+            catch
+            {
+                /* Leave the durable helper journal intact on a failed final restore. */
+            }
+
             recovery.Dispose();
             lock (gate) notificationWindow = default;
             foreach (var hook in hooks) hook.Dispose();
@@ -298,10 +345,12 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             if (previousDpi != default) PInvoke.SetThreadDpiAwarenessContext(previousDpi);
             captures.Writer.TryComplete(failure);
             while (captures.Reader.TryRead(out var request))
-                request.Completion.TrySetException(failure ?? new ObjectDisposedException(nameof(WindowsDesktopObserver)));
+                request.Completion.TrySetException(failure ??
+                                                   new ObjectDisposedException(nameof(WindowsDesktopObserver)));
             applies.Writer.TryComplete(failure);
             while (applies.Reader.TryRead(out var request))
-                request.Completion.TrySetException(failure ?? new ObjectDisposedException(nameof(WindowsDesktopObserver)));
+                request.Completion.TrySetException(failure ??
+                                                   new ObjectDisposedException(nameof(WindowsDesktopObserver)));
             notifications.Writer.TryComplete(failure);
             started.TrySetException(failure ?? new ObjectDisposedException(nameof(WindowsDesktopObserver)));
             stopped.TrySetResult();
@@ -319,10 +368,12 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             hook.Dispose();
             throw NativeError("SetWinEventHook");
         }
+
         hooks.Add(hook);
     }
 
-    private unsafe void WinEventProcedure(HWINEVENTHOOK hook, uint eventType, HWND window, int objectId, int childId, uint eventThread, uint eventTime)
+    private unsafe void WinEventProcedure(HWINEVENTHOOK hook, uint eventType, HWND window, int objectId, int childId,
+        uint eventThread, uint eventTime)
     {
         if (eventType >= ObjectCreate && (objectId != 0 || childId != 0 || window == default)) return;
         try
@@ -330,9 +381,11 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             var handle = (nint)window.Value;
             if (eventType == PInvoke.EVENT_SYSTEM_MOVESIZESTART && window != default)
             {
-                var id = observedWindows.Keys.FirstOrDefault(id => identities.TryResolve(id, out var identity) && identity.Handle == handle);
+                var id = observedWindows.Keys.FirstOrDefault(id =>
+                    identities.TryResolve(id, out var identity) && identity.Handle == handle);
                 if (id != Guid.Empty && movingWindows.TryAdd(handle, id))
-                    notifications.Writer.TryWrite(new(NativeNotificationKind.MoveStarted, id, observedWindows[id].Bounds));
+                    notifications.Writer.TryWrite(new(NativeNotificationKind.MoveStarted, id,
+                        observedWindows[id].Bounds));
             }
             else if (eventType == PInvoke.EVENT_SYSTEM_MOVESIZEEND && movingWindows.Remove(handle, out var id))
             {
@@ -343,8 +396,10 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             {
                 if (movingWindows.Remove(handle, out var destroyed)) pendingDrops.Remove(destroyed);
             }
+
             if (eventType is ObjectCreate or ObjectDestroy)
-                identities.RecordLifecycleChange((nint)window.Value, WindowIdentityMap.ExpandEventTime(eventTime, PInvoke.GetTickCount64()));
+                identities.RecordLifecycleChange((nint)window.Value,
+                    WindowIdentityMap.ExpandEventTime(eventTime, PInvoke.GetTickCount64()));
             Notify();
         }
         catch (Exception error)
@@ -364,11 +419,13 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 PInvoke.PostQuitMessage(0);
                 return default;
             }
+
             if (message == PInvoke.WM_HOTKEY)
             {
                 QueueShortcut(wParam, lParam);
                 return default;
             }
+
             if (message is PInvoke.WM_DISPLAYCHANGE or PInvoke.WM_SETTINGCHANGE or PInvoke.WM_DEVICECHANGE ||
                 (message == PInvoke.WM_DPICHANGED && !measuringDpi))
                 Notify();
@@ -378,6 +435,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             notifications.Writer.TryComplete(error);
             PInvoke.PostQuitMessage(1);
         }
+
         return PInvoke.DefWindowProc(window, message, wParam, lParam);
     }
 
@@ -397,9 +455,16 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 request.CancellationToken.ThrowIfCancellationRequested();
                 request.Completion.TrySetResult(Capture(request.CancellationToken));
             }
-            catch (OperationCanceledException) { request.Completion.TrySetCanceled(request.CancellationToken); }
-            catch (Exception error) { request.Completion.TrySetException(error); }
+            catch (OperationCanceledException)
+            {
+                request.Completion.TrySetCanceled(request.CancellationToken);
+            }
+            catch (Exception error)
+            {
+                request.Completion.TrySetException(error);
+            }
         }
+
         if (captures.Reader.TryPeek(out _)) PInvoke.PostMessage(window, CaptureMessage, default, default);
     }
 
@@ -415,9 +480,16 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                     ? RestoreManaged(request.CancellationToken, true)
                     : Apply(request.Plan, request.CancellationToken));
             }
-            catch (OperationCanceledException) { request.Completion.TrySetCanceled(request.CancellationToken); }
-            catch (Exception error) { request.Completion.TrySetException(error); }
+            catch (OperationCanceledException)
+            {
+                request.Completion.TrySetCanceled(request.CancellationToken);
+            }
+            catch (Exception error)
+            {
+                request.Completion.TrySetException(error);
+            }
         }
+
         if (applies.Reader.TryPeek(out _)) PInvoke.PostMessage(window, ApplyMessage, default, default);
     }
 
@@ -432,15 +504,22 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var info = new MONITORINFOEXW { monitorInfo = new MONITORINFO { cbSize = (uint)sizeof(MONITORINFOEXW) } };
+                var info = new MONITORINFOEXW
+                    { monitorInfo = new MONITORINFO { cbSize = (uint)sizeof(MONITORINFOEXW) } };
                 if (!PInvoke.GetMonitorInfo(monitor, (MONITORINFO*)&info)) throw NativeError("GetMonitorInfo");
                 var deviceName = info.szDevice.ToString();
                 if (!monitorIds.TryGetValue(deviceName, out var id)) monitorIds[deviceName] = id = Guid.NewGuid();
                 var dpi = ReadMonitorDpi(info.monitorInfo.rcMonitor);
-                monitorsByHandle.Add(monitor, new MonitorInfo(id, deviceName, Rect(info.monitorInfo.rcMonitor), Rect(info.monitorInfo.rcWork), dpi));
+                monitorsByHandle.Add(monitor,
+                    new MonitorInfo(id, deviceName, Rect(info.monitorInfo.rcMonitor), Rect(info.monitorInfo.rcWork),
+                        dpi));
                 return true;
             }
-            catch (Exception error) { enumerationError = error; return false; }
+            catch (Exception error)
+            {
+                enumerationError = error;
+                return false;
+            }
         };
         var monitorResult = PInvoke.EnumDisplayMonitors(default, null, monitorCallback, default);
         GC.KeepAlive(monitorCallback);
@@ -462,7 +541,11 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 handles.Add(window);
                 return true;
             }
-            catch (Exception error) { enumerationError = error; return false; }
+            catch (Exception error)
+            {
+                enumerationError = error;
+                return false;
+            }
         };
         var windowResult = PInvoke.EnumWindows(callback, default);
         GC.KeepAlive(callback);
@@ -477,13 +560,17 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             windows.Add(candidate);
             if (window == foreground) focused = candidate.Id;
         }
+
         identities.Retain(seen);
         observedWindows.Clear();
         foreach (var candidate in windows) observedWindows.Add(candidate.Id, candidate);
-        return new DesktopSnapshot(monitorsByHandle.Values.OrderBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase).ToArray(),
+        return new DesktopSnapshot(
+            monitorsByHandle.Values.OrderBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase).ToArray(),
             windows.OrderBy(window => window.Id).ToArray(), focused,
-            configuredExclusions.OrderBy(exclusion => exclusion.MonitorId).ThenBy(exclusion => exclusion.ProcessName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(exclusion => exclusion.ClassName, StringComparer.OrdinalIgnoreCase).ThenBy(exclusion => exclusion.Title, StringComparer.Ordinal).ToArray());
+            configuredExclusions.OrderBy(exclusion => exclusion.MonitorId).ThenBy(exclusion => exclusion.ProcessName,
+                    StringComparer.OrdinalIgnoreCase)
+                .ThenBy(exclusion => exclusion.ClassName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(exclusion => exclusion.Title, StringComparer.Ordinal).ToArray());
     }
 
     private unsafe WindowInfo? ReadWindow(HWND window, Dictionary<HMONITOR, MonitorInfo> monitors,
@@ -491,19 +578,22 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     {
         exclusion = null;
         var managerHidden = hiddenWindows.Any(pair => issuedHides.Contains(pair.Key) &&
-            pair.Value.Handle == (long)(nint)window.Value && RecoveryNative.Matches(pair.Value));
-        if ((!PInvoke.IsWindowVisible(window) && !managerHidden) || window == PInvoke.GetShellWindow() || window == PInvoke.GetDesktopWindow() ||
+                                                      pair.Value.Handle == (long)(nint)window.Value &&
+                                                      RecoveryNative.Matches(pair.Value));
+        if ((!PInvoke.IsWindowVisible(window) && !managerHidden) || window == PInvoke.GetShellWindow() ||
+            window == PInvoke.GetDesktopWindow() ||
             PInvoke.GetAncestor(window, GET_ANCESTOR_FLAGS.GA_ROOT) != window) return null;
         var style = (uint)PInvoke.GetWindowLong(window, WINDOW_LONG_PTR_INDEX.GWL_STYLE);
         var extendedStyle = (uint)PInvoke.GetWindowLong(window, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE);
         if ((style & (uint)WINDOW_STYLE.WS_CHILD) != 0) return null;
-        var flags = ClassifyWindowStyles(style, extendedStyle, PInvoke.GetWindow(window, GET_WINDOW_CMD.GW_OWNER) != default);
+        var flags = ClassifyWindowStyles(style, extendedStyle,
+            PInvoke.GetWindow(window, GET_WINDOW_CMD.GW_OWNER) != default);
         var className = ReadClassName(window);
         if (className.Length == 0 || IsShellOrTransientClass(className)) return null;
         var classNameExcluded = ignoredClasses.Contains(className);
         uint cloaked = 0;
         if (PInvoke.DwmGetWindowAttribute(window, global::Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_CLOAKED,
-            &cloaked, sizeof(uint)).Failed || cloaked != 0) return null;
+                &cloaked, sizeof(uint)).Failed || cloaked != 0) return null;
         PInvoke.GetWindowThreadProcessId(window, out var pid);
         if (pid == 0 || pid == (uint)Environment.ProcessId) return null;
         if (!TryReadProcess(pid, out var creationTime, out var processName)) return null;
@@ -511,14 +601,16 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         var monitor = PInvoke.MonitorFromWindow(window, MONITOR_FROM_FLAGS.MONITOR_DEFAULTTONEAREST);
         if (!monitors.TryGetValue(monitor, out var monitorInfo)) return null;
         RECT rectangle;
-        if (PInvoke.DwmGetWindowAttribute(window, global::Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_EXTENDED_FRAME_BOUNDS,
-            &rectangle, (uint)sizeof(RECT)).Failed && !PInvoke.GetWindowRect(window, out rectangle)) return null;
+        if (PInvoke.DwmGetWindowAttribute(window,
+                global::Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_EXTENDED_FRAME_BOUNDS,
+                &rectangle, (uint)sizeof(RECT)).Failed && !PInvoke.GetWindowRect(window, out rectangle)) return null;
         var title = ReadTitle(window);
         var minimum = processNameExcluded || classNameExcluded ? default : ReadMinimumSize(window, rectangle);
         // Revalidate after the cross-process queries: an HWND may disappear or be recycled meanwhile.
         PInvoke.GetWindowThreadProcessId(window, out var currentPid);
         if (!PInvoke.IsWindow(window) || currentPid != pid ||
-            !TryReadProcess(pid, out var currentCreationTime, out _) || currentCreationTime != creationTime) return null;
+            !TryReadProcess(pid, out var currentCreationTime, out _) ||
+            currentCreationTime != creationTime) return null;
         var bounds = Rect(rectangle);
         if (processNameExcluded || classNameExcluded)
         {
@@ -526,12 +618,16 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 processNameExcluded, classNameExcluded);
             return null;
         }
+
         var minimized = (bool)PInvoke.IsIconic(window);
         var fullscreen = !minimized && Covers(bounds, monitorInfo.Bounds);
-        var id = identities.GetOrCreate(new WindowIdentity((nint)window.Value, pid, creationTime), PInvoke.GetTickCount64());
-        return new WindowInfo(id, monitorInfo.Id, title, processName, className, bounds, PInvoke.IsWindowVisible(window), minimized, fullscreen,
+        var id = identities.GetOrCreate(new WindowIdentity((nint)window.Value, pid, creationTime),
+            PInvoke.GetTickCount64());
+        return new WindowInfo(id, monitorInfo.Id, title, processName, className, bounds,
+            PInvoke.IsWindowVisible(window), minimized, fullscreen,
             WindowMode.Tiling, minimum.Width, minimum.Height, managerHidden,
-            IsPopup: flags.IsPopup, IsToolWindow: flags.IsToolWindow, IsOwned: flags.IsOwned, IsNoActivate: flags.IsNoActivate);
+            IsPopup: flags.IsPopup, IsToolWindow: flags.IsToolWindow, IsOwned: flags.IsOwned,
+            IsNoActivate: flags.IsNoActivate);
     }
 
     internal static (bool IsPopup, bool IsToolWindow, bool IsOwned, bool IsNoActivate) ClassifyWindowStyles(
@@ -549,15 +645,19 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         foreach (var visibility in plan.Visibility ?? [])
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (movingWindows.ContainsValue(visibility.WindowId) || pendingDrops.Contains(visibility.WindowId)) continue;
+            if (movingWindows.ContainsValue(visibility.WindowId) ||
+                pendingDrops.Contains(visibility.WindowId)) continue;
             ApplyVisibility(visibility, failures, cancellationToken);
         }
+
         foreach (var minimization in plan.Minimizations ?? [])
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (movingWindows.ContainsValue(minimization.WindowId) || pendingDrops.Contains(minimization.WindowId)) continue;
+            if (movingWindows.ContainsValue(minimization.WindowId) ||
+                pendingDrops.Contains(minimization.WindowId)) continue;
             ApplyMinimization(minimization, failures, cancellationToken);
         }
+
         foreach (var placement in plan.Placements)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -567,30 +667,37 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 failures.Add(failure!);
                 continue;
             }
+
             if (placement.Bounds.Width <= 0 || placement.Bounds.Height <= 0)
             {
                 failures.Add(new(placement.WindowId, "invalid_bounds", "Window dimensions must be positive."));
                 continue;
             }
+
             if (!PInvoke.GetWindowRect(window, out var outer))
             {
                 failures.Add(ActionError(placement.WindowId, "GetWindowRect"));
                 continue;
             }
+
             var frame = outer;
-            PInvoke.DwmGetWindowAttribute(window, global::Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_EXTENDED_FRAME_BOUNDS,
+            PInvoke.DwmGetWindowAttribute(window,
+                global::Windows.Win32.Graphics.Dwm.DWMWINDOWATTRIBUTE.DWMWA_EXTENDED_FRAME_BOUNDS,
                 &frame, (uint)sizeof(RECT));
             // Contract bounds describe the visible frame; SetWindowPos includes invisible borders.
             var x = (long)placement.Bounds.X + outer.left - frame.left;
             var y = (long)placement.Bounds.Y + outer.top - frame.top;
             var outerWidth = (long)placement.Bounds.Width + outer.right - outer.left - (frame.right - (long)frame.left);
-            var outerHeight = (long)placement.Bounds.Height + outer.bottom - outer.top - (frame.bottom - (long)frame.top);
+            var outerHeight = (long)placement.Bounds.Height + outer.bottom - outer.top -
+                              (frame.bottom - (long)frame.top);
             if (x < int.MinValue || x > int.MaxValue || y < int.MinValue || y > int.MaxValue ||
                 outerWidth <= 0 || outerWidth > int.MaxValue || outerHeight <= 0 || outerHeight > int.MaxValue)
             {
-                failures.Add(new(placement.WindowId, "invalid_bounds", "Window bounds exceed native coordinate limits."));
+                failures.Add(
+                    new(placement.WindowId, "invalid_bounds", "Window bounds exceed native coordinate limits."));
                 continue;
             }
+
             cancellationToken.ThrowIfCancellationRequested();
             // Recheck the GUID generation as well as PID/start time before issuing the native request.
             if (!ValidateTarget(placement.WindowId, out window, out _, out failure))
@@ -598,12 +705,15 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 failures.Add(failure!);
                 continue;
             }
+
             if (movingWindows.ContainsValue(placement.WindowId) || pendingDrops.Contains(placement.WindowId)) continue;
             Marshal.SetLastPInvokeError(0);
             if (!PInvoke.SetWindowPos(window, default, (int)x, (int)y, (int)outerWidth, (int)outerHeight,
-                SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER | SET_WINDOW_POS_FLAGS.SWP_ASYNCWINDOWPOS))
+                    SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER |
+                    SET_WINDOW_POS_FLAGS.SWP_ASYNCWINDOWPOS))
                 failures.Add(ActionError(placement.WindowId, "SetWindowPos"));
         }
+
         if (plan.FocusWindowId is { } focusId)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -619,6 +729,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                         "Windows did not grant foreground focus."));
             }
         }
+
         Notify();
         return new ApplyResult(failures);
     }
@@ -637,12 +748,16 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             failure = new(id, "access_denied", "Cannot verify the target process identity.");
             return false;
         }
-        if (creationTime != identity.ProcessCreationTime || !identities.TryResolve(id, out var current) || current != identity) return false;
+
+        if (creationTime != identity.ProcessCreationTime || !identities.TryResolve(id, out var current) ||
+            current != identity) return false;
         uint cloaked = 0;
         var normalStyle = (uint)PInvoke.GetWindowLong(window, WINDOW_LONG_PTR_INDEX.GWL_STYLE);
         var className = ReadClassName(window);
-        var managerHidden = issuedHides.Contains(id) && hiddenWindows.TryGetValue(id, out var hidden) && RecoveryNative.Matches(hidden);
-        if ((!PInvoke.IsWindowVisible(window) && !managerHidden) || window == PInvoke.GetShellWindow() || window == PInvoke.GetDesktopWindow() ||
+        var managerHidden = issuedHides.Contains(id) && hiddenWindows.TryGetValue(id, out var hidden) &&
+                            RecoveryNative.Matches(hidden);
+        if ((!PInvoke.IsWindowVisible(window) && !managerHidden) || window == PInvoke.GetShellWindow() ||
+            window == PInvoke.GetDesktopWindow() ||
             PInvoke.GetAncestor(window, GET_ANCESTOR_FLAGS.GA_ROOT) != window ||
             (normalStyle & (uint)WINDOW_STYLE.WS_CHILD) != 0 ||
             IsProcessExcluded(processName) ||
@@ -653,6 +768,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             failure = new(id, "ineligible_window", "Window is no longer eligible for managed actions.");
             return false;
         }
+
         PInvoke.GetWindowThreadProcessId(window, out var finalPid);
         if (!PInvoke.IsWindow(window) || finalPid != identity.ProcessId ||
             !identities.TryResolve(id, out current) || current != identity) return false;
@@ -666,33 +782,41 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             RestoreManaged(CancellationToken.None, false);
     }
 
-    private unsafe void ApplyVisibility(WindowVisibility visibility, List<NativeActionFailure> failures, CancellationToken token)
+    private unsafe void ApplyVisibility(WindowVisibility visibility, List<NativeActionFailure> failures,
+        CancellationToken token)
     {
         if (!ValidateTarget(visibility.WindowId, out var window, out _, out var failure))
         {
             failures.Add(failure!);
             return;
         }
+
         if (visibility.Visible)
         {
             if (hiddenWindows.TryGetValue(visibility.WindowId, out var original))
                 RestoreOne(visibility.WindowId, original, failures);
             return;
         }
+
         if (hiddenWindows.ContainsKey(visibility.WindowId)) return;
         if (PInvoke.IsIconic(window))
         {
-            failures.Add(new(visibility.WindowId, "ineligible_window", "Application-minimized windows are not manager-hidden."));
+            failures.Add(new(visibility.WindowId, "ineligible_window",
+                "Application-minimized windows are not manager-hidden."));
             return;
         }
+
         var placement = new WINDOWPLACEMENT { length = (uint)Marshal.SizeOf<WINDOWPLACEMENT>() };
-        if (!PInvoke.GetWindowPlacement(window, ref placement) || !identities.TryResolve(visibility.WindowId, out var identity))
+        if (!PInvoke.GetWindowPlacement(window, ref placement) ||
+            !identities.TryResolve(visibility.WindowId, out var identity))
         {
             failures.Add(ActionError(visibility.WindowId, "GetWindowPlacement"));
             return;
         }
+
         var command = placement.showCmd == SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED
-            ? SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED : SHOW_WINDOW_CMD.SW_SHOWNOACTIVATE;
+            ? SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED
+            : SHOW_WINDOW_CMD.SW_SHOWNOACTIVATE;
         var record = new RecoveryRecord((long)(nint)window.Value, identity.ProcessId, identity.ProcessCreationTime,
             (uint)command, "WinManager.Recovery." + Guid.NewGuid().ToString("N"), Minimization: true);
         try
@@ -703,47 +827,58 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 failures.Add(failure!);
                 return;
             }
+
             if (!RecoveryNative.Mark(record))
             {
                 failures.Add(ActionError(visibility.WindowId, "SetProp"));
                 return;
             }
+
             hiddenWindows.Add(visibility.WindowId, record);
             recovery.Send(new RecoveryCommand("register", record));
         }
         catch (Exception error) when (error is IOException or Win32Exception or OperationCanceledException or
-            UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+                                          UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
             failures.Add(new(visibility.WindowId, "recovery_unavailable", error.Message));
-            if (hiddenWindows.ContainsKey(visibility.WindowId)) RestoreOne(visibility.WindowId, record with { HideConfirmed = true }, failures);
+            if (hiddenWindows.ContainsKey(visibility.WindowId))
+                RestoreOne(visibility.WindowId, record with { HideConfirmed = true }, failures);
             CheckRecovery();
             return;
         }
+
         if (token.IsCancellationRequested)
         {
             RestoreOne(visibility.WindowId, record with { HideConfirmed = true }, failures);
             token.ThrowIfCancellationRequested();
         }
+
         if (!ValidateTarget(visibility.WindowId, out window, out _, out failure) || !RecoveryNative.Matches(record))
         {
-            failures.Add(failure ?? new(visibility.WindowId, "stale_window", "Target changed during recovery registration."));
+            failures.Add(failure ?? new(visibility.WindowId, "stale_window",
+                "Target changed during recovery registration."));
             RestoreOne(visibility.WindowId, record with { HideConfirmed = true }, failures);
             return;
         }
+
         if (!recovery.Healthy)
         {
             failures.Add(new(visibility.WindowId, "recovery_unavailable", "Recovery helper exited before hiding."));
             RestoreOne(visibility.WindowId, record with { HideConfirmed = true }, failures);
             return;
         }
+
         if (!PInvoke.ShowWindowAsync(window, SHOW_WINDOW_CMD.SW_HIDE))
         {
             failures.Add(ActionError(visibility.WindowId, "ShowWindowAsync"));
             RestoreOne(visibility.WindowId, record with { HideConfirmed = true }, failures);
             return;
         }
+
         issuedHides.Add(visibility.WindowId);
-        for (var attempt = 0; attempt < 50 && RecoveryNative.Matches(record) && PInvoke.IsWindowVisible(window); attempt++)
+        for (var attempt = 0;
+             attempt < 50 && RecoveryNative.Matches(record) && PInvoke.IsWindowVisible(window);
+             attempt++)
             Thread.Sleep(10);
         if (!RecoveryNative.Matches(record) || PInvoke.IsWindowVisible(window))
         {
@@ -754,7 +889,10 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         {
             record = record with { HideConfirmed = true };
             hiddenWindows[visibility.WindowId] = record;
-            try { recovery.Send(new RecoveryCommand("confirmed", record)); }
+            try
+            {
+                recovery.Send(new RecoveryCommand("confirmed", record));
+            }
             catch (Exception error) when (error is IOException or OperationCanceledException)
             {
                 failures.Add(new(visibility.WindowId, "recovery_unavailable", error.Message));
@@ -762,31 +900,38 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 CheckRecovery();
             }
         }
+
         Notify();
     }
 
-    private unsafe void ApplyMinimization(WindowMinimization minimization, List<NativeActionFailure> failures, CancellationToken token)
+    private unsafe void ApplyMinimization(WindowMinimization minimization, List<NativeActionFailure> failures,
+        CancellationToken token)
     {
         if (!ValidateTarget(minimization.WindowId, out var window, out _, out var failure))
         {
             failures.Add(failure!);
             return;
         }
+
         if (!minimization.Minimized)
         {
             if (minimizedWindows.TryGetValue(minimization.WindowId, out var original))
                 RestoreOne(minimization.WindowId, original, failures);
             return;
         }
+
         if (minimizedWindows.ContainsKey(minimization.WindowId) || PInvoke.IsIconic(window)) return;
         var placement = new WINDOWPLACEMENT { length = (uint)Marshal.SizeOf<WINDOWPLACEMENT>() };
-        if (!PInvoke.GetWindowPlacement(window, ref placement) || !identities.TryResolve(minimization.WindowId, out var identity))
+        if (!PInvoke.GetWindowPlacement(window, ref placement) ||
+            !identities.TryResolve(minimization.WindowId, out var identity))
         {
             failures.Add(ActionError(minimization.WindowId, "GetWindowPlacement"));
             return;
         }
+
         var command = placement.showCmd == SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED
-            ? SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED : SHOW_WINDOW_CMD.SW_SHOWNOACTIVATE;
+            ? SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED
+            : SHOW_WINDOW_CMD.SW_SHOWNOACTIVATE;
         var record = new RecoveryRecord((long)(nint)window.Value, identity.ProcessId, identity.ProcessCreationTime,
             (uint)command, "WinManager.Recovery." + Guid.NewGuid().ToString("N"));
         try
@@ -797,16 +942,18 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 failures.Add(failure!);
                 return;
             }
+
             if (!RecoveryNative.Mark(record))
             {
                 failures.Add(ActionError(minimization.WindowId, "SetProp"));
                 return;
             }
+
             minimizedWindows.Add(minimization.WindowId, record);
             recovery.Send(new RecoveryCommand("register", record));
         }
         catch (Exception error) when (error is IOException or Win32Exception or OperationCanceledException or
-            UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+                                          UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
             failures.Add(new(minimization.WindowId, "recovery_unavailable", error.Message));
             if (minimizedWindows.ContainsKey(minimization.WindowId))
@@ -814,23 +961,29 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             CheckRecovery();
             return;
         }
+
         if (token.IsCancellationRequested)
         {
             RestoreOne(minimization.WindowId, record with { HideConfirmed = true }, failures);
             token.ThrowIfCancellationRequested();
         }
+
         if (!ValidateTarget(minimization.WindowId, out window, out _, out failure) || !RecoveryNative.Matches(record))
         {
-            failures.Add(failure ?? new(minimization.WindowId, "stale_window", "Target changed during recovery registration."));
+            failures.Add(failure ?? new(minimization.WindowId, "stale_window",
+                "Target changed during recovery registration."));
             RestoreOne(minimization.WindowId, record with { HideConfirmed = true }, failures);
             return;
         }
+
         if (!recovery.Healthy)
         {
-            failures.Add(new(minimization.WindowId, "recovery_unavailable", "Recovery helper exited before minimizing."));
+            failures.Add(
+                new(minimization.WindowId, "recovery_unavailable", "Recovery helper exited before minimizing."));
             RestoreOne(minimization.WindowId, record with { HideConfirmed = true }, failures);
             return;
         }
+
         issuedMinimizations.Add(minimization.WindowId);
         PInvoke.ShowWindowAsync(window, SHOW_WINDOW_CMD.SW_MINIMIZE);
         for (var attempt = 0; attempt < 50 && RecoveryNative.Matches(record) && !PInvoke.IsIconic(window); attempt++)
@@ -844,7 +997,10 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         {
             record = record with { HideConfirmed = true };
             minimizedWindows[minimization.WindowId] = record;
-            try { recovery.Send(new RecoveryCommand("confirmed", record)); }
+            try
+            {
+                recovery.Send(new RecoveryCommand("confirmed", record));
+            }
             catch (Exception error) when (error is IOException or OperationCanceledException)
             {
                 failures.Add(new(minimization.WindowId, "recovery_unavailable", error.Message));
@@ -852,6 +1008,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 CheckRecovery();
             }
         }
+
         Notify();
     }
 
@@ -859,18 +1016,24 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     {
         if ((issuedHides.Contains(id) || issuedMinimizations.Contains(id)) && !RecoveryNative.Restore(record))
         {
-            failures.Add(new(id, "restore_failed", "Original window state was not restored; recovery record retained."));
+            failures.Add(new(id, "restore_failed",
+                "Original window state was not restored; recovery record retained."));
             return;
         }
+
         // Never retire durable protection before actual native restoration has succeeded.
         if (recovery.Healthy)
         {
-            try { recovery.Send(new RecoveryCommand("remove", record)); }
+            try
+            {
+                recovery.Send(new RecoveryCommand("remove", record));
+            }
             catch (Exception error) when (error is IOException or OperationCanceledException)
             {
                 failures.Add(new(id, "recovery_unavailable", error.Message));
             }
         }
+
         RecoveryNative.Unmark(record);
         hiddenWindows.Remove(id);
         minimizedWindows.Remove(id);
@@ -887,26 +1050,34 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             token.ThrowIfCancellationRequested();
             RestoreOne(pair.Key, pair.Value, failures);
         }
+
         foreach (var pair in minimizedWindows.ToArray())
         {
             token.ThrowIfCancellationRequested();
             RestoreOne(pair.Key, pair.Value, failures);
         }
-        if (complete && hiddenWindows.Count == 0 && minimizedWindows.Count == 0 && failures.Count == 0 && recovery.Healthy)
+
+        if (complete && hiddenWindows.Count == 0 && minimizedWindows.Count == 0 && failures.Count == 0 &&
+            recovery.Healthy)
         {
-            try { recovery.Complete(); }
+            try
+            {
+                recovery.Complete();
+            }
             catch (Exception error) when (error is IOException or OperationCanceledException)
             {
                 failures.Add(new(null, "recovery_unavailable", error.Message));
             }
         }
+
         return new ApplyResult(failures);
     }
 
     private static NativeActionFailure ActionError(Guid id, string operation)
     {
         var error = Marshal.GetLastWin32Error();
-        return new(id, error switch { 5 => "access_denied", 1400 => "stale_window", 1460 => "timeout", _ => "native_error" },
+        return new(id,
+            error switch { 5 => "access_denied", 1400 => "stale_window", 1460 => "timeout", _ => "native_error" },
             $"{operation} failed ({error}).");
     }
 
@@ -925,9 +1096,11 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         var fallback = minimum.ptMinTrackSize;
         // A hung or inaccessible application must not stall the observer indefinitely.
         if (PInvoke.SendMessageTimeout(window, PInvoke.WM_GETMINMAXINFO, default, new LPARAM((nint)(&minimum)),
-            SEND_MESSAGE_TIMEOUT_FLAGS.SMTO_ABORTIFHUNG | SEND_MESSAGE_TIMEOUT_FLAGS.SMTO_BLOCK | SEND_MESSAGE_TIMEOUT_FLAGS.SMTO_ERRORONEXIT,
-            50, null) == default) minimum.ptMinTrackSize = fallback;
-        if (!PInvoke.GetWindowRect(window, out var outer)) return (Math.Max(1, minimum.ptMinTrackSize.X), Math.Max(1, minimum.ptMinTrackSize.Y));
+                SEND_MESSAGE_TIMEOUT_FLAGS.SMTO_ABORTIFHUNG | SEND_MESSAGE_TIMEOUT_FLAGS.SMTO_BLOCK |
+                SEND_MESSAGE_TIMEOUT_FLAGS.SMTO_ERRORONEXIT,
+                50, null) == default) minimum.ptMinTrackSize = fallback;
+        if (!PInvoke.GetWindowRect(window, out var outer))
+            return (Math.Max(1, minimum.ptMinTrackSize.X), Math.Max(1, minimum.ptMinTrackSize.Y));
         var borderWidth = (long)outer.right - outer.left - (frame.right - (long)frame.left);
         var borderHeight = (long)outer.bottom - outer.top - (frame.bottom - (long)frame.top);
         return ((int)Math.Clamp(minimum.ptMinTrackSize.X - borderWidth, 1, int.MaxValue),
@@ -942,12 +1115,16 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         try
         {
             if (!PInvoke.SetWindowPos(notificationWindow, default, bounds.left, bounds.top, 1, 1,
-                SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER)) throw NativeError("SetWindowPos");
+                    SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE | SET_WINDOW_POS_FLAGS.SWP_NOZORDER))
+                throw NativeError("SetWindowPos");
             var dpi = PInvoke.GetDpiForWindow(notificationWindow);
             if (dpi == 0) throw NativeError("GetDpiForWindow");
             return dpi;
         }
-        finally { measuringDpi = false; }
+        finally
+        {
+            measuringDpi = false;
+        }
     }
 
     private static bool IsShellOrTransientClass(string name) => name is
@@ -964,7 +1141,8 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     {
         creationTime = 0;
         name = "";
-        using var process = PInvoke.OpenProcess_SafeHandle(global::Windows.Win32.System.Threading.PROCESS_ACCESS_RIGHTS.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+        using var process = PInvoke.OpenProcess_SafeHandle(
+            global::Windows.Win32.System.Threading.PROCESS_ACCESS_RIGHTS.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
         if (process.IsInvalid || !PInvoke.GetProcessTimes(process, out var created, out _, out _, out _)) return false;
         creationTime = ((ulong)(uint)created.dwHighDateTime << 32) | (uint)created.dwLowDateTime;
         Span<char> path = stackalloc char[32768];
@@ -994,20 +1172,25 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         }
     }
 
-    private static PixelRect Rect(RECT rect) => new(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+    private static PixelRect Rect(RECT rect) =>
+        new(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+
     private static bool Covers(PixelRect window, PixelRect monitor) =>
         window.X <= monitor.X && window.Y <= monitor.Y &&
         (long)window.X + window.Width >= (long)monitor.X + monitor.Width &&
         (long)window.Y + window.Height >= (long)monitor.Y + monitor.Height;
+
     private static Win32Exception NativeError(string operation) => new(Marshal.GetLastWin32Error(), operation);
 
     private sealed record CaptureRequest(CancellationToken CancellationToken)
     {
-        public TaskCompletionSource<DesktopSnapshot> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<DesktopSnapshot> Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     private sealed record ApplyRequest(LayoutPlan Plan, CancellationToken CancellationToken, bool Restore)
     {
-        public TaskCompletionSource<ApplyResult> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<ApplyResult> Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }

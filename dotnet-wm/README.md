@@ -1,7 +1,7 @@
 # WinManager
 
-Windows-only, headless .NET 10 tiling window manager with a separate optional
-Avalonia debug/control companion for its **one shared desk**. The adjacent
+Windows-only, headless .NET 10 tiling window manager with separate optional
+Avalonia management and spatial-switcher apps for its **one shared desk**. The adjacent
 GlazeWM checkout is a behavioral reference and is not modified or linked.
 
 ## Current implementation
@@ -30,20 +30,26 @@ workspace identity. See [the one-desk goal](docs/project-goal.md) and its
 - Desk-owned workspaces with exclusive, transferable monitor views, deterministic
   source fallback, monitor hotplug handling, safe visibility, and an acknowledged
   crash-recovery helper. `WorkspaceViews` exposes current monitor assignments.
+- Manager-owned logical workspace positions are independent of monitor pixels and
+  DPI, exposed in snapshots, seeded by configuration, and editable with
+  `setWorkspacePosition` without moving native windows.
 - Same-user/session named-pipe queries, commands, atomic snapshot/event
   subscriptions, bounded clients, a .NET SDK, and a headless CLI.
 - Validated JSON configuration, optional registered shortcuts, pause/redraw/exit,
   rotating logs, single-instance protection, and explicit logon registration.
-- A code-only Avalonia inspector shows the one desk's workspaces, monitor views,
-  window membership, overflow and configured exclusions, with explicit controls
-  through the SDK. See [the companion guide](src/WinManager.DebugUi/README.md).
+- A code-only Avalonia debug console shows workspaces, monitor views, windows,
+  overflow, exclusions and recent events, with explicit controls through the SDK.
+  A separate spatial switcher maps workspace groups to manager-owned desk
+  coordinates. See the [debug console guide](src/WinManager.DebugUi/README.md)
+  and [spatial switcher guide](src/WinManager.SpatialSwitcher/README.md).
 
 `Core` has no generated native dependencies. `Windows` isolates CsWin32 on its
 native message thread. `Host` composes them through dependency injection as a
 normal-privilege `WinExe`; `Client` depends only on public contracts.
 No tray, widget, service, browser bridge, or arbitrary shell execution is included.
-Logical desk positions, columns/rows/Fibonacci workspace rules, persistent view
-assignments, and the spatial desk overview/quick switcher remain future work.
+The spatial switcher is implemented; a full draggable/zoomable desk overview,
+columns/rows/Fibonacci workspace rules, and persistent runtime desk positions or
+view assignments remain future work.
 
 ## Existing feature progress
 
@@ -67,6 +73,13 @@ Native desktop integration tests must run only in a disposable, isolated
 interactive Windows session, never Session 0 or a normal working desktop.
 Their opt-in instructions are in `tests\WinManager.Windows.Tests\README.md`.
 Do not start the host on a desktop managed by another window manager.
+
+Run either visual app in safe sample mode without connecting to the manager:
+
+```powershell
+dotnet run --project .\src\WinManager.DebugUi\WinManager.DebugUi.csproj -- --demo
+dotnet run --project .\src\WinManager.SpatialSwitcher\WinManager.SpatialSwitcher.csproj -- --demo
+```
 
 Dependencies are version-pinned and NuGet lock files are committed with source.
 Use `dotnet restore --locked-mode` to enforce the resolved dependency graph.

@@ -30,7 +30,8 @@ public sealed record ManagerConfiguration
             Workspaces.Any(workspace => workspace is null || string.IsNullOrWhiteSpace(workspace.Name) ||
                                         workspace.Name.Length > 64 ||
                                         workspace.MonitorDeviceName is { Length: > 256 } ||
-                                        !Enum.IsDefined(workspace.Layout)) ||
+                                        !Enum.IsDefined(workspace.Layout) ||
+                                        workspace.Position is { IsValid: false }) ||
             Workspaces.Select(workspace => workspace.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() !=
             Workspaces.Count)
             throw new InvalidDataException("Workspace names must be nonblank and unique.");
@@ -75,6 +76,11 @@ public sealed record ManagerConfiguration
             CommandKind.ActivateWorkspace or CommandKind.MoveToWorkspace =>
                 command.WorkspaceId is { } id && id != Guid.Empty || command.WorkspaceName is { } name &&
                 Workspaces.Any(workspace => string.Equals(workspace.Name, name, StringComparison.OrdinalIgnoreCase)),
+            CommandKind.SetWorkspacePosition => command.Position is { IsValid: true } &&
+                                                (command.WorkspaceId is { } id && id != Guid.Empty ||
+                                                 command.WorkspaceName is { } name &&
+                                                 Workspaces.Any(workspace => string.Equals(workspace.Name, name,
+                                                     StringComparison.OrdinalIgnoreCase))),
             CommandKind.SetWorkspaceLayout => command.Layout is not null &&
                                               (command.WorkspaceId is { } id && id != Guid.Empty ||
                                                command.WorkspaceName is { } name &&
@@ -95,6 +101,12 @@ public sealed record ManagerConfiguration
         if (!valid || command.WorkspaceId is not null && command.WorkspaceName is not null ||
             command.Kind == CommandKind.ActivateWorkspace && command.MonitorId == Guid.Empty ||
             command.Kind != CommandKind.SetWorkspaceLayout && command.Layout is not null ||
+            command.Kind != CommandKind.SetWorkspacePosition && command.Position is not null ||
+            command.Kind == CommandKind.SetWorkspacePosition &&
+            (command.WindowId is not null || command.MonitorId is not null || command.Direction is not null ||
+             command.Amount is not null || command.Orientation is not null || command.Mode is not null ||
+             command.Paused is not null || command.NodeId is not null || command.Navigation is not null ||
+             command.CycleDirection is not null || command.Layout is not null) ||
             command.Kind == CommandKind.SetWorkspaceLayout && (command.WindowId is not null ||
                                                                command.Direction is not null ||
                                                                command.Amount is not null ||

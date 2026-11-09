@@ -206,6 +206,15 @@
       },
       "winmanager.contracts": {
         "type": "Project"
+      },
+      "winmanager.ui": {
+        "type": "Project",
+        "dependencies": {
+          "Avalonia": "[12.1.5, )",
+          "Avalonia.Themes.Fluent": "[12.1.5, )",
+          "WinManager.Client": "[1.0.0, )",
+          "WinManager.Contracts": "[1.0.0, )"
+        }
       }
     }
   }

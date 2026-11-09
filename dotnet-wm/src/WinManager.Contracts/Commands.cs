@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace WinManager.Contracts;
 
 public enum Direction
@@ -52,7 +54,17 @@ public enum CommandKind
     SelectContainer,
     ClearSelection,
     FocusCycle,
-    SetWorkspaceLayout
+    SetWorkspaceLayout,
+    SetWorkspacePosition
+}
+
+public sealed record DeskPosition(double X, double Y)
+{
+    public const double CoordinateLimit = 100_000;
+
+    [JsonIgnore]
+    public bool IsValid => double.IsFinite(X) && double.IsFinite(Y) &&
+                           Math.Abs(X) <= CoordinateLimit && Math.Abs(Y) <= CoordinateLimit;
 }
 
 public sealed record ManagerCommand(
@@ -69,7 +81,8 @@ public sealed record ManagerCommand(
     Guid? NodeId = null,
     ContainerNavigation? Navigation = null,
     FocusCycleDirection? CycleDirection = null,
-    WorkspaceLayout? Layout = null);
+    WorkspaceLayout? Layout = null,
+    DeskPosition? Position = null);
 
 public sealed record CommandResult(bool Success, string? ErrorCode, string? Message, long StateRevision);
 
@@ -96,7 +109,8 @@ public sealed record ContainerSelection(Guid WorkspaceId, Guid NodeId);
 public sealed record WorkspaceDefinition(
     string Name,
     string? MonitorDeviceName = null,
-    WorkspaceLayout Layout = WorkspaceLayout.Split);
+    WorkspaceLayout Layout = WorkspaceLayout.Split,
+    DeskPosition? Position = null);
 
 public sealed record WorkspaceInfo(
     Guid Id,
@@ -104,6 +118,7 @@ public sealed record WorkspaceInfo(
     Guid MonitorId,
     bool Active,
     IReadOnlyList<Guid> WindowIds,
-    WorkspaceLayout Layout = WorkspaceLayout.Split);
+    WorkspaceLayout Layout = WorkspaceLayout.Split,
+    DeskPosition? Position = null);
 
 public sealed record WorkspaceViewInfo(Guid MonitorId, Guid WorkspaceId);

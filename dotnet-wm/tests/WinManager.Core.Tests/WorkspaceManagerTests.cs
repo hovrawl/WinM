@@ -672,8 +672,8 @@ public sealed class WorkspaceManagerTests
             Assert.Equal("not_found", (await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
                 WorkspaceId: Guid.NewGuid(), Layout: WorkspaceLayout.Layered), timeout.Token)).ErrorCode);
             Assert.Equal("invalid_argument", (await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
-                    WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered, Mode: WindowMode.Tiling),
-                timeout.Token))
+                        WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered, Mode: WindowMode.Tiling),
+                    timeout.Token))
                 .ErrorCode);
             fake.FailActions = true;
 
@@ -723,6 +723,49 @@ public sealed class WorkspaceManagerTests
             Assert.Equal(2, engine.Current.Workspaces!.Single().WindowIds.Count);
             Assert.Equal(2, fake.Plans[^1].Placements.Count);
             Assert.Contains(fake.Plans[^1].Minimizations!, minimization => !minimization.Minimized);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task WorkspacePositionUpdatesWithoutNativeActionsAndRejectsInvalidTargets()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One"), new("Two")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var before = engine.Current!;
+            var workspace = before.Workspaces!.First();
+            var nativePlanCount = fake.Plans.Count;
+            var position = new DeskPosition(-640, 280);
+
+            var result = await engine.ExecuteAsync(new(CommandKind.SetWorkspacePosition,
+                WorkspaceId: workspace.Id, Position: position), timeout.Token);
+
+            Assert.True(result.Success);
+            Assert.Equal(position,
+                engine.Current!.Workspaces!.Single(candidate => candidate.Id == workspace.Id).Position);
+            Assert.True(engine.Current.StateRevision > before.StateRevision);
+            Assert.Equal(nativePlanCount, fake.Plans.Count);
+            Assert.Equal("invalid_argument", (await engine.ExecuteAsync(new(CommandKind.SetWorkspacePosition,
+                WorkspaceId: workspace.Id, Position: new(double.NaN, 0)), timeout.Token)).ErrorCode);
+            Assert.Equal("not_found", (await engine.ExecuteAsync(new(CommandKind.SetWorkspacePosition,
+                WorkspaceId: Guid.NewGuid(), Position: position), timeout.Token)).ErrorCode);
+            Assert.Equal("invalid_argument", (await engine.ExecuteAsync(new(CommandKind.SetWorkspacePosition,
+                WorkspaceId: workspace.Id, Position: position, WindowId: Guid.NewGuid()), timeout.Token)).ErrorCode);
+
+            var unchanged = engine.Current.StateRevision;
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.SetWorkspacePosition,
+                WorkspaceId: workspace.Id, Position: position), timeout.Token)).Success);
+            Assert.Equal(unchanged, engine.Current.StateRevision);
+            Assert.Equal(nativePlanCount, fake.Plans.Count);
         }
         finally
         {

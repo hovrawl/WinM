@@ -37,6 +37,31 @@ public sealed class WorkspaceTests
         Assert.False(set.SetLayout(workspace.Id, (WorkspaceLayout)99));
     }
 
+    [Fact]
+    public void DeskPositionsUseStableLogicalDefaultsAndSurviveViewChanges()
+    {
+        var set = new WorkspaceSet([new("One"), new("Two"), new("Seeded", Position: new(920, -40))]);
+        var desktop = Desktop([], Monitor(FirstMonitor, "A"), Monitor(SecondMonitor, "B"));
+        set.Reconcile(desktop);
+        var one = set.Snapshot.Single(workspace => workspace.Name == "One");
+        var two = set.Snapshot.Single(workspace => workspace.Name == "Two");
+        var seeded = set.Snapshot.Single(workspace => workspace.Name == "Seeded");
+
+        Assert.Equal(new DeskPosition(0, 0), one.Position);
+        Assert.Equal(new DeskPosition(480, 0), two.Position);
+        Assert.Equal(new DeskPosition(920, -40), seeded.Position);
+        Assert.True(set.SetPosition(two.Id, new(-120, 640)));
+        Assert.False(set.SetPosition(two.Id, new(double.NaN, 0)));
+        Assert.True(set.Activate(one.Id, SecondMonitor));
+        set.Reconcile(Desktop([], Monitor(FirstMonitor, "A")));
+        set.Reconcile(desktop);
+
+        Assert.Equal(new DeskPosition(0, 0), set.Snapshot.Single(workspace => workspace.Id == one.Id).Position);
+        Assert.Equal(new DeskPosition(-120, 640), set.Snapshot.Single(workspace => workspace.Id == two.Id).Position);
+        Assert.Equal(new DeskPosition(920, -40), set.Snapshot.Single(workspace => workspace.Id == seeded.Id).Position);
+        Assert.False(new DeskPosition(DeskPosition.CoordinateLimit + 1, 0).IsValid);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

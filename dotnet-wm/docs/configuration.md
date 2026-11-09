@@ -18,13 +18,13 @@ current view map is exposed in `ManagerSnapshot.WorkspaceViews`; the older
 `WorkspaceInfo.MonitorId` and `Active` fields are projections, with `Guid.Empty`
 and `false` for an unviewed workspace. View assignments are not saved across
 manager restarts. See [the project goal](project-goal.md) and
-[the migration plan](desk-model-plan.md) for the remaining spatial and persistence work.
+[the migration plan](desk-model-plan.md) for the remaining overview and persistence work.
 
 Example (shortcuts are disabled in the generated defaults):
 
 ```json
 {
-  "workspaces": [{ "name": "1", "layout": "split" }, { "name": "2", "layout": "layered" }, { "name": "3" }],
+  "workspaces": [{ "name": "1", "layout": "split", "position": { "x": 0, "y": 0 } }, { "name": "2", "layout": "layered", "position": { "x": 520, "y": -80 } }, { "name": "3" }],
   "innerGap": 8,
   "outerGap": 8,
   "ignoredProcessNames": ["example.exe"],
@@ -57,6 +57,13 @@ Example (shortcuts are disabled in the generated defaults):
   preserve window minimum sizes. Only a page whose own minimum size exceeds the
   monitor work area overflows. A runtime `setWorkspaceLayout` change lasts until
   the manager restarts; configure the workspace layout to select the restart default.
+- Each workspace can seed an optional logical `position` with finite `x` and `y`
+  coordinates in `[-100000,100000]`. If omitted, the manager assigns stable
+  defaults in workspace creation order, four columns at 480 desk units by 360
+  desk units. Coordinates are independent of monitor pixels, DPI and client zoom.
+  The runtime `setWorkspacePosition` command and debug console update the snapshot
+  and publish `workspace.updated` without moving or resizing native windows;
+  configure a position to restore it after a manager restart.
 - `activateWorkspace` accepts an optional `monitorId`. Without it, the manager
   targets the focused window's observed connected monitor, then the primary
   monitor in stable device-name/GUID order. If no monitor is connected, activation
@@ -73,10 +80,11 @@ Example (shortcuts are disabled in the generated defaults):
   and `cycleDirection: "next"` or `"previous"` navigates the layered page stack.
 - Gaps are DIPs in `[0,256]`, converted per-monitor to physical pixels.
 - Process/class ignores are case-insensitive exact names, not regex rules.
-  The `WinManager.DebugUi` companion process is always excluded, even when
-  `ignoredProcessNames` is empty. It is never tiled, workspace-hidden, or minimized
-  by the manager; its read-only process-exclusion diagnostic cannot be opted into
-  management by editing the configured lists or issuing `setMode`.
+  The `WinManager.DebugUi` and `WinManager.SpatialSwitcher` companion processes
+  are always excluded, even when `ignoredProcessNames` is empty. They are never
+  tiled, workspace-hidden, or minimized by the manager; their read-only
+  process-exclusion diagnostics cannot be opted into management by editing the
+  configured lists or issuing `setMode`.
   Fullscreen, popup (`WS_POPUP`), tool (`WS_EX_TOOLWINDOW`), owned, and no-activate
   windows are ignored semantically by default, without excluding their entire
   application class. They remain in snapshots but are neither placed nor hidden.

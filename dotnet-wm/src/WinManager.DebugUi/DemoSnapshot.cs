@@ -31,9 +31,9 @@ internal static class DemoSnapshot
         ];
         WorkspaceInfo[] workspaces =
         [
-            new(code, "Code", left, true, [staged, overflow, ignored], WorkspaceLayout.Layered),
-            new(chat, "Chat", right, true, []),
-            new(unviewed, "Unviewed", Guid.Empty, false, [])
+            new(code, "Code", left, true, [staged, overflow, ignored], WorkspaceLayout.Layered, new(0, 0)),
+            new(chat, "Chat", right, true, [], Position: new(520, -80)),
+            new(unviewed, "Unviewed", Guid.Empty, false, [], Position: new(960, 320))
         ];
         var exclusion = new ConfiguredWindowExclusion("Excluded by config", "sample-host", "SampleHostWindow",
             right, new(2050, 80, 600, 400), ProcessNameExcluded: true, ClassNameExcluded: false);

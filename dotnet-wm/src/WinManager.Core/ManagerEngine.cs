@@ -634,7 +634,7 @@ public sealed class ManagerEngine
             if (!oldWorkspaces.TryGetValue(workspace.Id, out var old))
                 Publish(ManagerEventTypes.WorkspaceUpdated, next);
             else if (old.Name != workspace.Name || old.MonitorId != workspace.MonitorId ||
-                     old.Layout != workspace.Layout ||
+                     old.Layout != workspace.Layout || old.Position != workspace.Position ||
                      !old.WindowIds.SequenceEqual(workspace.WindowIds))
                 Publish(ManagerEventTypes.WorkspaceUpdated, next);
             if (old?.Active == true && !workspace.Active) Publish(ManagerEventTypes.WorkspaceDeactivated, next);
@@ -653,7 +653,7 @@ public sealed class ManagerEngine
         {
             if (command.WorkspaceId is not null || string.IsNullOrWhiteSpace(name) ||
                 command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToWorkspace or
-                    CommandKind.FocusCycle or CommandKind.SetWorkspaceLayout))
+                    CommandKind.FocusCycle or CommandKind.SetWorkspaceLayout or CommandKind.SetWorkspacePosition))
                 return Error("invalid_argument", "Specify exactly one workspace name or ID for a workspace command.");
             var named = workspaces.Snapshot.SingleOrDefault(workspace =>
                 string.Equals(workspace.Name, name, StringComparison.OrdinalIgnoreCase));
@@ -667,7 +667,8 @@ public sealed class ManagerEngine
             command.Orientation is { } orientation && !Enum.IsDefined(orientation) ||
             command.Navigation is { } navigation && !Enum.IsDefined(navigation) ||
             command.CycleDirection is { } cycleDirection && !Enum.IsDefined(cycleDirection) ||
-            command.Layout is { } layout && !Enum.IsDefined(layout))
+            command.Layout is { } layout && !Enum.IsDefined(layout) ||
+            command.Position is { IsValid: false })
             return Error("invalid_argument", "Unknown command or enum value.");
         if (command.MonitorId is not null &&
             command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToMonitor))
@@ -679,6 +680,8 @@ public sealed class ManagerEngine
             return Error("invalid_argument", "Cycle direction is only supported by focusCycle.");
         if (command.Kind != CommandKind.SetWorkspaceLayout && command.Layout is not null)
             return Error("invalid_argument", "Layout is only supported by setWorkspaceLayout.");
+        if (command.Kind != CommandKind.SetWorkspacePosition && command.Position is not null)
+            return Error("invalid_argument", "Position is only supported by setWorkspacePosition.");
         if (command.Kind == CommandKind.FocusCycle)
             return await FocusCycleAsync(command, cancellationToken);
         if (command.Kind == CommandKind.SelectContainer)
@@ -789,6 +792,25 @@ public sealed class ManagerEngine
             }
 
             return Result(failures);
+        }
+        else if (command.Kind == CommandKind.SetWorkspacePosition)
+        {
+            if (command.WorkspaceId is not { } workspaceId || workspaceId == Guid.Empty ||
+                command.Position is not { IsValid: true } position)
+                return Error("invalid_argument",
+                    "setWorkspacePosition requires a workspace target and valid position.");
+            if (command.WindowId is not null || command.MonitorId is not null || command.Mode is not null ||
+                command.Paused is not null || command.Direction is not null || command.Amount is not null ||
+                command.Orientation is not null || command.NodeId is not null || command.Navigation is not null ||
+                command.CycleDirection is not null || command.Layout is not null)
+                return Error("invalid_argument", "setWorkspacePosition accepts only a workspace target and position.");
+            var workspace = workspaces.Snapshot.SingleOrDefault(candidate => candidate.Id == workspaceId);
+            if (workspace is null) return Error("not_found", "Workspace does not exist.");
+            if (workspace.Position == position) return new(true, null, null, revision);
+            if (!workspaces.SetPosition(workspaceId, position))
+                return Error("invalid_argument", "Workspace position is outside the supported desk bounds.");
+            Commit(Current!.Desktop);
+            return new(true, null, null, revision);
         }
         else if (command.Kind != CommandKind.Redraw)
         {

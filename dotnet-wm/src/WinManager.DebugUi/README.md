@@ -1,6 +1,6 @@
-# One-desk debug/control companion
+# One-desk debug console
 
-`WinManager.DebugUi` is a separate, code-only Avalonia Fluent desktop application.
+`WinManager.DebugUi` is a separate, code-only Avalonia management application.
 It inspects and controls **one shared desk** through `WinManager.Client`. It does
 not create desks or own a second copy of manager state. Named entries such as
 `Code` and `Chat` are workspaces (window groups), not separate desks. Monitors
@@ -31,7 +31,10 @@ the SDK's current-user/session pipe. The companion never starts the manager.
   Every connected monitor view is shown even if its workspace has no windows.
 - Each workspace displays its current `Split` or `Layered` layout. Select a
   workspace to choose either layout; layered workspaces also provide previous/next
-  page controls that cycle focus through the visible tiled windows.
+  page controls that cycle focus through the visible tiled windows. Workspace
+  coordinates are displayed and editable as logical desk positions; this does
+  not resize or move native windows. The configured position is used as the restart
+  default because runtime desk-state persistence is not implemented.
 - Windows show physical monitor versus workspace membership, native exclusion
   flags, explicit tiling overrides, visibility, minimization, overflow and minimum
   size. The selected-window display identifies the target by title and ID and
@@ -68,6 +71,6 @@ Debug builds enable the installed `avalonia-mcp` inspection bridge through
 Do not use development inspection tools to invoke live manager controls during
 safe UI verification; use `--demo` or a separate fake-platform test pipe.
 
-This is an inspector, not the spatial desk overview or quick switcher. Logical
-desk positions, drag placement, zoom, and the modal switcher remain explicit
-later work; the companion does not invent spatial coordinates for them.
+The spatial switcher is a separate [companion app](../WinManager.SpatialSwitcher/README.md).
+The draggable/zoomable full desk overview and persistence of runtime position
+changes remain future work.

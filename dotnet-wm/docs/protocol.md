@@ -1,9 +1,10 @@
 ### Local IPC, version 1
 
 This section documents the current version 1 protocol, including workspace-view
-transfer and per-workspace split/layered layout contracts. Logical desk positions,
-workspace bounds, additional layout rules, persistent desk state, and spatial visualization
-remain planned; a separate debug/control inspector is available. See [the project goal](project-goal.md) and
+transfer, logical workspace positions, and per-workspace split/layered layout contracts.
+Workspace bounds, additional layout rules, persistent desk state, and the full desk
+overview remain planned; separate debug-console and spatial-switcher apps are available.
+See [the project goal](project-goal.md) and
 [the migration plan](desk-model-plan.md).
 
 The Windows host exposes a duplex byte-mode named pipe. The default name is
@@ -42,12 +43,12 @@ ID receives `Guid.Empty` as its response ID. Errors do not mutate manager state.
 | `subscribe` | `{"eventTypes": null}` or `{}` for all events; otherwise an array of known event names | `SubscriptionResult`, including `subscriptionId` |
 | `unsubscribe` | `{"subscriptionId": "<GUID>"}` | None |
 
-Commands support `focus`, `move`, `resize`, `setSplit`, `setMode`, `setWorkspaceLayout`, `pause`,
+Commands support `focus`, `move`, `resize`, `setSplit`, `setMode`, `setWorkspaceLayout`, `setWorkspacePosition`, `pause`,
 `redraw`, `exit`, `activateWorkspace`, `moveToWorkspace`, `moveToMonitor`, `toggleMode`,
 `selectContainer`, `clearSelection`, and `focusCycle`.
 Optional command fields are `windowId`, `direction`, `amount`, `orientation`,
 `mode`, `paused`, `workspaceId`, `workspaceName`, `monitorId`, `nodeId`, `navigation`,
-`cycleDirection`, and `layout`. Workspace
+`cycleDirection`, `layout`, and `position`. Workspace
 commands accept exactly one workspace GUID or case-insensitive configured name;
 named targets are resolved atomically in the manager. Command-specific argument and
 target validation is performed by the manager actor. For example, `pause`
@@ -64,6 +65,12 @@ configured name. It reflows the active view unless paused; on a native action fa
 reports the error and restores the previous layout selection. The layout field is
 included in each `WorkspaceInfo` and saved in workspace configuration as the restart
 default; runtime changes are not persisted to configuration.
+`setWorkspacePosition` accepts a finite logical `{x,y}` position in the inclusive
+range `[-100000,100000]` and exactly one workspace ID or configured name. It
+updates desk state and publishes `workspace.updated` without native window actions.
+`WorkspaceDefinition.position` seeds coordinates across restarts; omitted values
+receive deterministic workspace-order defaults. `WorkspaceInfo.position` may be
+absent on older hosts. Positions are independent of monitor pixels, DPI and zoom.
 `toggleMode` needs no arguments; an optional `windowId` selects the target,
 otherwise it uses the focused observable window. `setMode: tiling` and toggling
 into tiling override fullscreen/popup/tool/owned/no-activate defaults for that
@@ -100,7 +107,8 @@ branch when no explicit `windowId` is supplied. See the [command reference](exte
 `monitorId`/`workspaceId` pairs. Use it as the authoritative monitor view map.
 `WorkspaceInfo.MonitorId` and `Active` remain compatibility projections; an
 unviewed workspace has `Guid.Empty` and `false`. `WorkspaceInfo.Layout` reports
-`split` or `layered`. Older hosts may omit
+`split` or `layered`, and `WorkspaceInfo.Position` reports logical desk coordinates.
+Older hosts may omit
 `WorkspaceViews`; the named-pipe framing and protocol version do not change.
 Other newer commands and fields may still require a matching host version.
 

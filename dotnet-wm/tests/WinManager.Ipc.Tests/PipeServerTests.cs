@@ -54,8 +54,13 @@ public sealed class PipeServerTests
             await Send(anonymous, Request("command", new ManagerCommand(CommandKind.Pause, Paused: true)), host.Token);
             await Disconnected(anonymous, host.Token);
         }
-        catch (UnauthorizedAccessException) { }
-        catch (IOException) { }
+        catch (UnauthorizedAccessException)
+        {
+        }
+        catch (IOException)
+        {
+        }
+
         Assert.False(host.Engine.Current!.Paused);
         await using var permitted = await host.ConnectAsync();
         await Send(permitted, Request("query.snapshot", new { }), host.Token);
@@ -78,6 +83,26 @@ public sealed class PipeServerTests
         var snapshot = response.Payload!.Value.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!;
         Assert.Equal(host.Engine.Current!.InstanceId, snapshot.InstanceId);
         Assert.Equal(snapshot.StateRevision, response.StateRevision);
+    }
+
+    [Fact]
+    public async Task DeskPositionCommandAndSnapshotRoundTripOverThePipe()
+    {
+        await using var host = await PipeHost.StartAsync(workspaceDefinitions: [new("One")]);
+        await using var client = await host.ConnectAsync();
+        var workspace = Assert.Single(host.Engine.Current!.Workspaces!);
+        var position = new DeskPosition(-220, 480);
+        await Send(client, Request("command", new ManagerCommand(CommandKind.SetWorkspacePosition,
+            WorkspaceId: workspace.Id, Position: position)), host.Token);
+
+        var commandResponse = await Response(client, host.Token);
+        Assert.True(commandResponse.Success);
+        Assert.True(commandResponse.Payload!.Value.Deserialize<CommandResult>(Protocol.JsonOptions)!.Success);
+        await Send(client, Request("query.snapshot", new { }), host.Token);
+
+        var snapshotResponse = await Response(client, host.Token);
+        var snapshot = snapshotResponse.Payload!.Value.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!;
+        Assert.Equal(position, Assert.Single(snapshot.Workspaces!).Position);
     }
 
     [Theory]
@@ -103,9 +128,12 @@ public sealed class PipeServerTests
         await using var host = await PipeHost.StartAsync(maximumClients: 1);
         await using var client = await host.ConnectAsync();
         var id = Guid.NewGuid();
-        var beginning = $"{{\"protocolVersion\":1,\"kind\":\"request\",\"requestId\":\"{id}\",\"operation\":\"query.snapshot\",\"payload\":{{\"padding\":\"";
+        var beginning =
+            $"{{\"protocolVersion\":1,\"kind\":\"request\",\"requestId\":\"{id}\",\"operation\":\"query.snapshot\",\"payload\":{{\"padding\":\"";
         const string ending = "\"}}";
-        var json = beginning + new string('x', Protocol.MaximumFrameBytes - Encoding.UTF8.GetByteCount(beginning + ending)) + ending;
+        var json = beginning +
+                   new string('x', Protocol.MaximumFrameBytes - Encoding.UTF8.GetByteCount(beginning + ending)) +
+                   ending;
         Assert.Equal(Protocol.MaximumFrameBytes, Encoding.UTF8.GetByteCount(json));
         await WriteJson(client, json, host.Token);
         var response = await Response(client, host.Token);
@@ -126,24 +154,41 @@ public sealed class PipeServerTests
             await WriteJson(malformed, "{", host.Token);
             await Disconnected(malformed, host.Token);
         }
+
         await using var next = await host.ConnectAsync();
         await Send(next, Request("query.snapshot", new { }), host.Token);
         Assert.True((await Response(next, host.Token)).Success);
     }
 
     [Theory]
-    [InlineData("\"protocolVersion\":2,\"kind\":\"request\",\"operation\":\"query.snapshot\",\"payload\":{}", "unsupported_version")]
-    [InlineData("\"protocolVersion\":1,\"kind\":\"event\",\"operation\":\"query.snapshot\",\"payload\":{}", "invalid_argument")]
-    [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"unknown\",\"payload\":{}", "unknown_operation")]
-    [InlineData("\"protocolVersion\":\"1\",\"kind\":\"request\",\"operation\":\"query.snapshot\",\"payload\":{}", "invalid_argument")]
-    [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"query.snapshot\",\"payload\":{\"extra\":1}", "invalid_argument")]
-    [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"command\",\"payload\":{}", "invalid_argument")]
-    [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"command\",\"payload\":{\"kind\":100}", "invalid_argument")]
-    [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"command\",\"payload\":{\"kind\":\"unknown\"}", "invalid_argument")]
-    [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"command\",\"payload\":{\"kind\":\"pause\"}", "invalid_argument")]
-    [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"subscribe\",\"payload\":{\"eventTypes\":[\"unknown\"]}", "invalid_argument")]
-    [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"unsubscribe\",\"payload\":{\"subscriptionId\":\"bad\"}", "invalid_argument")]
-    [InlineData("\"protocolVersion\":1,\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"query.snapshot\",\"payload\":{}", "invalid_argument")]
+    [InlineData("\"protocolVersion\":2,\"kind\":\"request\",\"operation\":\"query.snapshot\",\"payload\":{}",
+        "unsupported_version")]
+    [InlineData("\"protocolVersion\":1,\"kind\":\"event\",\"operation\":\"query.snapshot\",\"payload\":{}",
+        "invalid_argument")]
+    [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"unknown\",\"payload\":{}",
+        "unknown_operation")]
+    [InlineData("\"protocolVersion\":\"1\",\"kind\":\"request\",\"operation\":\"query.snapshot\",\"payload\":{}",
+        "invalid_argument")]
+    [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"query.snapshot\",\"payload\":{\"extra\":1}",
+        "invalid_argument")]
+    [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"command\",\"payload\":{}",
+        "invalid_argument")]
+    [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"command\",\"payload\":{\"kind\":100}",
+        "invalid_argument")]
+    [InlineData(
+        "\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"command\",\"payload\":{\"kind\":\"unknown\"}",
+        "invalid_argument")]
+    [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"command\",\"payload\":{\"kind\":\"pause\"}",
+        "invalid_argument")]
+    [InlineData(
+        "\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"subscribe\",\"payload\":{\"eventTypes\":[\"unknown\"]}",
+        "invalid_argument")]
+    [InlineData(
+        "\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"unsubscribe\",\"payload\":{\"subscriptionId\":\"bad\"}",
+        "invalid_argument")]
+    [InlineData(
+        "\"protocolVersion\":1,\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"query.snapshot\",\"payload\":{}",
+        "invalid_argument")]
     public async Task InvalidRequestsReturnStructuredCorrelatedErrors(string properties, string code)
     {
         await using var host = await PipeHost.StartAsync();
@@ -169,7 +214,9 @@ public sealed class PipeServerTests
     {
         await using var host = await PipeHost.StartAsync();
         await using var client = await host.ConnectAsync();
-        await WriteJson(client, $"{{\"protocolVersion\":1,\"kind\":\"request\",\"requestId\":{requestId},\"operation\":\"query.snapshot\",\"payload\":{{}}}}", host.Token);
+        await WriteJson(client,
+            $"{{\"protocolVersion\":1,\"kind\":\"request\",\"requestId\":{requestId},\"operation\":\"query.snapshot\",\"payload\":{{}}}}",
+            host.Token);
         var response = await Response(client, host.Token);
         Assert.Equal(Guid.Empty, response.RequestId);
         Assert.Equal("invalid_argument", response.ErrorCode);
@@ -188,13 +235,15 @@ public sealed class PipeServerTests
         while (true)
         {
             var message = await Read(client, host.Token);
-            if (message.GetProperty("kind").GetString() == "event") events.Add(message.Deserialize<EventEnvelope>(Protocol.JsonOptions)!);
+            if (message.GetProperty("kind").GetString() == "event")
+                events.Add(message.Deserialize<EventEnvelope>(Protocol.JsonOptions)!);
             else
             {
                 response = message.Deserialize<ResponseEnvelope>(Protocol.JsonOptions)!;
                 break;
             }
         }
+
         Assert.Equal(request.RequestId, response.RequestId);
         Assert.True(response.Success);
         var changed = Assert.Single(events, envelope => envelope.EventType == "pause.changed");
@@ -236,7 +285,8 @@ public sealed class PipeServerTests
         var changes = Task.Run(async () =>
         {
             for (var index = 0; index < 12; index++)
-                Assert.True((await host.Engine.ExecuteAsync(new(CommandKind.Pause, Paused: index % 2 == 0), host.Token)).Success);
+                Assert.True((await host.Engine.ExecuteAsync(new(CommandKind.Pause, Paused: index % 2 == 0), host.Token))
+                    .Success);
         });
         var first = (await Read(client, host.Token)).Deserialize<EventEnvelope>(Protocol.JsonOptions)!;
         Assert.Equal("snapshot", first.EventType);
@@ -248,7 +298,8 @@ public sealed class PipeServerTests
         while (true)
         {
             var message = await Read(client, host.Token);
-            if (message.GetProperty("kind").GetString() == "event") events.Add(message.Deserialize<EventEnvelope>(Protocol.JsonOptions)!);
+            if (message.GetProperty("kind").GetString() == "event")
+                events.Add(message.Deserialize<EventEnvelope>(Protocol.JsonOptions)!);
             else
             {
                 var response = message.Deserialize<ResponseEnvelope>(Protocol.JsonOptions)!;
@@ -259,11 +310,14 @@ public sealed class PipeServerTests
                     Assert.Equal(response.StateRevision, events[^1].StateRevision);
                     break;
                 }
+
                 Assert.Equal(subscription.RequestId, response.RequestId);
                 responseSeen = true;
             }
         }
-        Assert.True(events.Zip(events.Skip(1)).All(pair => pair.First.Sequence < pair.Second.Sequence && pair.First.StateRevision < pair.Second.StateRevision));
+
+        Assert.True(events.Zip(events.Skip(1)).All(pair =>
+            pair.First.Sequence < pair.Second.Sequence && pair.First.StateRevision < pair.Second.StateRevision));
         foreach (var envelope in events)
         {
             var snapshot = envelope.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!;
@@ -318,12 +372,14 @@ public sealed class PipeServerTests
         long previous = 0;
         for (var index = 0; index < 24; index++)
         {
-            Assert.True((await host.Engine.ExecuteAsync(new(CommandKind.Pause, Paused: index % 2 == 0), host.Token)).Success);
+            Assert.True((await host.Engine.ExecuteAsync(new(CommandKind.Pause, Paused: index % 2 == 0), host.Token))
+                .Success);
             var changed = (await Read(healthy, host.Token)).Deserialize<EventEnvelope>(Protocol.JsonOptions)!;
             Assert.Equal("pause.changed", changed.EventType);
             Assert.True(changed.Sequence > previous);
             previous = changed.Sequence;
         }
+
         await Disconnected(slow, host.Token);
         await using var replacement = await host.ConnectAsync();
         var fresh = await Subscribe(replacement, host.Token, ["pause.changed"]);
@@ -359,6 +415,7 @@ public sealed class PipeServerTests
             previousInstance = initial.Event.InstanceId;
             await host.Engine.ExecuteAsync(new(CommandKind.Pause, Paused: true), host.Token);
         }
+
         await using var replacement = await PipeHost.StartAsync(name: name);
         await using var next = await replacement.ConnectAsync();
         var fresh = await Subscribe(next, replacement.Token);
@@ -368,8 +425,10 @@ public sealed class PipeServerTests
 
     private static RequestEnvelope Request<T>(string operation, T payload) =>
         new(Protocol.Version, Guid.NewGuid(), operation, Protocol.Payload(payload));
+
     private static Task Send(NamedPipeClientStream client, RequestEnvelope request, CancellationToken token) =>
         PipeFraming.WriteAsync(client, request, token);
+
     private static async Task WriteJson(Stream stream, string json, CancellationToken token)
     {
         var bytes = Encoding.UTF8.GetBytes(json);
@@ -378,19 +437,23 @@ public sealed class PipeServerTests
         await stream.WriteAsync(prefix, token);
         await stream.WriteAsync(bytes, token);
     }
+
     private static async Task<JsonElement> Read(Stream client, CancellationToken token)
     {
         using var document = await PipeFraming.ReadAsync(client, token);
         Assert.NotNull(document);
         return document.RootElement.Clone();
     }
+
     private static async Task<ResponseEnvelope> Response(Stream client, CancellationToken token)
     {
         var message = await Read(client, token);
         Assert.Equal("response", message.GetProperty("kind").GetString());
         return message.Deserialize<ResponseEnvelope>(Protocol.JsonOptions)!;
     }
-    private static async Task<(EventEnvelope Event, Guid Id)> Subscribe(NamedPipeClientStream client, CancellationToken token, string[]? types = null)
+
+    private static async Task<(EventEnvelope Event, Guid Id)> Subscribe(NamedPipeClientStream client,
+        CancellationToken token, string[]? types = null)
     {
         var request = Request("subscribe", new SubscribeRequest(types));
         await Send(client, request, token);
@@ -405,13 +468,16 @@ public sealed class PipeServerTests
         Assert.True(result.Success);
         return (initial, result.SubscriptionId!.Value);
     }
+
     private static async Task Disconnected(Stream client, CancellationToken token)
     {
         try
         {
             while (await PipeFraming.ReadAsync(client, token) is { } document) document.Dispose();
         }
-        catch (IOException) { }
+        catch (IOException)
+        {
+        }
     }
 }
 
@@ -436,21 +502,26 @@ internal sealed class PipeHost : IAsyncDisposable
         Server = new(Engine, Name, maximumClients, outputCapacity);
         ServerRun = Server.RunAsync(Token);
     }
-    internal static async Task<PipeHost> StartAsync(string? name = null, int maximumClients = 16, int outputCapacity = 128,
+
+    internal static async Task<PipeHost> StartAsync(string? name = null, int maximumClients = 16,
+        int outputCapacity = 128,
         int titleLength = 8, bool popup = false, IEnumerable<WorkspaceDefinition>? workspaceDefinitions = null)
     {
         var host = new PipeHost(name, maximumClients, outputCapacity, titleLength, popup, workspaceDefinitions);
         Assert.True((await host.Engine.ExecuteAsync(new(CommandKind.Redraw), host.Token)).Success);
         return host;
     }
+
     internal static NamedPipeClientStream CreateClient(string name) =>
         new(".", name, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Impersonation);
+
     internal async Task<NamedPipeClientStream> ConnectAsync()
     {
         var client = CreateClient(Name);
         await client.ConnectAsync(Token);
         return client;
     }
+
     public async ValueTask DisposeAsync()
     {
         try
@@ -473,28 +544,39 @@ internal sealed class TestWindowPlatform : IWindowPlatform
 {
     private readonly Channel<NativeNotification> notifications = Channel.CreateBounded<NativeNotification>(1);
     private DesktopSnapshot desktop;
+
     internal TestWindowPlatform(int titleLength, bool popup = false)
     {
         var monitor = Guid.NewGuid();
         desktop = new([new(monitor, "test", new(0, 0, 1000, 900), new(0, 0, 1000, 850), 96)],
-            [new(Guid.NewGuid(), monitor, new string('x', titleLength), "test", "test", new(0, 0, 200, 200), true, false, false, WindowMode.Tiling, IsPopup: popup)], null);
+        [
+            new(Guid.NewGuid(), monitor, new string('x', titleLength), "test", "test", new(0, 0, 200, 200), true, false,
+                false, WindowMode.Tiling, IsPopup: popup)
+        ], null);
     }
+
     public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     public Task<DesktopSnapshot> CaptureAsync(CancellationToken cancellationToken) => Task.FromResult(desktop);
-    public IAsyncEnumerable<NativeNotification> Notifications(CancellationToken cancellationToken) => notifications.Reader.ReadAllAsync(cancellationToken);
+
+    public IAsyncEnumerable<NativeNotification> Notifications(CancellationToken cancellationToken) =>
+        notifications.Reader.ReadAllAsync(cancellationToken);
+
     public Task<ApplyResult> ApplyAsync(LayoutPlan plan, CancellationToken cancellationToken)
     {
         desktop = desktop with
         {
             Windows = desktop.Windows.Select(window => window with
             {
-                Bounds = plan.Placements.FirstOrDefault(placement => placement.WindowId == window.Id)?.Bounds ?? window.Bounds,
-                Visible = plan.Visibility?.FirstOrDefault(visibility => visibility.WindowId == window.Id)?.Visible ?? window.Visible
+                Bounds = plan.Placements.FirstOrDefault(placement => placement.WindowId == window.Id)?.Bounds ??
+                         window.Bounds,
+                Visible = plan.Visibility?.FirstOrDefault(visibility => visibility.WindowId == window.Id)?.Visible ??
+                          window.Visible
             }).ToArray(),
             FocusedWindowId = plan.FocusWindowId ?? desktop.FocusedWindowId
         };
         return Task.FromResult(new ApplyResult([]));
     }
+
     public Task<ApplyResult> RestoreAsync(CancellationToken cancellationToken) => Task.FromResult(new ApplyResult([]));
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

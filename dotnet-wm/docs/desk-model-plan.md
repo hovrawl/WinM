@@ -2,9 +2,9 @@
 
 ## Goal and scope
 
-Move from monitor-owned workspaces to exactly one shared desk with transferable workspace views. The headless manager now supports per-workspace split and layered layouts, and a separate Avalonia debug/control companion is available. This plan tracks remaining system work and the later spatial overview/quick switcher.
+Move from monitor-owned workspaces to exactly one shared desk with transferable workspace views. The headless manager now supports logical workspace positions and per-workspace split/layered layouts; separate Avalonia debug-console and spatial-switcher apps are available. This plan tracks remaining system work and the future full desk overview.
 
-The target rules live in [Project goal: one shared desk](project-goal.md). Transfer, target-selection, split/layered layout, and page-focus policies below are implemented; spatial, additional-layout, and persistence policies remain open.
+The target rules live in [Project goal: one shared desk](project-goal.md). Transfer, target-selection, logical workspace positions, split/layered layout, and page-focus policies below are implemented; workspace bounds, additional layouts, and persistent runtime state remain open.
 
 ## Current implementation
 
@@ -16,6 +16,7 @@ The target rules live in [Project goal: one shared desk](project-goal.md). Trans
 - `SplitTree.Layout` stages only windows whose reported minimum width and height fit. It retains the full tree and reports overflow IDs; `ManagerEngine` exposes `WindowInfo.LayoutOverflow`, minimizes overflow, and supports promoting one through the existing `focus` command. The Windows recovery helper restores manager-minimized overflow on graceful exit or host failure. CLI status and the separate Avalonia inspector expose affected windows.
 - `WorkspaceLayout` is per-workspace state. `split` remains the default; `layered` places every individually fitting tiled window in a large, bounded cascade and reports only individually oversized pages as overflow. The saved split tree and workspace membership are unchanged, and tiling `focusCycle` brings the selected page forward.
 - `WorkspaceDefinition.Layout` configures the restart default. `setWorkspaceLayout` changes runtime state and immediately reflows; a native action failure reports its error and restores the previous layout selection. The inspector exposes layout selection and previous/next page controls.
+- `WorkspaceInfo.Position` is manager-owned logical desk state. `WorkspaceDefinition.Position` seeds a configured workspace; omitted positions receive deterministic four-column defaults. `setWorkspacePosition` publishes `workspace.updated` without native window actions. Runtime changes are not persisted across restarts.
 
 These details are the baseline for migration. The `MonitorId` on `WindowInfo` is observed native placement, not a future desk relationship.
 
@@ -28,7 +29,7 @@ These details are the baseline for migration. The `MonitorId` on `WindowInfo` is
 
 ## Decisions that remain
 
-- **Spatial rules:** choose coordinate units, bounds validation, overlap policy, and defaults for new workspaces. Coordinates must remain independent of monitor pixels, DPI, and client zoom.
+- **Spatial bounds:** decide workspace bounds and overlap policy for future drag placement. Implemented point coordinates are finite and bounded to ±100000 desk units, with stable defaults independent of monitor pixels, DPI, and client zoom.
 - **Additional layout rules:** define columns, rows, and Fibonacci tile calculations, including reflow behavior and layout constraints. Split and layered layouts are implemented.
 - **Persistence and compatibility:** define persisted desk state, view restoration across manager restarts, migration from current configuration, and any future protocol changes.
 
@@ -36,7 +37,7 @@ These details are the baseline for migration. The `MonitorId` on `WindowInfo` is
 
 ### 1. Add desk state and invariants
 
-The first slice is implemented: `WorkspaceSet` keeps stable workspace IDs, window membership, split trees, per-workspace split/layered choices, and monitor views as separate state. The remaining work is to add logical workspace positions and bounds and any additional layout rules.
+The first slice is implemented: `WorkspaceSet` keeps stable workspace IDs, window membership, split trees, per-workspace split/layered choices, logical positions, and monitor views as separate state. Workspace bounds and additional layout rules remain future work.
 
 Enforce these invariants in core state:
 
@@ -45,7 +46,8 @@ Enforce these invariants in core state:
 - Implemented: a workspace can exist without a view.
 - Implemented: view transfer does not change window membership.
 - Implemented: observed Windows monitor placement remains separate from workspace membership.
-- Remaining: validate desk bounds and define overlap behavior independently of monitor pixels, DPI, and client zoom.
+- Implemented: validate logical positions independently of monitor pixels, DPI, and client zoom.
+- Remaining: add workspace bounds and define overlap behavior for drag placement.
 
 ### 2. Change activation and reconciliation
 
@@ -65,9 +67,9 @@ Keep the core layout input independent of a visual client's zoom and desk coordi
 
 ### 4. Evolve contracts, configuration, and persistence
 
-Implemented: `src/WinManager.Contracts/Commands.cs` exposes `WorkspaceViews`, per-workspace `WorkspaceLayout`, `SetWorkspaceLayout`, and an optional monitor target on `ActivateWorkspace`; `MoveToMonitor` remains a separate window-membership operation. Workspace bounds and persistent desk-state fields remain future contract work.
+Implemented: `src/WinManager.Contracts/Commands.cs` exposes `WorkspaceViews`, per-workspace `WorkspaceLayout`, `DeskPosition`, `SetWorkspaceLayout`, `SetWorkspacePosition`, and an optional monitor target on `ActivateWorkspace`; `MoveToMonitor` remains a separate window-membership operation. Workspace bounds and persistent runtime desk-state fields remain future contract work.
 
-Implemented: host validation accepts workspace layout defaults and shortcut commands. Current `monitorDeviceName` values act as initial placement hints. Layout defaults are configured per workspace; runtime layout changes, workspace positions, and transferred view assignments are not persisted across restarts.
+Implemented: host validation accepts workspace layout and optional position defaults and shortcut commands. Current `monitorDeviceName` values act as initial placement hints. Layout and position defaults are configured per workspace; runtime layout/position changes and transferred view assignments are not persisted across restarts.
 
 Version protocol changes deliberately. Update `docs/protocol.md` and `docs/external-api.md` only when the new contracts exist. Keep the current version 1 examples marked as current until then. Preserve the current IPC security model and atomic snapshot/event behavior.
 
@@ -91,9 +93,9 @@ Run the targeted core, IPC, and Windows tests in a safe interactive environment 
 
 ### 6. Add visual clients without changing single-desk ownership
 
-Implemented first slice: `WinManager.DebugUi` is a code-only Avalonia companion using the existing SDK. It shows monitor views (including empty ones), all desk workspaces, window state and membership, and read-only configured-exclusion diagnostics. Explicit controls activate views, change membership and workspace layout, cycle layered pages, focus/promote overflow, set modes, pause/resume and redraw. Its demo mode never connects to the manager. See [the companion guide](../src/WinManager.DebugUi/README.md).
+Implemented visual slices: `WinManager.DebugUi` is a code-only Avalonia debug console using the shared manager session and SDK; it shows monitor views, workspaces, positions, window state and read-only configured-exclusion diagnostics with explicit controls. `WinManager.SpatialSwitcher` is a separate code-only Avalonia popup that uses desk positions for its map, directional navigation, search dimming, and explicit monitor-targeted activation. Both offer safe demo mode. See the [debug console guide](../src/WinManager.DebugUi/README.md) and [switcher guide](../src/WinManager.SpatialSwitcher/README.md).
 
-There is exactly one desk, not a collection of desks. UI groups represent workspaces and monitor views on that shared desk. Keep the manager headless and authoritative. Spatial overview and quick-switcher gestures remain later work, after their spatial contracts exist; they must not invent a separate desk model in the client.
+There is exactly one desk, not a collection of desks. UI groups represent workspaces and monitor views on that shared desk. Keep the manager headless and authoritative. The full draggable/zoomable desk overview remains later work; it must consume manager coordinates and must not invent a separate desk model in the client.
 
 ## Visual client choices
 
@@ -103,8 +105,8 @@ There is exactly one desk, not a collection of desks. UI groups represent worksp
 | Bundled separate client | Keeps the process boundary and contracts; offers one installer and coordinated release. | Adds package, update, startup, and lifecycle work. | Consider after the companion proves useful. |
 | UI inside the manager host | One process and direct access to state. | Couples UI lifetime and platform concerns to the manager; weakens the headless boundary. | Not recommended. |
 
-The recommended companion can implement the desk overview and quick switcher. The overview can zoom out and show windows in workspace groups, including an explicit overflow list that explains why a window is minimized and lets the user focus it to replace a staged tile. Users can move groups on the desk or select a workspace.
+The separate companion apps now implement the debug console and spatial switcher. The future full overview can zoom out and show windows in workspace groups, including an explicit overflow list that explains why a window is minimized and lets the user focus it to replace a staged tile. Users can move groups on the desk or select a workspace.
 
-The quick switcher can use a floating modal window with groups at uneven, desk-like positions. Arrow keys move selection. A name filter narrows the choices. Enter activates the selected workspace on the chosen monitor.
+The spatial switcher uses a popup with groups at their manager-owned desk positions. Arrow keys move selection spatially, search dims nonmatching cards without moving them, and Enter activates on the explicitly chosen monitor.
 
 The manager must still own all state changes. The companion sends commands through the public IPC contract. It does not maintain a second source of truth.

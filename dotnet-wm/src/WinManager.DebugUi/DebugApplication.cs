@@ -1,12 +1,12 @@
 ﻿using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Themes.Fluent;
+using WinManager.Ui;
 
 namespace WinManager.DebugUi;
 
 internal sealed class DebugApplication : Application
 {
-    public DebugApplication() => Styles.Add(new FluentTheme());
+    public DebugApplication() => DeskTheme.Apply(this);
 
     public override void OnFrameworkInitializationCompleted()
     {
