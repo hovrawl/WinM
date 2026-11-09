@@ -31,7 +31,8 @@ public sealed record ManagerConfiguration
                                         workspace.Name.Length > 64 ||
                                         workspace.MonitorDeviceName is { Length: > 256 } ||
                                         !Enum.IsDefined(workspace.Layout) ||
-                                        workspace.Position is { IsValid: false }) ||
+                                        workspace.Position is { IsValid: false } ||
+                                        workspace.LayeredLayoutOptions is { IsValid: false }) ||
             Workspaces.Select(workspace => workspace.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() !=
             Workspaces.Count)
             throw new InvalidDataException("Workspace names must be nonblank and unique.");
@@ -64,7 +65,8 @@ public sealed record ManagerConfiguration
             command.Orientation is { } orientation && !Enum.IsDefined(orientation) ||
             command.Navigation is { } navigation && !Enum.IsDefined(navigation) ||
             command.CycleDirection is { } cycleDirection && !Enum.IsDefined(cycleDirection) ||
-            command.Layout is { } layout && !Enum.IsDefined(layout))
+            command.Layout is { } layout && !Enum.IsDefined(layout) ||
+            command.LayeredLayoutOptions is { IsValid: false })
             throw new InvalidDataException("Shortcut command has an unknown enum value.");
         var valid = command.Kind switch
         {
@@ -101,6 +103,7 @@ public sealed record ManagerConfiguration
         if (!valid || command.WorkspaceId is not null && command.WorkspaceName is not null ||
             command.Kind == CommandKind.ActivateWorkspace && command.MonitorId == Guid.Empty ||
             command.Kind != CommandKind.SetWorkspaceLayout && command.Layout is not null ||
+            command.Kind != CommandKind.SetWorkspaceLayout && command.LayeredLayoutOptions is not null ||
             command.Kind != CommandKind.SetWorkspacePosition && command.Position is not null ||
             command.Kind == CommandKind.SetWorkspacePosition &&
             (command.WindowId is not null || command.MonitorId is not null || command.Direction is not null ||

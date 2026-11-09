@@ -802,6 +802,35 @@ public sealed class WorkspaceManagerTests
             Assert.Equal(2, fake.Plans[^1].Placements.Count);
             Assert.NotEqual(fake.Plans[^1].Placements[0].Bounds, fake.Plans[^1].Placements[1].Bounds);
 
+            var options = new LayeredLayoutOptions(0.6, 0);
+            var revision = engine.Current.StateRevision;
+            var planCount = fake.Plans.Count;
+            var optionsChanged = await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
+                    WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered, LayeredLayoutOptions: options),
+                timeout.Token);
+
+            Assert.True(optionsChanged.Success);
+            Assert.True(engine.Current.StateRevision > revision);
+            Assert.Equal(options, Assert.Single(engine.Current.Workspaces!).LayeredLayoutOptions);
+            Assert.Equal(planCount + 1, fake.Plans.Count);
+            Assert.All(fake.Plans[^1].Placements,
+                placement => Assert.Equal(fake.Plans[^1].Placements[0].Bounds, placement.Bounds));
+
+            revision = engine.Current.StateRevision;
+            planCount = fake.Plans.Count;
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
+                    WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered, LayeredLayoutOptions: options),
+                timeout.Token)).Success);
+            Assert.Equal(revision, engine.Current.StateRevision);
+            Assert.Equal(planCount, fake.Plans.Count);
+
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
+                WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Split), timeout.Token)).Success);
+            Assert.Equal(options, Assert.Single(engine.Current!.Workspaces!).LayeredLayoutOptions);
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
+                WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered), timeout.Token)).Success);
+            Assert.Equal(options, Assert.Single(engine.Current!.Workspaces!).LayeredLayoutOptions);
+
             var cycles = new[]
             {
                 (FocusCycleDirection.Next, windowOrder[0]), (FocusCycleDirection.Next, windowOrder[1]),
@@ -842,14 +871,20 @@ public sealed class WorkspaceManagerTests
                         WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered, Mode: WindowMode.Tiling),
                     timeout.Token))
                 .ErrorCode);
+            Assert.Equal("invalid_argument", (await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
+                WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered,
+                LayeredLayoutOptions: new LayeredLayoutOptions(1.1, 0)), timeout.Token)).ErrorCode);
             fake.FailActions = true;
 
             var result = await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
-                WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered), timeout.Token);
+                WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered,
+                LayeredLayoutOptions: new LayeredLayoutOptions(0.6, 0)), timeout.Token);
 
             Assert.False(result.Success);
             Assert.Equal("access_denied", result.ErrorCode);
-            Assert.Equal(WorkspaceLayout.Split, Assert.Single(engine.Current!.Workspaces!).Layout);
+            var restoredWorkspace = Assert.Single(engine.Current!.Workspaces!);
+            Assert.Equal(WorkspaceLayout.Split, restoredWorkspace.Layout);
+            Assert.Equal(LayeredLayoutOptions.Default, restoredWorkspace.LayeredLayoutOptions);
             Assert.Equal(tree, engine.Current.Trees[workspace.Id]);
         }
         finally

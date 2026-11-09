@@ -126,19 +126,24 @@ public sealed class HostConfigurationTests
         var file = Path.Combine(directory.Path, "config.json");
         File.WriteAllText(file, """
                                 {
-                                  "workspaces": [{ "name": "Layered", "layout": "layered" }],
+                                  "workspaces": [{ "name": "Layered", "layout": "layered",
+                                    "layeredLayoutOptions": { "windowWidthRatio": 0.65, "horizontalOffset": 48 } }],
                                   "shortcuts": [{ "modifiers": 2, "virtualKey": 76,
-                                    "command": { "kind": "setWorkspaceLayout", "workspaceName": "Layered", "layout": "layered" } }]
+                                    "command": { "kind": "setWorkspaceLayout", "workspaceName": "Layered", "layout": "layered",
+                                      "layeredLayoutOptions": { "windowWidthRatio": 0.6, "horizontalOffset": 0 } } }]
                                 }
                                 """);
 
         var loaded = ManagerConfiguration.Load(file, createDefault: false);
 
         Assert.Equal(WorkspaceLayout.Layered, Assert.Single(loaded.Workspaces).Layout);
+        Assert.Equal(new LayeredLayoutOptions(0.65, 48),
+            Assert.Single(loaded.Workspaces).LayeredLayoutOptions);
         var shortcut = Assert.Single(loaded.Shortcuts).Command;
         Assert.Equal(CommandKind.SetWorkspaceLayout, shortcut.Kind);
         Assert.Equal(WorkspaceLayout.Layered, shortcut.Layout);
         Assert.Equal("Layered", shortcut.WorkspaceName);
+        Assert.Equal(new LayeredLayoutOptions(0.6, 0), shortcut.LayeredLayoutOptions);
 
         var invalid = new ManagerCommand[]
         {
@@ -148,6 +153,9 @@ public sealed class HostConfigurationTests
             new(CommandKind.SetWorkspaceLayout, WorkspaceId: Guid.Empty, Layout: WorkspaceLayout.Layered),
             new(CommandKind.SetWorkspaceLayout, WorkspaceName: "Layered", Layout: WorkspaceLayout.Layered,
                 Mode: WindowMode.Tiling),
+            new(CommandKind.SetWorkspaceLayout, WorkspaceName: "Layered", Layout: WorkspaceLayout.Layered,
+                LayeredLayoutOptions: new LayeredLayoutOptions(double.NaN, 0)),
+            new(CommandKind.Pause, Paused: true, LayeredLayoutOptions: LayeredLayoutOptions.Default),
             new(CommandKind.Redraw, Layout: WorkspaceLayout.Layered)
         };
         foreach (var command in invalid)
@@ -155,6 +163,15 @@ public sealed class HostConfigurationTests
             {
                 Shortcuts = [new(2, 76, command)]
             }).Validate());
+
+        Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration
+        {
+            Workspaces = [new("Layered", LayeredLayoutOptions: new LayeredLayoutOptions(0, 32))]
+        }).Validate());
+        Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration
+        {
+            Workspaces = [new("Layered", LayeredLayoutOptions: new LayeredLayoutOptions(0.8, 257))]
+        }).Validate());
     }
 
     [Fact]

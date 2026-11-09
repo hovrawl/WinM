@@ -601,7 +601,8 @@ public sealed class ManagerEngine
         {
             WorkspaceLayout.Split => tree.Layout(monitor, innerGap, outerGap, priorityOrder),
             WorkspaceLayout.Layered => LayeredLayout.Layout(monitor,
-                tree.WindowOrder.Select(windowId => windowsById[windowId]).ToArray(), outerGap),
+                tree.WindowOrder.Select(windowId => windowsById[windowId]).ToArray(), outerGap,
+                workspace.LayeredLayoutOptions),
             _ => throw new InvalidOperationException("Workspace layout is not supported.")
         };
     }
@@ -702,6 +703,7 @@ public sealed class ManagerEngine
                 Publish(ManagerEventTypes.WorkspaceUpdated, next);
             else if (old.Name != workspace.Name || old.MonitorId != workspace.MonitorId ||
                      old.Layout != workspace.Layout || old.Position != workspace.Position ||
+                     old.LayeredLayoutOptions != workspace.LayeredLayoutOptions ||
                      !old.WindowIds.SequenceEqual(workspace.WindowIds))
                 Publish(ManagerEventTypes.WorkspaceUpdated, next);
             if (old?.Active == true && !workspace.Active) Publish(ManagerEventTypes.WorkspaceDeactivated, next);
@@ -735,7 +737,8 @@ public sealed class ManagerEngine
             command.Navigation is { } navigation && !Enum.IsDefined(navigation) ||
             command.CycleDirection is { } cycleDirection && !Enum.IsDefined(cycleDirection) ||
             command.Layout is { } layout && !Enum.IsDefined(layout) ||
-            command.Position is { IsValid: false })
+            command.Position is { IsValid: false } ||
+            command.LayeredLayoutOptions is { IsValid: false })
             return Error("invalid_argument", "Unknown command or enum value.");
         if (command.MonitorId is not null &&
             command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToMonitor))
@@ -747,6 +750,8 @@ public sealed class ManagerEngine
             return Error("invalid_argument", "Cycle direction is only supported by focusCycle.");
         if (command.Kind != CommandKind.SetWorkspaceLayout && command.Layout is not null)
             return Error("invalid_argument", "Layout is only supported by setWorkspaceLayout.");
+        if (command.Kind != CommandKind.SetWorkspaceLayout && command.LayeredLayoutOptions is not null)
+            return Error("invalid_argument", "Layered layout options are only supported by setWorkspaceLayout.");
         if (command.Kind != CommandKind.SetWorkspacePosition && command.Position is not null)
             return Error("invalid_argument", "Position is only supported by setWorkspacePosition.");
         if (command.Kind == CommandKind.FocusCycle)
@@ -847,14 +852,16 @@ public sealed class ManagerEngine
                 command.Direction is not null || command.Amount is not null || command.Orientation is not null ||
                 command.NodeId is not null || command.Navigation is not null || command.CycleDirection is not null)
                 return Error("invalid_argument", "setWorkspaceLayout accepts only a workspace target and layout.");
-            var previousLayout = workspaces.LayoutFor(workspaceId);
-            if (previousLayout is null) return Error("not_found", "Workspace does not exist.");
-            if (previousLayout == requestedLayout) return new(true, null, null, revision);
-            workspaces.SetLayout(workspaceId, requestedLayout);
+            var previousWorkspace = workspaces.Snapshot.SingleOrDefault(workspace => workspace.Id == workspaceId);
+            if (previousWorkspace is null) return Error("not_found", "Workspace does not exist.");
+            var requestedOptions = command.LayeredLayoutOptions ?? previousWorkspace.LayeredLayoutOptions;
+            if (previousWorkspace.Layout == requestedLayout &&
+                previousWorkspace.LayeredLayoutOptions == requestedOptions) return new(true, null, null, revision);
+            workspaces.SetLayout(workspaceId, requestedLayout, requestedOptions);
             var failures = await ReconcileAsync(cancellationToken);
             if (failures.Count > 0)
             {
-                workspaces.SetLayout(workspaceId, previousLayout.Value);
+                workspaces.SetLayout(workspaceId, previousWorkspace.Layout, previousWorkspace.LayeredLayoutOptions);
                 await ReconcileAsync(cancellationToken);
             }
 

@@ -9,13 +9,15 @@ public sealed class WorkspaceSet
         string name,
         string? initialDeviceName,
         WorkspaceLayout layout,
-        DeskPosition position)
+        DeskPosition position,
+        LayeredLayoutOptions layeredLayoutOptions)
     {
         public Guid Id { get; } = Guid.NewGuid();
         public string Name { get; } = name;
         public string? InitialDeviceName { get; set; } = initialDeviceName;
         public WorkspaceLayout Layout { get; set; } = layout;
         public DeskPosition Position { get; set; } = position;
+        public LayeredLayoutOptions LayeredLayoutOptions { get; set; } = layeredLayoutOptions;
     }
 
     private readonly List<Workspace> workspaces = [];
@@ -38,10 +40,13 @@ public sealed class WorkspaceSet
         if (configured.Any(d => d.Position is { IsValid: false }))
             throw new ArgumentException("Workspace positions must be finite and within the supported desk bounds.",
                 nameof(definitions));
+        if (configured.Any(d => d.LayeredLayoutOptions is { IsValid: false }))
+            throw new ArgumentException("Layered layout options are outside the supported range.", nameof(definitions));
         if (configured.Select(d => d.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != configured.Length)
             throw new ArgumentException("Workspace names must be unique.", nameof(definitions));
         foreach (var definition in configured)
-            Add(definition.Name, definition.MonitorDeviceName, definition.Layout, definition.Position);
+            Add(definition.Name, definition.MonitorDeviceName, definition.Layout, definition.Position,
+                definition.LayeredLayoutOptions);
     }
 
     public IReadOnlyList<WorkspaceInfo> Snapshot => workspaces.Select(workspace =>
@@ -49,7 +54,8 @@ public sealed class WorkspaceSet
         var monitorId = views.FirstOrDefault(view => view.Value == workspace.Id).Key;
         return new WorkspaceInfo(workspace.Id, workspace.Name, monitorId, monitorId != Guid.Empty,
             Array.AsReadOnly(assignments.Where(assignment => assignment.Value == workspace.Id)
-                .Select(assignment => assignment.Key).Order().ToArray()), workspace.Layout, workspace.Position);
+                .Select(assignment => assignment.Key).Order().ToArray()), workspace.Layout, workspace.Position,
+            workspace.LayeredLayoutOptions);
     }).ToList().AsReadOnly();
 
     public IReadOnlyList<WorkspaceViewInfo> Views => views.OrderBy(view => view.Key)
@@ -140,12 +146,13 @@ public sealed class WorkspaceSet
     public WorkspaceLayout? LayoutFor(Guid workspaceId) =>
         workspaces.FirstOrDefault(workspace => workspace.Id == workspaceId)?.Layout;
 
-    public bool SetLayout(Guid workspaceId, WorkspaceLayout layout)
+    public bool SetLayout(Guid workspaceId, WorkspaceLayout layout, LayeredLayoutOptions? layeredLayoutOptions = null)
     {
-        if (!Enum.IsDefined(layout)) return false;
+        if (!Enum.IsDefined(layout) || layeredLayoutOptions is { IsValid: false }) return false;
         var workspace = workspaces.FirstOrDefault(candidate => candidate.Id == workspaceId);
         if (workspace is null) return false;
         workspace.Layout = layout;
+        if (layeredLayoutOptions is not null) workspace.LayeredLayoutOptions = layeredLayoutOptions;
         return true;
     }
 
@@ -223,9 +230,10 @@ public sealed class WorkspaceSet
     }
 
     private Workspace Add(string name, string? deviceName, WorkspaceLayout layout = WorkspaceLayout.Split,
-        DeskPosition? position = null)
+        DeskPosition? position = null, LayeredLayoutOptions? layeredLayoutOptions = null)
     {
-        var workspace = new Workspace(name, deviceName, layout, position ?? DefaultPosition(workspaces.Count));
+        var workspace = new Workspace(name, deviceName, layout, position ?? DefaultPosition(workspaces.Count),
+            layeredLayoutOptions ?? LayeredLayoutOptions.Default);
         workspaces.Add(workspace);
         trees.Add(workspace.Id, new SplitTree());
         return workspace;

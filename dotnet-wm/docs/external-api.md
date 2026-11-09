@@ -34,7 +34,7 @@ SDK/IPC contract for their display and explicit controls. Neither creates desks
 or owns manager state.
 
 View activation, logical workspace positions, per-workspace `split`/`layered`
-layout selection, and the spatial switcher are implemented. Workspace bounds,
+layout selection and layered width/spacing rules, and the spatial switcher are implemented. Workspace bounds,
 columns/rows/Fibonacci rules, persistence of runtime desk state, and the full desk
 overview are not. See [the project goal](project-goal.md) and
 [the migration plan](desk-model-plan.md).
@@ -70,8 +70,10 @@ The response is a complete `ManagerSnapshot`:
 - `desktop.focusedWindowId`: the current focused managed window, or `null`.
 - `desktop.monitors`: monitor `id`, device name, bounds, work area, and DPI.
 - `workspaces`: workspace `id`, configured name, `layout` (`split` or `layered`),
+  effective `layeredLayoutOptions` (`windowWidthRatio` and `horizontalOffset`),
   logical `position` (`x` and `y`), monitor ID, active flag, and assigned window IDs.
-  Older hosts can omit position; spatial clients should treat its absence as unavailable.
+  Older hosts can omit position or layered options; spatial clients should treat
+  missing position as unavailable and missing options as the documented defaults.
 - `trees`: split trees keyed by **workspace ID**, not monitor ID. Each node has
   an ID, optional window ID, orientation, ratio, and first/second children.
 - `paused`: whether automatic layout application is paused.
@@ -113,7 +115,7 @@ replace `<window-guid>`, `<workspace-guid>`, and
 | `activateWorkspace` | Exactly one of `workspaceId`, `workspaceName`; optional `monitorId` | Show the workspace on the target monitor. If it is visible elsewhere, transfer its view; the destination's prior workspace remains unviewed. Without `monitorId`, use the focused window's connected monitor, then the primary monitor. | `{"kind":"activateWorkspace","workspaceName":"2","monitorId":"<monitor-guid>"}` |
 | `moveToWorkspace` | Exactly one of `workspaceId`, `workspaceName` | Assign the target window to an existing workspace; does not activate the destination. | `{"kind":"moveToWorkspace","windowId":"<window-guid>","workspaceId":"<workspace-guid>"}` |
 | `moveToMonitor` | `monitorId` | Assign the target window to the workspace currently shown by the destination monitor; this does not transfer a workspace view. | `{"kind":"moveToMonitor","monitorId":"<monitor-guid>"}` |
-| `setWorkspaceLayout` | Exactly one of `workspaceId`, `workspaceName`; `layout` | Set a workspace's `split` or `layered` layout and reflow its active view unless paused; native action failure restores the previous layout selection. | `{"kind":"setWorkspaceLayout","workspaceName":"2","layout":"layered"}` |
+| `setWorkspaceLayout` | Exactly one of `workspaceId`, `workspaceName`; `layout`; optional `layeredLayoutOptions` | Set a workspace's `split` or `layered` layout and reflow its active view unless paused. Option updates can be sent while keeping the same layout; layout and options roll back together on native action failure. | `{"kind":"setWorkspaceLayout","workspaceName":"2","layout":"layered","layeredLayoutOptions":{"windowWidthRatio":0.8,"horizontalOffset":32}}` |
 | `setWorkspacePosition` | Exactly one of `workspaceId`, `workspaceName`; `position` | Set logical desk coordinates without moving or resizing native windows; commits `workspace.updated`. | `{"kind":"setWorkspacePosition","workspaceName":"2","position":{"x":520,"y":-80}}` |
 
 Argument details:
@@ -125,9 +127,14 @@ Argument details:
 - `position`: logical `x` and `y` desk units. Both values must be finite and in
   `[-100000,100000]`; this does not represent monitor pixels or resize a workspace.
 - `layout`: `split` or `layered`. `split` uses the saved split tree and gap settings.
-  `layered` overlays every individually fitting tiled window in a large page stack;
-  it caps the cascade at 48 DIPs and reduces offsets to respect minimum sizes.
-  Only windows whose own minimum width or height exceeds the work area overflow.
+  `layered` places individually fitting tiled windows in a full-height horizontal
+  page stack. Only windows whose own minimum width or height exceeds the work area
+  overflow.
+- `layeredLayoutOptions`: optional object with `windowWidthRatio` (default `0.8`,
+  finite in `(0,1]`) and `horizontalOffset` (default `32`, integer DIPs in `[0,256]`).
+  The ratio controls each page's preferred share of usable work width; the offset
+  controls horizontal start-to-start spacing and is compressed when a large stack
+  would exceed available width. Effective values are returned in workspace snapshots.
 - `amount`: a finite fraction in `(0, 0.8]`, not pixels or a percentage integer.
   `0.05` changes the split ratio by five percentage points. `left`/`up` decrease
   the first child's share; `right`/`down` increase it, regardless of which child

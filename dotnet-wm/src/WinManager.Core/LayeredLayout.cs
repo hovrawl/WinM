@@ -4,15 +4,15 @@ namespace WinManager.Core;
 
 public static class LayeredLayout
 {
-    private const int PageOffsetDip = 12;
-    private const int MaximumSpreadDip = 48;
-
-    public static LayoutPlan Layout(MonitorInfo monitor, IReadOnlyList<WindowInfo> orderedWindows, int outerGap)
+    public static LayoutPlan Layout(MonitorInfo monitor, IReadOnlyList<WindowInfo> orderedWindows, int outerGap,
+        LayeredLayoutOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(monitor);
         ArgumentNullException.ThrowIfNull(orderedWindows);
         ArgumentOutOfRangeException.ThrowIfNegative(outerGap);
         if (monitor.Dpi == 0) throw new ArgumentOutOfRangeException(nameof(monitor));
+        options ??= LayeredLayoutOptions.Default;
+        if (!options.IsValid) throw new ArgumentOutOfRangeException(nameof(options));
 
         var candidates = orderedWindows.Where(window => window.Mode == WindowMode.Tiling && !window.IsIgnored &&
                                                         (window.LayoutOverflow || window.Visible && !window.Minimized))
@@ -37,18 +37,19 @@ public static class LayeredLayout
             (work.Height - maximumMinimumHeight) / 2));
         var areaWidth = work.Width - 2L * outer;
         var areaHeight = work.Height - 2L * outer;
-        var availableSpread = Math.Max(0, Math.Min(areaWidth - maximumMinimumWidth, areaHeight - maximumMinimumHeight));
-        var requestedSpread = Math.Min(GapPixels(MaximumSpreadDip, monitor.Dpi),
-            (long)Math.Max(0, fitting.Length - 1) * GapPixels(PageOffsetDip, monitor.Dpi));
+        var preferredPageWidth = (long)Math.Round(areaWidth * options.WindowWidthRatio,
+            MidpointRounding.AwayFromZero);
+        var pageWidth = Math.Max(maximumMinimumWidth, preferredPageWidth);
+        var availableSpread = Math.Max(0, areaWidth - pageWidth);
+        var requestedSpread = (long)Math.Max(0, fitting.Length - 1) *
+                              GapPixels(options.HorizontalOffset, monitor.Dpi);
         var spread = Math.Min(requestedSpread, availableSpread);
-        var pageWidth = areaWidth - spread;
-        var pageHeight = areaHeight - spread;
         var placements = new List<WindowPlacement>(fitting.Length);
         for (var index = 0; index < fitting.Length; index++)
         {
             var offset = fitting.Length <= 1 ? 0 : spread * index / (fitting.Length - 1);
             placements.Add(new(fitting[index].Id, Rectangle((long)work.X + outer + offset,
-                (long)work.Y + outer + offset, pageWidth, pageHeight)));
+                (long)work.Y + outer, pageWidth, areaHeight)));
         }
 
         return new LayoutPlan(placements.AsReadOnly(),

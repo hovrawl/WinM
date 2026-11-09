@@ -223,6 +223,27 @@ public sealed class PipeServerTests
     }
 
     [Fact]
+    public async Task LayeredOptionsCommandAndSnapshotRoundTripThroughStrictPipe()
+    {
+        await using var host = await PipeHost.StartAsync(workspaceDefinitions:
+            [new WorkspaceDefinition("Layered", Layout: WorkspaceLayout.Layered)]);
+        await using var client = await host.ConnectAsync();
+        var workspace = Assert.Single(host.Engine.Current!.Workspaces!);
+        var options = new LayeredLayoutOptions(0.65, 24);
+
+        await Send(client, Request("command", new ManagerCommand(CommandKind.SetWorkspaceLayout,
+            WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered, LayeredLayoutOptions: options)), host.Token);
+
+        var commandResponse = await Response(client, host.Token);
+        Assert.True(commandResponse.Success);
+        await Send(client, Request("query.snapshot", new { }), host.Token);
+        var snapshotResponse = await Response(client, host.Token);
+        Assert.True(snapshotResponse.Success);
+        var snapshot = snapshotResponse.Payload!.Value.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!;
+        Assert.Equal(options, Assert.Single(snapshot.Workspaces!).LayeredLayoutOptions);
+    }
+
+    [Fact]
     public async Task SubscribeSnapshotPrecedesResponseAndCommandsInterleaveCommittedEvents()
     {
         await using var host = await PipeHost.StartAsync();

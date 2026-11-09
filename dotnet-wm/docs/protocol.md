@@ -48,7 +48,7 @@ Commands support `focus`, `move`, `resize`, `setSplit`, `setMode`, `setWorkspace
 `selectContainer`, `clearSelection`, and `focusCycle`.
 Optional command fields are `windowId`, `direction`, `amount`, `orientation`,
 `mode`, `paused`, `workspaceId`, `workspaceName`, `monitorId`, `nodeId`, `navigation`,
-`cycleDirection`, `layout`, and `position`. Workspace
+`cycleDirection`, `layout`, `position`, and `layeredLayoutOptions`. Workspace
 commands accept exactly one workspace GUID or case-insensitive configured name;
 named targets are resolved atomically in the manager. Command-specific argument and
 target validation is performed by the manager actor. For example, `pause`
@@ -60,11 +60,15 @@ returns `not_ready`. Selecting a workspace visible on another monitor transfers
 its exclusive view; the destination's prior workspace remains unviewed. If a
 source monitor needs a fallback, the manager uses another pre-existing unviewed
 workspace or creates an empty one, without using the displaced destination view.
-`setWorkspaceLayout` accepts `layout: split|layered` and exactly one workspace ID or
-configured name. It reflows the active view unless paused; on a native action failure the manager
-reports the error and restores the previous layout selection. The layout field is
-included in each `WorkspaceInfo` and saved in workspace configuration as the restart
-default; runtime changes are not persisted to configuration.
+`setWorkspaceLayout` accepts `layout: split|layered`, optional
+`layeredLayoutOptions`, and exactly one workspace ID or configured name. The options
+contain `windowWidthRatio` (default `0.8`, finite and in `(0,1]`) and
+`horizontalOffset` (default `32`, an integer from `0` to `256` DIPs). The effective
+options and selected layout are included in each `WorkspaceInfo`; layered pages keep
+full work-area height and use a horizontal-only stack, compressing offsets when needed.
+The command reflows the active view unless paused; on a native action failure the
+manager reports the error and restores the previous layout and options. Workspace
+configuration seeds restart defaults; runtime changes are not persisted to configuration.
 `setWorkspacePosition` accepts a finite logical `{x,y}` position in the inclusive
 range `[-100000,100000]` and exactly one workspace ID or configured name. It
 updates desk state and publishes `workspace.updated` without native window actions.

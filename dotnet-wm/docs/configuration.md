@@ -24,7 +24,7 @@ Example (shortcuts are disabled in the generated defaults):
 
 ```json
 {
-  "workspaces": [{ "name": "1", "layout": "split", "position": { "x": 0, "y": 0 } }, { "name": "2", "layout": "layered", "position": { "x": 520, "y": -80 } }, { "name": "3" }],
+  "workspaces": [{ "name": "1", "layout": "split", "position": { "x": 0, "y": 0 } }, { "name": "2", "layout": "layered", "position": { "x": 520, "y": -80 }, "layeredLayoutOptions": { "windowWidthRatio": 0.8, "horizontalOffset": 32 } }, { "name": "3" }],
   "innerGap": 8,
   "outerGap": 8,
   "ignoredProcessNames": ["example.exe"],
@@ -53,10 +53,14 @@ Example (shortcuts are disabled in the generated defaults):
   workspace for each remaining view. An unviewed workspace retains its identity,
   window assignments, and split tree when a monitor is removed.
 - Each workspace can set `layout` to `split` or `layered`; omitted values default
-  to `split`. Layered pages overlap in a bounded cascade, with offsets reduced to
-  preserve window minimum sizes. Only a page whose own minimum size exceeds the
-  monitor work area overflows. A runtime `setWorkspaceLayout` change lasts until
-  the manager restarts; configure the workspace layout to select the restart default.
+  to `split`. Optional `layeredLayoutOptions` tune `windowWidthRatio` (default
+  `0.8`, greater than zero and at most `1`) and `horizontalOffset` (default `32`
+  DIPs, from `0` to `256`). Layered pages use the configured share of usable work
+  width, remain full-height, and overlap on one horizontal line. The DPI-scaled
+  horizontal offset is compressed when a larger stack would exceed the available
+  width; a zero offset completely overlays pages. Only a page whose own minimum
+  size exceeds the work area overflows. Runtime layout/option changes last until
+  the manager restarts; configure these values to select restart defaults.
 - Each workspace can seed an optional logical `position` with finite `x` and `y`
   coordinates in `[-100000,100000]`. If omitted, the manager assigns stable
   defaults in workspace creation order, four columns at 480 desk units by 360
@@ -135,12 +139,15 @@ Per-window startup widths and saving/restoring split proportions across host
 restarts are not currently configuration options; a fresh host starts with equal
 shares unless changed through runtime commands or resizing.
 
-Layered workspaces place every fitting tiled window in a large overlapping page
-stack. The cascade advances in small DPI-scaled offsets and stops at 48 DIPs; it
-shrinks when needed to preserve each page's minimum dimensions. A window over the
-work area's own width or height remains overflow; splits elsewhere in that stack
-do not force otherwise fitting pages to overflow. Focus cycling raises the selected
-page without changing workspace membership or tree order.
+Layered workspaces place every fitting tiled window in an overlapping horizontal
+page stack. `windowWidthRatio` sets each page's preferred width relative to the
+usable work width (subject to the largest fitting window minimum), while
+`horizontalOffset` sets the preferred start-to-start spacing in DIPs. When the
+whole stack cannot fit at that spacing, offsets compress evenly to the available
+horizontal spread; page width and full work-area height are preserved. A window
+over the work area's own width or height remains overflow; stack size alone does
+not overflow otherwise fitting pages. Focus cycling raises the selected page
+without changing workspace membership or tree order.
 
 Invalid work areas or gaps that cannot produce valid pixel rectangles return
 `layout_constraints`; windows that do not meet their minimum size remain in

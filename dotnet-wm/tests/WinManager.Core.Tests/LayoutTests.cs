@@ -465,7 +465,7 @@ public sealed class LayoutTests
     }
 
     [Fact]
-    public void LayeredLayoutKeepsEveryPageLargeAndCapsDpiScaledCascade()
+    public void LayeredLayoutUsesFullHeightPagesAndCompressesHorizontalSpacingForLargeStacks()
     {
         var windows = Enumerable.Range(1, 12).Select(index => Window(index)).ToArray();
         var monitor = Monitor(1200, 900, 192, -1400, 300) with
@@ -481,17 +481,60 @@ public sealed class LayoutTests
         var last = plan.Placements[^1].Bounds;
         Assert.Equal(monitor.WorkArea.X + 16, first.X);
         Assert.Equal(monitor.WorkArea.Y + 16, first.Y);
-        Assert.Equal(96, last.X - first.X);
-        Assert.Equal(96, last.Y - first.Y);
+        Assert.Equal(194, last.X - first.X);
+        Assert.Equal(first.Y, last.Y);
         Assert.All(plan.Placements, placement =>
         {
-            Assert.True(placement.Bounds.Width >= 1);
-            Assert.True(placement.Bounds.Height >= 1);
+            Assert.Equal(774, placement.Bounds.Width);
+            Assert.Equal(668, placement.Bounds.Height);
             Assert.InRange(placement.Bounds.X, monitor.WorkArea.X,
                 monitor.WorkArea.X + monitor.WorkArea.Width - placement.Bounds.Width);
+            Assert.Equal(first.Y, placement.Bounds.Y);
             Assert.InRange(placement.Bounds.Y, monitor.WorkArea.Y,
                 monitor.WorkArea.Y + monitor.WorkArea.Height - placement.Bounds.Height);
         });
+    }
+
+    [Fact]
+    public void LayeredLayoutUsesConfiguredWindowWidthAndDpiScaledHorizontalOffset()
+    {
+        var windows = Enumerable.Range(1, 3).Select(index => Window(index)).ToArray();
+        var monitor = Monitor(1200, 900, 144, -100, 10) with
+        {
+            WorkArea = new(-90, 20, 1000, 700)
+        };
+
+        var plan = LayeredLayout.Layout(monitor, windows, 8, new LayeredLayoutOptions(0.6, 50));
+
+        Assert.Empty(plan.OverflowWindowIds!);
+        Assert.All(plan.Placements, placement =>
+        {
+            Assert.Equal(586, placement.Bounds.Width);
+            Assert.Equal(676, placement.Bounds.Height);
+            Assert.Equal(32, placement.Bounds.Y);
+        });
+        Assert.Equal(75, plan.Placements[1].Bounds.X - plan.Placements[0].Bounds.X);
+        Assert.Equal(75, plan.Placements[2].Bounds.X - plan.Placements[1].Bounds.X);
+    }
+
+    [Fact]
+    public void LayeredLayoutAllowsZeroOffsetToOverlayAllPages()
+    {
+        var windows = Enumerable.Range(1, 4).Select(index => Window(index)).ToArray();
+
+        var plan = LayeredLayout.Layout(Monitor(), windows, 8, new LayeredLayoutOptions(0.8, 0));
+
+        Assert.Equal(4, plan.Placements.Count);
+        Assert.All(plan.Placements, placement => Assert.Equal(plan.Placements[0].Bounds, placement.Bounds));
+    }
+
+    [Fact]
+    public void LayeredLayoutRejectsInvalidOptions()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => LayeredLayout.Layout(Monitor(), [], 8,
+            new LayeredLayoutOptions(double.NaN, 32)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => LayeredLayout.Layout(Monitor(), [], 8,
+            new LayeredLayoutOptions(0.8, 257)));
     }
 
     [Fact]
@@ -506,7 +549,7 @@ public sealed class LayoutTests
     }
 
     [Fact]
-    public void LayeredLayoutReducesMarginsAndSpreadToRespectFittingMinimums()
+    public void LayeredLayoutReducesMarginsAndHorizontalSpreadToRespectFittingMinimums()
     {
         var monitor = Monitor(400, 300, 144, -1000, 0) with { WorkArea = new(-1000, 20, 400, 300) };
         var windows = new[] { Window(1, 350, 270), Window(2, 300, 250) };
@@ -522,7 +565,8 @@ public sealed class LayoutTests
             Assert.True(placement.Bounds.Height >= window.MinimumHeight);
         });
         Assert.Equal(-985, plan.Placements[0].Bounds.X);
+        Assert.Equal(20, plan.Placements[1].Bounds.X - plan.Placements[0].Bounds.X);
         Assert.Equal(35, plan.Placements[0].Bounds.Y);
-        Assert.Equal(plan.Placements[0].Bounds, plan.Placements[1].Bounds);
+        Assert.Equal(plan.Placements[0].Bounds.Y, plan.Placements[1].Bounds.Y);
     }
 }
