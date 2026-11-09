@@ -917,6 +917,26 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         {
             if (minimizedWindows.TryGetValue(minimization.WindowId, out var original))
                 RestoreOne(minimization.WindowId, original, failures);
+            else if (PInvoke.IsIconic(window))
+            {
+                token.ThrowIfCancellationRequested();
+                if (!PInvoke.ShowWindowAsync(window, SHOW_WINDOW_CMD.SW_RESTORE))
+                {
+                    failures.Add(ActionError(minimization.WindowId, "ShowWindowAsync"));
+                    return;
+                }
+
+                for (var attempt = 0; attempt < 50 && PInvoke.IsIconic(window); attempt++)
+                    Thread.Sleep(10);
+                if (PInvoke.IsIconic(window))
+                {
+                    failures.Add(new(minimization.WindowId, "restore_denied", "Window did not become restored."));
+                    return;
+                }
+
+                Notify();
+            }
+
             return;
         }
 

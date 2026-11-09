@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Input;
 using Avalonia.Media;
 using WinManager.Contracts;
 using WinManager.SpatialSwitcher;
@@ -23,6 +24,24 @@ public sealed class SpatialSwitcherTests
         var label = CurrentWorkspaceWindow.Label("Window", 12, Brushes.White, FontWeight.SemiBold);
 
         Assert.Equal(FontWeight.SemiBold, label.FontWeight);
+    }
+
+    [Fact]
+    public void AcceptKeyPolicyAcceptsEnterAndUnmodifiedSpace()
+    {
+        Assert.True(SwitcherAcceptKeyPolicy.IsAcceptKey(Key.Enter, KeyModifiers.None));
+        Assert.True(SwitcherAcceptKeyPolicy.IsAcceptKey(Key.Space, KeyModifiers.None));
+    }
+
+    [Theory]
+    [InlineData(KeyModifiers.Shift)]
+    [InlineData(KeyModifiers.Control)]
+    [InlineData(KeyModifiers.Alt)]
+    [InlineData(KeyModifiers.Meta)]
+    public void AcceptKeyPolicyDoesNotAcceptModifiedOrSearchFieldSpace(KeyModifiers modifiers)
+    {
+        Assert.False(SwitcherAcceptKeyPolicy.IsAcceptKey(Key.Space, modifiers));
+        Assert.False(SwitcherAcceptKeyPolicy.IsAcceptKey(Key.Space, KeyModifiers.None, textInputFocused: true));
     }
 
     [Fact]
@@ -179,7 +198,9 @@ public sealed class SpatialSwitcherTests
             Window("Ignored", ignored: true)
         };
         var code = Workspace("Code", new(0, 0)) with
-            { WindowIds = [windows[0].Id, windows[1].Id, windows[2].Id, windows[4].Id] };
+        {
+            WindowIds = [windows[0].Id, windows[1].Id, windows[2].Id, windows[4].Id]
+        };
         var chat = Workspace("Chat", new(200, 0)) with { WindowIds = [windows[3].Id] };
         var candidates = SpatialSwitcherPresentation.WindowsForWorkspace(code, windows);
 
@@ -219,9 +240,13 @@ public sealed class SpatialSwitcherTests
         var right = Guid.NewGuid();
         var editor = Window("Editor") with { MonitorId = left };
         var code = Workspace("Code", new(0, 0)) with
-            { MonitorId = left, Active = true, WindowIds = [editor.Id] };
+        {
+            MonitorId = left, Active = true, WindowIds = [editor.Id]
+        };
         var empty = Workspace("Empty", new(200, 0)) with
-            { MonitorId = right, Active = true };
+        {
+            MonitorId = right, Active = true
+        };
         var snapshot = new ManagerSnapshot(Guid.NewGuid(), 1,
             new DesktopSnapshot([Monitor(left), Monitor(right)], [editor], editor.Id),
             new Dictionary<Guid, SplitNodeInfo?>(), false, [code, empty], null,
@@ -233,6 +258,96 @@ public sealed class SpatialSwitcherTests
     }
 
     [Fact]
+    public void CurrentWorkspaceContextStaysOnCapturedMonitorAcrossFocusUpdates()
+    {
+        var left = Guid.NewGuid();
+        var right = Guid.NewGuid();
+        var leftWindow = Window("Left window") with { MonitorId = left };
+        var rightWindow = Window("Right window") with { MonitorId = right };
+        var leftWorkspace = Workspace("Left workspace", new(0, 0)) with
+        {
+            MonitorId = left, Active = true, WindowIds = [leftWindow.Id]
+        };
+        var rightWorkspace = Workspace("Right workspace", new(200, 0)) with
+        {
+            MonitorId = right, Active = true, WindowIds = [rightWindow.Id]
+        };
+        var snapshot = new ManagerSnapshot(Guid.NewGuid(), 1,
+            new DesktopSnapshot([Monitor(left), Monitor(right)], [leftWindow, rightWindow], leftWindow.Id),
+            new Dictionary<Guid, SplitNodeInfo?>(), false, [leftWorkspace, rightWorkspace], null,
+            [new(left, leftWorkspace.Id), new(right, rightWorkspace.Id)]);
+        var capturedContext = SpatialSwitcherPresentation.CaptureContext(snapshot, right);
+
+        Assert.Equal(new SwitcherContext(rightWorkspace.Id, rightWindow.Id, right), capturedContext);
+
+        snapshot = snapshot with { Desktop = snapshot.Desktop with { FocusedWindowId = null } };
+        var refreshedContext = SpatialSwitcherPresentation.CaptureContext(snapshot, capturedContext.MonitorId);
+
+        Assert.Equal(new SwitcherContext(rightWorkspace.Id, rightWindow.Id, right), refreshedContext);
+        Assert.Equal([rightWindow.Id], SpatialSwitcherPresentation.WindowsForWorkspace(
+            snapshot.Workspaces!.Single(workspace => workspace.Id == refreshedContext.WorkspaceId),
+            snapshot.Desktop.Windows).Select(window => window.Id));
+    }
+
+    [Fact]
+    public void CurrentWorkspaceContextKeepsEmptyCapturedMonitorViewAfterFocusMovesElsewhere()
+    {
+        var left = Guid.NewGuid();
+        var right = Guid.NewGuid();
+        var leftWindow = Window("Left window") with { MonitorId = left };
+        var leftWorkspace = Workspace("Left workspace", new(0, 0)) with
+        {
+            MonitorId = left, Active = true, WindowIds = [leftWindow.Id]
+        };
+        var emptyWorkspace = Workspace("Empty workspace", new(200, 0)) with
+        {
+            MonitorId = right, Active = true
+        };
+        var snapshot = new ManagerSnapshot(Guid.NewGuid(), 1,
+            new DesktopSnapshot([Monitor(left), Monitor(right)], [leftWindow], leftWindow.Id),
+            new Dictionary<Guid, SplitNodeInfo?>(), false, [leftWorkspace, emptyWorkspace], null,
+            [new(left, leftWorkspace.Id), new(right, emptyWorkspace.Id)]);
+        var capturedContext = SpatialSwitcherPresentation.CaptureContext(snapshot, right);
+
+        Assert.Equal(new SwitcherContext(emptyWorkspace.Id, null, right), capturedContext);
+
+        snapshot = snapshot with { Desktop = snapshot.Desktop with { FocusedWindowId = null } };
+        var refreshedContext = SpatialSwitcherPresentation.CaptureContext(snapshot, capturedContext.MonitorId);
+
+        Assert.Equal(new SwitcherContext(emptyWorkspace.Id, null, right), refreshedContext);
+    }
+
+    [Fact]
+    public void SwitcherSnapshotUpdatesStayBoundToThePopupMonitor()
+    {
+        var left = Guid.NewGuid();
+        var right = Guid.NewGuid();
+        var leftWindow = Window("Left window") with { MonitorId = left };
+        var rightWindow = Window("Right window") with { MonitorId = right };
+        var leftWorkspace = Workspace("Left workspace", new(0, 0)) with
+        {
+            MonitorId = left, Active = true, WindowIds = [leftWindow.Id]
+        };
+        var rightWorkspace = Workspace("Right workspace", new(200, 0)) with
+        {
+            MonitorId = right, Active = true, WindowIds = [rightWindow.Id]
+        };
+        var snapshot = new ManagerSnapshot(Guid.NewGuid(), 1,
+            new DesktopSnapshot([Monitor(left), Monitor(right)], [leftWindow, rightWindow], leftWindow.Id),
+            new Dictionary<Guid, SplitNodeInfo?>(), false, [leftWorkspace, rightWorkspace], null,
+            [new(left, leftWorkspace.Id), new(right, rightWorkspace.Id)]);
+        var state = new SwitcherPopupContextState();
+
+        state.Apply(SpatialSwitcherPresentation.CaptureContext(snapshot, right), null);
+        var refreshedContext = state.Refresh(
+            snapshot with { Desktop = snapshot.Desktop with { FocusedWindowId = null } }, left);
+
+        Assert.Equal(new SwitcherContext(rightWorkspace.Id, rightWindow.Id, right), refreshedContext);
+        Assert.Equal(rightWorkspace.Id, state.WorkspaceId);
+        Assert.Equal(right, state.MonitorId);
+    }
+
+    [Fact]
     public void WindowGroupsSeparateVisibleWindowsFromMinimizedAndOverflowWindows()
     {
         var active = Window("Active");
@@ -240,7 +355,9 @@ public sealed class SpatialSwitcherTests
         var overflow = Window("Overflow", visible: false, minimized: true, overflow: true);
         var ignored = Window("Ignored", ignored: true);
         var workspace = Workspace("Code", new(0, 0)) with
-            { WindowIds = [active.Id, minimized.Id, overflow.Id, ignored.Id] };
+        {
+            WindowIds = [active.Id, minimized.Id, overflow.Id, ignored.Id]
+        };
 
         var groups = SpatialSwitcherPresentation.WindowGroupsForWorkspace(workspace,
             [active, minimized, overflow, ignored]);
@@ -270,7 +387,9 @@ public sealed class SpatialSwitcherTests
     {
         var primary = Monitor(Guid.NewGuid());
         var secondary = Monitor(Guid.NewGuid()) with
-            { DeviceName = "DISPLAY-Z", Bounds = new(1920, 0, 1920, 1080) };
+        {
+            DeviceName = "DISPLAY-Z", Bounds = new(1920, 0, 1920, 1080)
+        };
 
         Assert.Equal(secondary.Id, PopupPlacement.FromSnapshot([primary, secondary], secondary.Id)?.MonitorId);
         Assert.Equal(primary.Id, PopupPlacement.FromSnapshot([secondary, primary])?.MonitorId);

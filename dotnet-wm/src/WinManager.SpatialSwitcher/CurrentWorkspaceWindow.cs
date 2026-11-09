@@ -17,6 +17,7 @@ internal sealed class CurrentWorkspaceWindow : Window
     private static readonly IBrush AccentBrush = Brush("#98B69F");
     private static readonly IBrush TextBrush = Brush("#F2F1EC");
     private static readonly IBrush MutedBrush = Brush("#9BA5A8");
+
     private static readonly IBrush[] ShapeBrushes =
     [
         Brush("#A9C6B0"), Brush("#D0B99A"), Brush("#AABDD1"), Brush("#C2AFCB")
@@ -51,7 +52,8 @@ internal sealed class CurrentWorkspaceWindow : Window
         ShowInTaskbar = false;
         WindowDecorations = Avalonia.Controls.WindowDecorations.None;
         WindowStartupLocation = WindowStartupLocation.Manual;
-        Background = CanvasBrush;
+        TransparencyLevelHint = [WindowTransparencyLevel.Transparent];
+        Background = Brushes.Transparent;
         Content = BuildContent();
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
         Deactivated += (_, _) =>
@@ -238,13 +240,16 @@ internal sealed class CurrentWorkspaceWindow : Window
             workspaceTitle.Text = "Waiting for workspace state";
             activeHeading.Text = "ACTIVE WINDOWS";
             inactiveHeading.Text = "INACTIVE WINDOWS";
-            status.Text = snapshot is null ? "Waiting for a manager snapshot…" : "No workspace is assigned to this monitor.";
+            status.Text = snapshot is null
+                ? "Waiting for a manager snapshot…"
+                : "No workspace is assigned to this monitor.";
             focusButton.IsEnabled = false;
             return;
         }
 
         var targetMonitor = snapshot?.Desktop.Monitors.FirstOrDefault(candidate => candidate.Id == monitorId);
-        workspaceTitle.Text = targetMonitor is null ? workspace.Name : $"{workspace.Name}  ·  {targetMonitor.DeviceName}";
+        workspaceTitle.Text =
+            targetMonitor is null ? workspace.Name : $"{workspace.Name}  ·  {targetMonitor.DeviceName}";
         activeHeading.Text = $"ACTIVE WINDOWS  ·  {groups.Active.Count}";
         inactiveHeading.Text = $"INACTIVE WINDOWS  ·  {groups.Inactive.Count}";
         foreach (var window in groups.Active) activeCards.Children.Add(CreateActiveCard(window));
@@ -258,7 +263,7 @@ internal sealed class CurrentWorkspaceWindow : Window
         status.Text = selected is null
             ? connected ? "No switchable windows" : "Manager disconnected · focus unavailable"
             : connected
-                ? $"{selected.Title}  ·  {ModeLabel(selected)}  ·  Alt+Tab to cycle · Enter to focus · Esc to close"
+                ? $"{selected.Title}  ·  {ModeLabel(selected)}  ·  Alt+Tab to cycle · Enter / Space to focus · Esc to close"
                 : "Manager disconnected · focus unavailable";
         focusButton.IsEnabled = connected && !commandBusy && selected is not null;
     }
@@ -313,10 +318,12 @@ internal sealed class CurrentWorkspaceWindow : Window
         var areaHeight = Math.Max(1, area?.Height ?? window.Bounds.Height);
         var shapeWidth = Math.Clamp(window.Bounds.Width / (double)areaWidth * width, 28, width - 8);
         var shapeHeight = Math.Clamp(window.Bounds.Height / (double)areaHeight * height, 22, height - 8);
-        var left = area is null ? (width - shapeWidth) / 2 :
-            Math.Clamp((window.Bounds.X - area.X) / (double)areaWidth * width, 3, width - shapeWidth - 3);
-        var top = area is null ? (height - shapeHeight) / 2 :
-            Math.Clamp((window.Bounds.Y - area.Y) / (double)areaHeight * height, 3, height - shapeHeight - 3);
+        var left = area is null
+            ? (width - shapeWidth) / 2
+            : Math.Clamp((window.Bounds.X - area.X) / (double)areaWidth * width, 3, width - shapeWidth - 3);
+        var top = area is null
+            ? (height - shapeHeight) / 2
+            : Math.Clamp((window.Bounds.Y - area.Y) / (double)areaHeight * height, 3, height - shapeHeight - 3);
         var fill = ShapeBrushes[(int)(Math.Abs((long)window.Id.GetHashCode()) % ShapeBrushes.Length)];
         var shape = new Border
         {
@@ -369,7 +376,7 @@ internal sealed class CurrentWorkspaceWindow : Window
             args.Handled = true;
             Hide();
         }
-        else if (args.Key == Key.Enter)
+        else if (SwitcherAcceptKeyPolicy.IsAcceptKey(args.Key, args.KeyModifiers))
         {
             args.Handled = true;
             _ = FocusSelectedWindowAsync();
@@ -421,10 +428,12 @@ internal sealed class CurrentWorkspaceWindow : Window
     private IReadOnlyList<WindowInfo> Candidates() => groups.Active.Concat(groups.Inactive).ToArray();
 
     private static string ModeLabel(WindowInfo window) => window.LayoutOverflow
-        ? "Overflow · Enter to restore"
-        : window.Minimized ? "Minimized"
-        : !window.Visible ? "Not visible"
-        : window.Mode.ToString();
+        ? "Overflow · Enter / Space to restore"
+        : window.Minimized
+            ? "Minimized"
+            : !window.Visible
+                ? "Not visible"
+                : window.Mode.ToString();
 
     internal static TextBlock Label(string text, double size, IBrush foreground,
         FontWeight? weight = null) => new()

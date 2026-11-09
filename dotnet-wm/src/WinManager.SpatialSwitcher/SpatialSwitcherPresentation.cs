@@ -4,8 +4,32 @@ using WinManager.Contracts;
 namespace WinManager.SpatialSwitcher;
 
 public readonly record struct SwitcherContext(Guid? WorkspaceId, Guid? WindowId, Guid? MonitorId);
-public readonly record struct WorkspaceWindowGroups(IReadOnlyList<WindowInfo> Active,
+
+public readonly record struct WorkspaceWindowGroups(
+    IReadOnlyList<WindowInfo> Active,
     IReadOnlyList<WindowInfo> Inactive);
+
+internal sealed class SwitcherPopupContextState
+{
+    public Guid? WorkspaceId { get; private set; }
+    public Guid? MonitorId { get; private set; }
+
+    public void Apply(SwitcherContext context, Guid? fallbackMonitorId)
+    {
+        WorkspaceId = context.WorkspaceId;
+        MonitorId = context.MonitorId ?? fallbackMonitorId;
+    }
+
+    public SwitcherContext Refresh(ManagerSnapshot snapshot, Guid? fallbackMonitorId)
+    {
+        var context = SpatialSwitcherPresentation.CaptureContext(snapshot, MonitorId ?? fallbackMonitorId);
+        WorkspaceId = context.WorkspaceId;
+        MonitorId = context.MonitorId;
+        return context;
+    }
+
+    public void SelectMonitor(Guid? monitorId) => MonitorId = monitorId;
+}
 
 public static class SpatialSwitcherPresentation
 {
@@ -79,7 +103,8 @@ public static class SpatialSwitcherPresentation
             var view = snapshot.WorkspaceViews?.FirstOrDefault(candidate => candidate.MonitorId == targetMonitor);
             if (view is not null && workspaces.Any(workspace => workspace.Id == view.WorkspaceId))
                 return view.WorkspaceId;
-            var active = workspaces.FirstOrDefault(workspace => workspace.Active && workspace.MonitorId == targetMonitor);
+            var active =
+                workspaces.FirstOrDefault(workspace => workspace.Active && workspace.MonitorId == targetMonitor);
             if (active is not null) return active.Id;
             var focusedOnMonitor = snapshot.Desktop.Windows.FirstOrDefault(window =>
                 window.Id == snapshot.Desktop.FocusedWindowId && window.MonitorId == targetMonitor);
@@ -90,8 +115,10 @@ public static class SpatialSwitcherPresentation
 
         var focused = snapshot.Desktop.Windows.FirstOrDefault(window =>
             window.Id == snapshot.Desktop.FocusedWindowId);
-        return (focused is null ? null : workspaces.FirstOrDefault(workspace =>
-                   workspace.WindowIds.Contains(focused.Id))?.Id) ??
+        return (focused is null
+                   ? null
+                   : workspaces.FirstOrDefault(workspace =>
+                       workspace.WindowIds.Contains(focused.Id))?.Id) ??
                workspaces.FirstOrDefault(workspace => workspace.Active)?.Id ?? workspaces.FirstOrDefault()?.Id;
     }
 
@@ -110,13 +137,16 @@ public static class SpatialSwitcherPresentation
             ? focused
             : windows.FirstOrDefault();
         var monitors = snapshot.Desktop.Monitors;
-        var monitorId = requestedMonitorId ?? (selectedWindow is not null && monitors.Any(monitor => monitor.Id == selectedWindow.MonitorId)
-            ? selectedWindow.MonitorId
-            : workspace is { Active: true } && monitors.Any(monitor => monitor.Id == workspace.MonitorId)
-                ? workspace.MonitorId
-                : monitors.OrderBy(monitor => monitor.Bounds.X == 0 && monitor.Bounds.Y == 0 ? 0 : 1)
-                    .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(monitor => monitor.Id).Select(monitor => (Guid?)monitor.Id).FirstOrDefault());
+        var monitorId = requestedMonitorId ??
+                        (selectedWindow is not null && monitors.Any(monitor => monitor.Id == selectedWindow.MonitorId)
+                            ? selectedWindow.MonitorId
+                            : workspace is { Active: true } &&
+                              monitors.Any(monitor => monitor.Id == workspace.MonitorId)
+                                ? workspace.MonitorId
+                                : monitors.OrderBy(monitor => monitor.Bounds.X == 0 && monitor.Bounds.Y == 0 ? 0 : 1)
+                                    .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase)
+                                    .ThenBy(monitor => monitor.Id).Select(monitor => (Guid?)monitor.Id)
+                                    .FirstOrDefault());
         return new SwitcherContext(workspaceId, selectedWindow?.Id, monitorId);
     }
 

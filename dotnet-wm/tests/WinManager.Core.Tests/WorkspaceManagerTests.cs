@@ -283,6 +283,8 @@ public sealed class WorkspaceManagerTests
             var before = engine.Current!;
             Assert.True(before.Desktop.Windows.Single(window => window.Id == second.Id).LayoutOverflow);
             Assert.True(before.Desktop.Windows.Single(window => window.Id == second.Id).Minimized);
+            fake.Desktop = fake.Desktop with { FocusedWindowId = null };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
 
             var restore = await engine.ExecuteAsync(new(CommandKind.Focus, second.Id), timeout.Token);
 
@@ -299,6 +301,171 @@ public sealed class WorkspaceManagerTests
             Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
             Assert.All(engine.Current!.Desktop.Windows,
                 window => Assert.False(window.Minimized || window.LayoutOverflow));
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Theory]
+    [InlineData(WorkspaceLayout.Split)]
+    [InlineData(WorkspaceLayout.Layered)]
+    public async Task FocusingManuallyMinimizedWindowAddsItWhenCurrentLayoutHasRoom(WorkspaceLayout layout)
+    {
+        await using var fake = new FakeWindowPlatform();
+        var monitor = new MonitorInfo(Guid.NewGuid(), "Primary", new(0, 0, 1000, 800), new(0, 0, 1000, 800), 96);
+        var windows = fake.Desktop.Windows.OrderBy(window => window.Id).ToArray();
+        var focused = windows[0] with { MonitorId = monitor.Id, MinimumWidth = 100, MinimumHeight = 100 };
+        var minimized = windows[1] with
+        {
+            MonitorId = monitor.Id, Minimized = true, MinimumWidth = 100, MinimumHeight = 100
+        };
+        fake.Desktop = new([monitor], [focused, minimized], focused.Id);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var workspace = Assert.Single(engine.Current!.Workspaces!);
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
+                WorkspaceId: workspace.Id, Layout: layout), timeout.Token)).Success);
+            fake.Desktop = fake.Desktop with { FocusedWindowId = null };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+
+            var result = await engine.ExecuteAsync(new(CommandKind.Focus, minimized.Id), timeout.Token);
+
+            Assert.True(result.Success);
+            var current = engine.Current!;
+            Assert.Equal(minimized.Id, current.Desktop.FocusedWindowId);
+            Assert.All(current.Desktop.Windows, window => Assert.False(window.Minimized || window.LayoutOverflow));
+            Assert.Equal(2, current.Workspaces!.Single().WindowIds.Count);
+            Assert.Contains(fake.Plans[^1].Minimizations!, action => action.WindowId == minimized.Id && !action.Minimized);
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            Assert.All(engine.Current!.Desktop.Windows, window => Assert.False(window.Minimized || window.LayoutOverflow));
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task FocusingManuallyMinimizedWindowReplacesLastFocusedTileWhenLayoutIsFull()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var monitor = new MonitorInfo(Guid.NewGuid(), "Primary", new(0, 0, 1000, 800), new(0, 0, 1000, 800), 96);
+        var windows = fake.Desktop.Windows.OrderBy(window => window.Id).ToArray();
+        var focused = windows[0] with { MonitorId = monitor.Id, MinimumWidth = 600, MinimumHeight = 100 };
+        var minimized = windows[1] with
+        {
+            MonitorId = monitor.Id, Minimized = true, MinimumWidth = 600, MinimumHeight = 100
+        };
+        fake.Desktop = new([monitor], [focused, minimized], focused.Id);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var previousTile = engine.Current!.Desktop.Windows.Single(window => window.Id == focused.Id);
+            fake.Desktop = fake.Desktop with { FocusedWindowId = null };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+
+            var result = await engine.ExecuteAsync(new(CommandKind.Focus, minimized.Id), timeout.Token);
+
+            Assert.True(result.Success);
+            var current = engine.Current!;
+            Assert.Equal(minimized.Id, current.Desktop.FocusedWindowId);
+            var admitted = current.Desktop.Windows.Single(window => window.Id == minimized.Id);
+            var displaced = current.Desktop.Windows.Single(window => window.Id == focused.Id);
+            Assert.False(admitted.Minimized || admitted.LayoutOverflow);
+            Assert.True(displaced.Minimized && displaced.LayoutOverflow);
+            Assert.Equal(2, current.Workspaces!.Single().WindowIds.Count);
+            Assert.Contains(fake.Plans[^1].Minimizations!, action => action.WindowId == minimized.Id && !action.Minimized);
+            Assert.Contains(fake.Plans[^1].Minimizations!, action => action.WindowId == focused.Id && action.Minimized);
+            Assert.Equal(previousTile.Bounds, admitted.Bounds);
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            Assert.False(engine.Current!.Desktop.Windows.Single(window => window.Id == minimized.Id).LayoutOverflow);
+            Assert.True(engine.Current.Desktop.Windows.Single(window => window.Id == focused.Id).LayoutOverflow);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task FocusingOversizedManuallyMinimizedWindowLeavesPreviousTileActive()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var monitor = new MonitorInfo(Guid.NewGuid(), "Primary", new(0, 0, 1000, 800), new(0, 0, 1000, 800), 96);
+        var windows = fake.Desktop.Windows.OrderBy(window => window.Id).ToArray();
+        var focused = windows[0] with { MonitorId = monitor.Id, MinimumWidth = 100, MinimumHeight = 100 };
+        var oversized = windows[1] with
+        {
+            MonitorId = monitor.Id, Minimized = true, MinimumWidth = 1200, MinimumHeight = 100
+        };
+        fake.Desktop = new([monitor], [focused, oversized], focused.Id);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            fake.Desktop = fake.Desktop with { FocusedWindowId = null };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+
+            var result = await engine.ExecuteAsync(new(CommandKind.Focus, oversized.Id), timeout.Token);
+
+            Assert.False(result.Success);
+            Assert.Equal("layout_constraints", result.ErrorCode);
+            var current = engine.Current!;
+            Assert.NotEqual(oversized.Id, current.Desktop.FocusedWindowId);
+            Assert.True(current.Desktop.Windows.Single(window => window.Id == oversized.Id).Minimized);
+            Assert.False(current.Desktop.Windows.Single(window => window.Id == focused.Id).LayoutOverflow);
+            Assert.False(fake.Plans[^1].Minimizations?.Any(action => action.WindowId == oversized.Id) ?? false);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task FailedRestoreOfManuallyMinimizedWindowDoesNotClaimItWasActivated()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var monitor = new MonitorInfo(Guid.NewGuid(), "Primary", new(0, 0, 1000, 800), new(0, 0, 1000, 800), 96);
+        var windows = fake.Desktop.Windows.OrderBy(window => window.Id).ToArray();
+        var focused = windows[0] with { MonitorId = monitor.Id, MinimumWidth = 100, MinimumHeight = 100 };
+        var minimized = windows[1] with
+        {
+            MonitorId = monitor.Id, Minimized = true, MinimumWidth = 100, MinimumHeight = 100
+        };
+        fake.Desktop = new([monitor], [focused, minimized], focused.Id);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            fake.Desktop = fake.Desktop with { FocusedWindowId = null };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            fake.FailActions = true;
+
+            var result = await engine.ExecuteAsync(new(CommandKind.Focus, minimized.Id), timeout.Token);
+
+            Assert.False(result.Success);
+            Assert.Equal("access_denied", result.ErrorCode);
+            Assert.NotEqual(minimized.Id, engine.Current!.Desktop.FocusedWindowId);
+            Assert.True(engine.Current.Desktop.Windows.Single(window => window.Id == minimized.Id).Minimized);
+            Assert.Contains(fake.Plans[^1].Minimizations!, action => action.WindowId == minimized.Id && !action.Minimized);
         }
         finally
         {

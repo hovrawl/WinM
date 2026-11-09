@@ -36,21 +36,26 @@ window-management actions by the host, independent of configured ignore lists.
   window silhouettes use observed native bounds relative to each window's monitor
   work area; they do not capture screenshots or invent window contents.
 - Search dims nonmatching cards while preserving their map positions and selection.
-- Arrow keys select the nearest workspace in that desk direction. Enter activates
-  the selected workspace on the explicitly selected monitor; Escape dismisses the
-  switcher. Clicking a card changes selection but does not activate it.
+- Arrow keys select the nearest workspace in that desk direction. Enter or plain
+  Space activates the selected workspace on the explicitly selected monitor;
+  Space remains available for typing while the search field is focused. Escape
+  dismisses the switcher. Clicking a card changes selection but does not activate it.
 - A ready manager connection installs a process-wide Win32 low-level keyboard
   hook. `Alt+Tab` opens a separate current-workspace window switcher, showing
   visible windows as larger geometric previews and minimized/overflow windows in
-  an inactive row below; repeated presses cycle through both groups. Enter focuses
-  the selected window and Escape hides the popup. Floating windows are included;
-  focusing an overflow window uses the manager's restore/promotion behavior.
-- `Win+Tab` or `Win+Space` opens the spatial workspace switcher. The popup
-  windows are placed on the monitor that was foreground before the switcher is
-  shown, then resolve that monitor's workspace view (including an empty
-  workspace). If the native foreground monitor cannot be read, the client falls
-  back to the snapshot's focused/primary monitor. Window geometry previews use
-  observed bounds only.
+  an inactive row below; repeated presses cycle through both groups. Enter or
+  plain Space focuses the selected window and Escape hides the popup. Floating windows are included;
+  focusing a manually minimized tiled window adds it to the active layout when it
+  fits. If the layout is full, the manager replaces the last focused staged tile;
+  the displaced window remains managed as overflow. An individually oversized
+  window stays inactive and the manager reports that it cannot fit. Overflow
+  windows use the same restore/promotion behavior.
+- `Win+Tab` or `Win+Space` opens the spatial workspace switcher. Both popup types
+  are placed on the monitor that was foreground before they are shown and keep
+  their workspace context bound to that monitor across later manager snapshots,
+  even if popup focus changes or the monitor's view is empty. If the native
+  foreground monitor cannot be read, the client falls back to the snapshot's
+  focused/primary monitor. Window geometry previews use observed bounds only.
 - The hook is not installed in `--demo` mode and does not consume shortcuts until
   a live manager snapshot is available. If hook installation fails or the manager
   disconnects, the tray status reports shortcuts unavailable and the key chords

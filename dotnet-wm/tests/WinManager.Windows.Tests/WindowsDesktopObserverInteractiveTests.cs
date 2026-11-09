@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using WinManager.Contracts;
+using WinManager.Core;
 using Xunit;
 
 namespace WinManager.Windows.Tests;
@@ -115,6 +116,27 @@ public sealed class WindowsDesktopObserverInteractiveTests
         await fixture.CommandAsync("create");
         var created = await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".normal") is not null, timeout.Token);
         Assert.NotEqual(first.Id, Find(created, fixture.Prefix + ".normal")!.Id);
+    }
+
+    [IsolatedInteractiveFact]
+    [Trait("Category", "IsolatedInteractive")]
+    public async Task ExplicitRestoreRequestRestoresAnApplicationMinimizedWindow()
+    {
+        await using var fixture = await NativeWindowFixture.StartAsync();
+        await fixture.CommandAsync("minimize");
+        await using var observer = new WindowsDesktopObserver(ignoredClassNames: [fixture.IgnoredClass]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await observer.StartAsync(timeout.Token);
+        var minimized = await EventuallyAsync(observer,
+            snapshot => Find(snapshot, fixture.Prefix + ".normal")?.Minimized == true, timeout.Token);
+        var window = Find(minimized, fixture.Prefix + ".normal")!;
+
+        var result = await observer.ApplyAsync(new LayoutPlan([], Minimizations: [new(window.Id, false)]), timeout.Token);
+
+        Assert.Empty(result.Failures);
+        var restored = await EventuallyAsync(observer,
+            snapshot => Find(snapshot, fixture.Prefix + ".normal")?.Minimized == false, timeout.Token);
+        Assert.False(Find(restored, fixture.Prefix + ".normal")!.Minimized);
     }
 
     [IsolatedInteractiveFact]

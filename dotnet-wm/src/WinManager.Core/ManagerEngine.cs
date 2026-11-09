@@ -48,6 +48,7 @@ public sealed class ManagerEngine
     private readonly HashSet<Guid> overflowWindowIds = [];
     private readonly HashSet<Guid> managerMinimizedWindowIds = [];
     private readonly Dictionary<Guid, HashSet<Guid>> stagedWindowIds = [];
+    private readonly Dictionary<Guid, Guid> lastFocusedWindowByWorkspace = [];
     private readonly Guid instanceId = Guid.NewGuid();
     private readonly int innerGap;
     private readonly int outerGap;
@@ -308,14 +309,53 @@ public sealed class ManagerEngine
         foreach (var staged in stagedWindowIds.Values) staged.IntersectWith(existing);
         resizingWindows.IntersectWith(movingWindows.Keys);
         workspaces.Reconcile(desktop);
+        foreach (var (workspaceId, windowId) in lastFocusedWindowByWorkspace.ToArray())
+            if (workspaces.WorkspaceFor(windowId) != workspaceId)
+                lastFocusedWindowByWorkspace.Remove(workspaceId);
+    }
+
+    private Guid? PreviouslyFocusedTile(WorkspaceInfo workspace, DesktopSnapshot desktop)
+    {
+        if (desktop.FocusedWindowId is { } focused && IsStagedTile(workspace, desktop, focused)) return focused;
+        return lastFocusedWindowByWorkspace.TryGetValue(workspace.Id, out var remembered) &&
+               IsStagedTile(workspace, desktop, remembered)
+            ? remembered
+            : null;
+    }
+
+    private bool IsStagedTile(WorkspaceInfo workspace, DesktopSnapshot desktop, Guid id) =>
+        workspace.WindowIds.Contains(id) && workspaces.WorkspaceFor(id) == workspace.Id &&
+        stagedWindowIds.TryGetValue(workspace.Id, out var staged) && staged.Contains(id) &&
+        workspaces.Trees[workspace.Id].NodeForWindow(id) is not null &&
+        desktop.Windows.FirstOrDefault(window => window.Id == id) is
+            { Visible: true, Minimized: false, LayoutOverflow: false, IsIgnored: false, Mode: WindowMode.Tiling };
+
+    private void RememberFocusedStagedWindow(DesktopSnapshot desktop)
+    {
+        if (desktop.FocusedWindowId is not { } focused) return;
+        var workspace = workspaces.Snapshot.FirstOrDefault(candidate =>
+            candidate.Active && candidate.WindowIds.Contains(focused));
+        if (workspace is not null && IsStagedTile(workspace, desktop, focused))
+            lastFocusedWindowByWorkspace[workspace.Id] = focused;
     }
 
     private async Task<IReadOnlyList<NativeActionFailure>> ReconcileAsync(CancellationToken cancellationToken,
         Guid? focus = null,
         Guid? droppedWindowId = null, Guid? restoreOverflowWindowId = null,
+        Guid? restoreFocusedWindowId = null,
         (Guid WindowId, WindowMode Mode)? modeChange = null)
     {
         var desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
+        var restoreFocusedWindowWasMinimized = restoreFocusedWindowId is { } restoreId &&
+            desktop.Windows.Any(window => window.Id == restoreId && window.Minimized);
+        if (restoreFocusedWindowWasMinimized)
+            desktop = desktop with
+            {
+                Windows = desktop.Windows.Select(window => window.Id == restoreFocusedWindowId
+                    ? window with { Visible = true, Minimized = false }
+                    : window).ToArray()
+            };
+
         foreach (var window in desktop.Windows.Where(window =>
                      window.Visible && !window.Minimized && !window.ManagerHidden &&
                      window.Bounds.Width > 0 && window.Bounds.Height > 0))
@@ -346,6 +386,7 @@ public sealed class ManagerEngine
 
         List<NativeActionFailure> failures = [];
         List<WindowPlacement> placements = [];
+        var restoreTargetStaged = false;
         if (!paused)
         {
             var activeWorkspaces = workspaces.Snapshot.Where(workspace => workspace.Active).ToArray();
@@ -362,20 +403,33 @@ public sealed class ManagerEngine
                 try
                 {
                     var priority = new List<Guid>();
-                    if (restoreOverflowWindowId is { } restoring && workspace.WindowIds.Contains(restoring))
+                    var restoreTarget = restoreOverflowWindowId ?? restoreFocusedWindowId;
+                    if (restoreTarget is { } restoring && workspace.WindowIds.Contains(restoring))
                         priority.Add(restoring);
+                    var displacedFocus = restoreTarget is not null
+                        ? PreviouslyFocusedTile(workspace, desktop)
+                        : null;
                     if (stagedWindowIds.TryGetValue(workspace.Id, out var staged))
                     {
-                        var displacedFocus = restoreOverflowWindowId is not null &&
-                                             desktop.FocusedWindowId is { } focused &&
-                                             workspace.WindowIds.Contains(focused)
-                            ? focused
-                            : (Guid?)null;
-                        priority.AddRange(staged.Where(id => id != displacedFocus));
+                        priority.AddRange(staged.Where(id => id != displacedFocus && id != restoreTarget));
                         if (displacedFocus is { } displaced) priority.Add(displaced);
                     }
 
                     var plan = Layout(workspace, monitor, windowsById, priority);
+                    if (restoreTarget is { } target && workspace.WindowIds.Contains(target) &&
+                        plan.Placements.Any(placement => placement.WindowId == target))
+                    {
+                        restoreTargetStaged = true;
+                        if (displacedFocus is { } previous &&
+                            !plan.Placements.Any(placement => placement.WindowId == previous) &&
+                            workspaces.Trees[workspace.Id].NodeForWindow(target) is not null &&
+                            workspaces.Trees[workspace.Id].NodeForWindow(previous) is not null)
+                        {
+                            workspaces.Trees[workspace.Id].Swap(target, previous);
+                            plan = Layout(workspace, monitor, windowsById, priority);
+                        }
+                    }
+
                     placements.AddRange(plan.Placements);
                     nextOverflow.ExceptWith(workspace.WindowIds);
                     nextOverflow.UnionWith(plan.OverflowWindowIds ?? []);
@@ -417,6 +471,17 @@ public sealed class ManagerEngine
             overflowWindowIds.UnionWith(nextOverflow);
         }
 
+        if ((restoreOverflowWindowId ?? restoreFocusedWindowId) is { } requestedRestore &&
+            !restoreTargetStaged && focus == requestedRestore)
+        {
+            focus = null;
+            failures.Add(new(requestedRestore, "layout_constraints",
+                "Window does not fit the active workspace layout."));
+        }
+
+        if (restoreFocusedWindowId is not null && !restoreTargetStaged)
+            desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
+
         desktop = ApplyModes(desktop);
         var changes = placements.Where(placement => desktop.Windows.Any(window =>
                                                         window.Id == placement.WindowId &&
@@ -426,6 +491,7 @@ public sealed class ManagerEngine
             .ToArray();
         var minimizations = desktop.Windows.Where(window =>
         {
+            if (window.Id == restoreFocusedWindowId) return restoreTargetStaged && restoreFocusedWindowWasMinimized;
             if (overflowWindowIds.Contains(window.Id)) return !window.Minimized;
             return managerMinimizedWindowIds.Contains(window.Id) && window.Minimized;
         }).Select(window => new WindowMinimization(window.Id, overflowWindowIds.Contains(window.Id))).ToArray();
@@ -450,6 +516,7 @@ public sealed class ManagerEngine
         }
 
         Commit(desktop);
+        RememberFocusedStagedWindow(desktop);
         var diagnostics = failures.ToArray();
         if (!reportedFailures.SequenceEqual(diagnostics))
         {
@@ -830,24 +897,22 @@ public sealed class ManagerEngine
                         : window.Id;
                     if (target is null) return Error("not_found", "No directional focus target.");
                     Guid? restoreOverflow = null;
-                    if (window.Id == target.Value && window.LayoutOverflow)
+                    Guid? restoreManuallyMinimized = null;
+                    if (window.Id == target.Value && window.Mode == WindowMode.Tiling &&
+                        (window.LayoutOverflow || window.Minimized))
                     {
                         if (paused)
-                            return Error("not_ready", "Resume the manager before restoring an overflow window.");
+                            return Error("not_ready", "Resume the manager before restoring an inactive tiled window.");
                         if (!workspaces.Snapshot.Any(workspace => workspace.Id == assigned && workspace.Active))
                             return Error("not_ready",
-                                "Activate the workspace view before restoring an overflow window.");
-                        restoreOverflow = window.Id;
-                        if (desktop.FocusedWindowId is { } focused && focused != window.Id &&
-                            workspaces.WorkspaceFor(focused) == assigned &&
-                            desktop.Windows.FirstOrDefault(candidate => candidate.Id == focused) is
-                                { Minimized: false, LayoutOverflow: false, Mode: WindowMode.Tiling } &&
-                            tree.NodeForWindow(focused) is not null)
-                            tree.Swap(window.Id, focused);
+                                "Activate the workspace view before restoring an inactive tiled window.");
+                        if (window.LayoutOverflow) restoreOverflow = window.Id;
+                        else restoreManuallyMinimized = window.Id;
                     }
 
                     var failures = await ReconcileAsync(cancellationToken, target,
-                        restoreOverflowWindowId: restoreOverflow);
+                        restoreOverflowWindowId: restoreOverflow,
+                        restoreFocusedWindowId: restoreManuallyMinimized);
                     return Result(failures);
                 }
                 case CommandKind.Move:

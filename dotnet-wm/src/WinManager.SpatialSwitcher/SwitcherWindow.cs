@@ -43,9 +43,8 @@ internal sealed class SwitcherWindow : Window
     private ManagerSession? session;
     private ManagerSnapshot? snapshot;
     private Guid? selectedWorkspaceId;
-    private Guid? capturedWorkspaceId;
     private Guid? selectedWindowId;
-    private Guid? selectedMonitorId;
+    private readonly SwitcherPopupContextState popupContext = new();
     private bool windowSelectionMode;
     private bool keyboardHookAttempted;
     private bool connected;
@@ -101,6 +100,7 @@ internal sealed class SwitcherWindow : Window
             shortcutStatus.Text = "Waiting for a manager snapshot before enabling shortcuts";
             _ = ConnectAsync();
         }
+
         UpdateActions();
     }
 
@@ -144,12 +144,11 @@ internal sealed class SwitcherWindow : Window
 
     private void ApplyPopupContext(SwitcherContext context)
     {
-        capturedWorkspaceId = context.WorkspaceId;
+        popupContext.Apply(context, PopupPlacement.FromSnapshot(snapshot?.Desktop.Monitors ?? [])?.MonitorId);
         selectedWorkspaceId = context.WorkspaceId ?? snapshot?.Workspaces?.FirstOrDefault()?.Id;
         selectedWindowId = context.WindowId;
-        selectedMonitorId = context.MonitorId ?? PopupPlacement.FromSnapshot(snapshot?.Desktop.Monitors ?? [])?.MonitorId;
         monitorTarget.SelectedItem = monitorTarget.Items.OfType<MonitorChoice>()
-            .FirstOrDefault(choice => choice.Id == selectedMonitorId);
+            .FirstOrDefault(choice => choice.Id == popupContext.MonitorId);
         RenderMap();
         UpdateSelectedDetails();
         UpdateActions();
@@ -158,6 +157,7 @@ internal sealed class SwitcherWindow : Window
     private void ShowCurrentWorkspaceSwitcher(bool cycleWindow, bool previous = false)
     {
         var (placement, context) = CapturePopupContext();
+        ApplyPopupContext(context);
         Hide();
         currentWorkspaceWindow.ShowForContext(snapshot, context, connected, placement, cycleWindow, previous);
     }
@@ -195,7 +195,7 @@ internal sealed class SwitcherWindow : Window
         keys.Children.Add(DeskTheme.Caption("windows"));
         keys.Children.Add(KeyChip("Win+Tab / Space"));
         keys.Children.Add(DeskTheme.Caption("workspaces"));
-        keys.Children.Add(KeyChip("Enter"));
+        keys.Children.Add(KeyChip("Enter / Space"));
         keys.Children.Add(DeskTheme.Caption("commit"));
         Grid.SetColumn(keys, 1);
         header.Children.Add(keys);
@@ -252,7 +252,7 @@ internal sealed class SwitcherWindow : Window
         monitorTarget.MinWidth = 190;
         monitorTarget.SelectionChanged += (_, _) =>
         {
-            selectedMonitorId = (monitorTarget.SelectedItem as MonitorChoice)?.Id;
+            popupContext.SelectMonitor((monitorTarget.SelectedItem as MonitorChoice)?.Id);
             UpdateActions();
         };
         destination.Children.Add(monitorTarget);
@@ -318,8 +318,7 @@ internal sealed class SwitcherWindow : Window
         keyboardHookAttempted = true;
         try
         {
-            keyboardHook = new SwitcherKeyboardHook(
-                action => Dispatcher.UIThread.Post(() => HandleShortcut(action)));
+            keyboardHook = new SwitcherKeyboardHook(action => Dispatcher.UIThread.Post(() => HandleShortcut(action)));
             shortcutStatus.Text = "Alt+Tab cycles windows · Win+Tab or Win+Space opens workspaces";
         }
         catch (Exception error)
@@ -383,7 +382,7 @@ internal sealed class SwitcherWindow : Window
             : $"Connection lost · {failure.Message} · command outcome may be unknown.";
         status.Text = lastMessage;
         if (snapshot is not null)
-            currentWorkspaceWindow.UpdateSnapshot(snapshot, capturedWorkspaceId, selectedMonitorId, false);
+            currentWorkspaceWindow.UpdateSnapshot(snapshot, popupContext.WorkspaceId, popupContext.MonitorId, false);
         UpdateActions();
         _ = source.DisposeAsync();
     }
@@ -393,19 +392,18 @@ internal sealed class SwitcherWindow : Window
         snapshot = next;
         if (!demoMode) StartKeyboardHook();
         var workspaces = next.Workspaces ?? [];
-        var requestedMonitorId = selectedMonitorId ?? PopupPlacement.CaptureForegroundMonitor(next.Desktop.Monitors)?.MonitorId;
-        var context = SpatialSwitcherPresentation.CaptureContext(next, requestedMonitorId);
-        capturedWorkspaceId = context.WorkspaceId;
+        var fallbackMonitorId = PopupPlacement.CaptureForegroundMonitor(next.Desktop.Monitors)?.MonitorId;
+        var context = popupContext.Refresh(next, fallbackMonitorId);
         if (selectedWorkspaceId is null || workspaces.All(workspace => workspace.Id != selectedWorkspaceId))
-            selectedWorkspaceId = capturedWorkspaceId ?? workspaces.FirstOrDefault()?.Id;
+            selectedWorkspaceId = popupContext.WorkspaceId ?? workspaces.FirstOrDefault()?.Id;
 
-        var capturedWorkspace = workspaces.FirstOrDefault(workspace => workspace.Id == capturedWorkspaceId);
+        var capturedWorkspace = workspaces.FirstOrDefault(workspace => workspace.Id == popupContext.WorkspaceId);
         var windowCandidates = SpatialSwitcherPresentation.WindowsForWorkspace(capturedWorkspace, next.Desktop.Windows);
         if (selectedWindowId is null || windowCandidates.All(window => window.Id != selectedWindowId))
             selectedWindowId = context.WindowId ?? windowCandidates.FirstOrDefault()?.Id;
 
-        var currentMonitorId = selectedMonitorId ?? (monitorTarget.SelectedItem as MonitorChoice)?.Id ??
-                               context.MonitorId;
+        var currentMonitorId = popupContext.MonitorId ?? (monitorTarget.SelectedItem as MonitorChoice)?.Id ??
+            context.MonitorId;
         var monitors = next.Desktop.Monitors.OrderBy(monitor => monitor.Bounds.X == 0 && monitor.Bounds.Y == 0 ? 0 : 1)
             .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase).ThenBy(monitor => monitor.Id)
             .ToArray();
@@ -417,8 +415,8 @@ internal sealed class SwitcherWindow : Window
                               monitors.FirstOrDefault();
         monitorTarget.SelectedItem = monitorTarget.Items.Cast<MonitorChoice>()
             .FirstOrDefault(choice => choice.Id == selectedMonitor?.Id);
-        selectedMonitorId = selectedMonitor?.Id ?? context.MonitorId;
-        currentWorkspaceWindow.UpdateSnapshot(next, capturedWorkspaceId, selectedMonitorId, connected);
+        popupContext.SelectMonitor(selectedMonitor?.Id ?? context.MonitorId);
+        currentWorkspaceWindow.UpdateSnapshot(next, popupContext.WorkspaceId, popupContext.MonitorId, connected);
         RenderMap();
         UpdateSelectedDetails();
         UpdateActions();
@@ -598,11 +596,12 @@ internal sealed class SwitcherWindow : Window
     private void UpdateActions()
     {
         var workspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == selectedWorkspaceId);
-        var capturedWorkspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == capturedWorkspaceId);
+        var capturedWorkspace =
+            snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == popupContext.WorkspaceId);
         var selectedWindow = snapshot?.Desktop.Windows.FirstOrDefault(candidate => candidate.Id == selectedWindowId);
         var hasMap = SpatialSwitcherPresentation.HasSpatialState(snapshot?.Workspaces);
         var canActivate = connected && !demoMode && !commandBusy && workspace is not null &&
-                          selectedMonitorId is { } monitorId && monitorId != Guid.Empty &&
+                          popupContext.MonitorId is { } monitorId && monitorId != Guid.Empty &&
                           snapshot?.Desktop.Monitors.Any(monitor => monitor.Id == monitorId) == true && hasMap;
         var canFocus = connected && !demoMode && !commandBusy && capturedWorkspace?.Active == true &&
                        selectedWindow is not null &&
@@ -612,10 +611,14 @@ internal sealed class SwitcherWindow : Window
         monitorTarget.IsEnabled = !windowSelectionMode && !commandBusy && snapshot?.Desktop.Monitors.Count > 0;
         reconnectButton.IsEnabled = !demoMode && !connecting && !connected && !commandBusy;
         if (demoMode) status.Text = lastMessage ?? "DEMO · sample state only · activation disabled";
-        var connection = demoMode ? "Demo mode" : connected ? "Manager connected" :
+        var connection = demoMode ? "Demo mode" :
+            connected ? "Manager connected" :
             connecting ? "Connecting to manager" : "Manager disconnected";
-        var shortcuts = demoMode ? "Alt+Tab / Win+Tab / Win+Space disabled in demo" : keyboardHook is not null
-            ? "Alt+Tab windows · Win+Tab / Space workspaces" : "Alt+Tab / Win+Tab / Win+Space unavailable";
+        var shortcuts = demoMode
+            ? "Alt+Tab / Win+Tab / Win+Space disabled in demo"
+            : keyboardHook is not null
+                ? "Alt+Tab windows · Win+Tab / Space workspaces"
+                : "Alt+Tab / Win+Tab / Win+Space unavailable";
         trayStatusChanged?.Invoke(connection, shortcuts);
     }
 
@@ -628,7 +631,7 @@ internal sealed class SwitcherWindow : Window
             return;
         }
 
-        if (args.Key == Key.Enter)
+        if (SwitcherAcceptKeyPolicy.IsAcceptKey(args.Key, args.KeyModifiers, search.IsFocused))
         {
             args.Handled = true;
             _ = CommitSelectionAsync();
@@ -694,7 +697,7 @@ internal sealed class SwitcherWindow : Window
 
     private IReadOnlyList<WindowInfo> CurrentWindowCandidates()
     {
-        var workspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == capturedWorkspaceId);
+        var workspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == popupContext.WorkspaceId);
         return SpatialSwitcherPresentation.WindowsForWorkspace(workspace, snapshot?.Desktop.Windows ?? []);
     }
 
@@ -709,7 +712,7 @@ internal sealed class SwitcherWindow : Window
         if (!connected || demoMode || commandBusy || selectedWindowId is not { } windowId ||
             session is not { } activeSession || !CurrentWindowCandidates().Any(window => window.Id == windowId))
             return;
-        if (snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == capturedWorkspaceId)?.Active != true)
+        if (snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == popupContext.WorkspaceId)?.Active != true)
             return;
 
         var window = snapshot?.Desktop.Windows.FirstOrDefault(candidate => candidate.Id == windowId);
@@ -750,7 +753,7 @@ internal sealed class SwitcherWindow : Window
     private async Task ActivateSelectedAsync()
     {
         if (!connected || demoMode || commandBusy || selectedWorkspaceId is not { } workspaceId ||
-            selectedMonitorId is not { } monitorId || session is not { } activeSession)
+            popupContext.MonitorId is not { } monitorId || session is not { } activeSession)
             return;
 
         var workspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == workspaceId);
