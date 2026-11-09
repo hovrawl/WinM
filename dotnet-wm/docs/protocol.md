@@ -43,15 +43,23 @@ ID receives `Guid.Empty` as its response ID. Errors do not mutate manager state.
 | `subscribe` | `{"eventTypes": null}` or `{}` for all events; otherwise an array of known event names | `SubscriptionResult`, including `subscriptionId` |
 | `unsubscribe` | `{"subscriptionId": "<GUID>"}` | None |
 
-Commands support `focus`, `move`, `resize`, `setSplit`, `setMode`, `setWorkspaceLayout`, `setWorkspacePosition`, `pause`,
+Commands support `focus`, `focusMonitor`, `moveSpatial`, `move`, `resize`, `setSplit`, `setMode`, `setWorkspaceLayout`, `setWorkspacePosition`, `pause`,
 `redraw`, `exit`, `activateWorkspace`, `moveToWorkspace`, `moveToMonitor`, `toggleMode`,
 `selectContainer`, `clearSelection`, and `focusCycle`.
 Optional command fields are `windowId`, `direction`, `amount`, `orientation`,
 `mode`, `paused`, `workspaceId`, `workspaceName`, `monitorId`, `nodeId`, `navigation`,
-`cycleDirection`, `layout`, `position`, and `layeredLayoutOptions`. Workspace
-commands accept exactly one workspace GUID or case-insensitive configured name;
-named targets are resolved atomically in the manager. Command-specific argument and
-target validation is performed by the manager actor. For example, `pause`
+`cycleDirection`, `layout`, `position`, `layeredLayoutOptions`, `monitorNumber`, and
+`workspaceNumber`. Workspace commands accept exactly one workspace GUID or
+case-insensitive configured name, except `moveToWorkspace` also accepts a one-based
+`workspaceNumber` slot from 1 through 10; named targets are resolved atomically in
+the manager. `focusMonitor` accepts `monitorNumber` from 1 through 10 and focuses an
+eligible window on the corresponding configured/stable monitor slot without changing
+its workspace view. `moveSpatial` accepts a direction and optional window ID. It
+floats and positions the window beside a local directional neighbor, or transfers
+membership to the neighboring monitor's viewed workspace and centers it when no
+local target exists. Directional `focus` uses geometric nearest-window selection
+within the active workspace, then looks to the nearest monitor in that direction.
+Command-specific argument and target validation is performed by the manager actor. For example, `pause`
 requires `paused`, and `resize` requires `direction` and a fraction in `(0, 0.8]`.
 `activateWorkspace` uses optional `monitorId` to name the target monitor. Without
 it, the manager selects the focused window's observed connected monitor, then the
@@ -62,10 +70,18 @@ source monitor needs a fallback, the manager uses another pre-existing unviewed
 workspace or creates an empty one, without using the displaced destination view.
 `setWorkspaceLayout` accepts `layout: split|layered`, optional
 `layeredLayoutOptions`, and exactly one workspace ID or configured name. The options
-contain `windowWidthRatio` (default `0.8`, finite and in `(0,1]`) and
-`horizontalOffset` (default `32`, an integer from `0` to `256` DIPs). The effective
-options and selected layout are included in each `WorkspaceInfo`; layered pages keep
-full work-area height and use a horizontal-only stack, compressing offsets when needed.
+contain `windowWidthRatio` (default `1.0`, finite and in `(0,1]`) and
+`horizontalOffset` (default `32`, an integer from `0` to `256` DIPs). The ratio is a
+preferred maximum page width; at the default 100%, a single page fills the padded
+work area and each additional page reduces every page width by one offset, keeping
+the stack's far edge aligned. Spacing compresses uniformly only as needed to respect
+all fitting windows' minimum widths. Layered pages retain full work-area height. The
+effective options and selected layout are included in each `WorkspaceInfo`.
+With generated shortcuts enabled, Alt+H/J/K/L performs directional focus
+(H=left, J=down, K=up, L=right), and Alt+Shift with those keys performs the
+matching spatial move. The host can disable generated shortcuts or replace a
+default binding through its configuration.
+
 The command reflows the active view unless paused; on a native action failure the
 manager reports the error and restores the previous layout and options. Workspace
 configuration seeds restart defaults; runtime changes are not persisted to configuration.

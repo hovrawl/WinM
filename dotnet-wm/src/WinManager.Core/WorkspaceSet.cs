@@ -229,7 +229,7 @@ public sealed class WorkspaceSet
         return result.AsReadOnly();
     }
 
-    private Workspace Add(string name, string? deviceName, WorkspaceLayout layout = WorkspaceLayout.Split,
+    private Workspace Add(string name, string? deviceName, WorkspaceLayout layout = WorkspaceLayout.Layered,
         DeskPosition? position = null, LayeredLayoutOptions? layeredLayoutOptions = null)
     {
         var workspace = new Workspace(name, deviceName, layout, position ?? DefaultPosition(workspaces.Count),

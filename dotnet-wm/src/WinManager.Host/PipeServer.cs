@@ -252,7 +252,7 @@ public sealed class PipeServer : IAsyncDisposable
                     case "command":
                         CheckObject(payload, "kind", "windowId", "direction", "amount", "orientation", "mode", "paused",
                             "workspaceId", "monitorId", "workspaceName", "nodeId", "navigation", "cycleDirection",
-                            "layout", "position", "layeredLayoutOptions");
+                            "layout", "position", "layeredLayoutOptions", "monitorNumber", "workspaceNumber");
                         if (!payload.TryGetProperty("kind", out _))
                             throw new ArgumentException("Command kind is required.");
                         var command = payload.Deserialize<ManagerCommand>(Protocol.JsonOptions) ??

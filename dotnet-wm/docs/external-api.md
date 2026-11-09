@@ -80,8 +80,10 @@ The response is a complete `ManagerSnapshot`:
 - `selection`: optional `{workspaceId, nodeId}` logical tiling-container selection;
   this does not change `desktop.focusedWindowId`.
 
-Use these GUIDs as targets, not native window handles, process IDs, or array
-indexes. Rediscover IDs after a manager restart and when targets disappear.
+Use these GUIDs as targets, not native window handles or process IDs. Numbered
+shortcut slots are intentionally separate: monitor numbers follow configured
+`monitorOrder` (or stable connected-device order), and workspace numbers follow
+configuration order. Rediscover GUIDs after a manager restart and when targets disappear.
 Workspace names are resolved case-insensitively by the manager, so configured
 names are convenient for shortcuts and scripts.
 
@@ -100,9 +102,11 @@ replace `<window-guid>`, `<workspace-guid>`, and
 
 | `kind` | Required fields | Behavior | Example command JSON |
 | --- | --- | --- | --- |
-| `focus` | None; optional `direction` | Focus the target window or its directional neighbor. Focusing a `layoutOverflow` window in its active workspace prioritizes it for staging and can minimize the focused tile in its place. | `{"kind":"focus","windowId":"<overflow-window-guid>"}` |
+| `focus` | None; optional `direction` | Focus the target window, or the nearest eligible window in that direction within its workspace; if none exists, search the nearest directional monitor's viewed workspace. Focusing a `layoutOverflow` window in its active workspace prioritizes it for staging and can minimize the focused tile in its place. | `{"kind":"focus","direction":"right"}` |
+| `focusMonitor` | `monitorNumber` from 1 through 10 | Focus the nearest eligible window on that numbered monitor without changing its workspace view. An empty or disconnected slot returns `not_found`. | `{"kind":"focusMonitor","monitorNumber":2}` |
 | `focusCycle` | None; optional `cycleDirection`, `mode`, workspace target, `windowId` | Cycle eligible windows within an active workspace, wrapping at either end; for layered mode, this brings the selected page to the front. | `{"kind":"focusCycle","cycleDirection":"next","mode":"tiling"}` |
 | `move` | `direction` | Swap the target tile with a directional tiling neighbor in its workspace; not a pixel-position move. | `{"kind":"move","direction":"left"}` |
+| `moveSpatial` | `direction` | Float and place the target at the nearest directional local window's origin. If none exists in its workspace, move its membership to the neighboring monitor's viewed workspace and center it there. It never swaps another window. | `{"kind":"moveSpatial","direction":"right"}` |
 | `resize` | `direction`, `amount` | Adjust the nearest ancestor split on the direction's axis. | `{"kind":"resize","direction":"right","amount":0.05}` |
 | `setSplit` | `orientation` | Change the selected split when selection exists and `windowId` is omitted; otherwise change the target tile's parent split (or the next appended split for a single tile). | `{"kind":"setSplit","orientation":"vertical"}` |
 | `selectContainer` | None; optional `nodeId`, or `windowId` and `navigation` | Select a node of an active workspace's tiling tree without changing native focus. | `{"kind":"selectContainer","navigation":"parent"}` |
@@ -113,7 +117,7 @@ replace `<window-guid>`, `<workspace-guid>`, and
 | `redraw` | None | Rescan and reconcile the desktop; applies layouts when not paused. | `{"kind":"redraw"}` |
 | `exit` | None | Request manager shutdown and restoration of manager-owned native changes. | `{"kind":"exit"}` |
 | `activateWorkspace` | Exactly one of `workspaceId`, `workspaceName`; optional `monitorId` | Show the workspace on the target monitor. If it is visible elsewhere, transfer its view; the destination's prior workspace remains unviewed. Without `monitorId`, use the focused window's connected monitor, then the primary monitor. | `{"kind":"activateWorkspace","workspaceName":"2","monitorId":"<monitor-guid>"}` |
-| `moveToWorkspace` | Exactly one of `workspaceId`, `workspaceName` | Assign the target window to an existing workspace; does not activate the destination. | `{"kind":"moveToWorkspace","windowId":"<window-guid>","workspaceId":"<workspace-guid>"}` |
+| `moveToWorkspace` | Exactly one of `workspaceId`, `workspaceName`, or `workspaceNumber` | Assign the target window to an existing workspace; does not activate the destination. `workspaceNumber` is a one-based slot in configured workspace order, from 1 through 10. | `{"kind":"moveToWorkspace","windowId":"<window-guid>","workspaceNumber":2}` |
 | `moveToMonitor` | `monitorId` | Assign the target window to the workspace currently shown by the destination monitor; this does not transfer a workspace view. | `{"kind":"moveToMonitor","monitorId":"<monitor-guid>"}` |
 | `setWorkspaceLayout` | Exactly one of `workspaceId`, `workspaceName`; `layout`; optional `layeredLayoutOptions` | Set a workspace's `split` or `layered` layout and reflow its active view unless paused. Option updates can be sent while keeping the same layout; layout and options roll back together on native action failure. | `{"kind":"setWorkspaceLayout","workspaceName":"2","layout":"layered","layeredLayoutOptions":{"windowWidthRatio":0.8,"horizontalOffset":32}}` |
 | `setWorkspacePosition` | Exactly one of `workspaceId`, `workspaceName`; `position` | Set logical desk coordinates without moving or resizing native windows; commits `workspace.updated`. | `{"kind":"setWorkspacePosition","workspaceName":"2","position":{"x":520,"y":-80}}` |
@@ -121,6 +125,13 @@ replace `<window-guid>`, `<workspace-guid>`, and
 Argument details:
 
 - `direction`: `left`, `right`, `up`, or `down`.
+- `monitorNumber`: one-based monitor slot from 1 through 10. Slots in a configured
+  `monitorOrder` are fixed even while those devices are disconnected; without a
+  configured order, connected monitors are ordered with the primary first, then
+  by device name and GUID. Unlisted connected devices follow configured slots.
+- `workspaceNumber`: one-based configured workspace slot from 1 through 10; it is
+  accepted only by `moveToWorkspace`. Workspace names/IDs remain preferred for
+  clients that need an explicit stable identity.
 - `orientation`: `horizontal` means side-by-side tiles; `vertical` means stacked
   tiles.
 - `mode`: `tiling` or `floating`.
@@ -130,11 +141,13 @@ Argument details:
   `layered` places individually fitting tiled windows in a full-height horizontal
   page stack. Only windows whose own minimum width or height exceeds the work area
   overflow.
-- `layeredLayoutOptions`: optional object with `windowWidthRatio` (default `0.8`,
+- `layeredLayoutOptions`: optional object with `windowWidthRatio` (default `1.0`,
   finite in `(0,1]`) and `horizontalOffset` (default `32`, integer DIPs in `[0,256]`).
-  The ratio controls each page's preferred share of usable work width; the offset
-  controls horizontal start-to-start spacing and is compressed when a large stack
-  would exceed available width. Effective values are returned in workspace snapshots.
+  The ratio is a preferred maximum page width relative to usable work width. At the
+  default 100%, a single page fills the padded work area and each extra page reduces
+  all page widths by one offset while keeping the stack's far edge aligned. The
+  offset is a uniform start-to-start spacing and compresses when needed to preserve
+  fitting windows' minimum widths. Effective values are returned in workspace snapshots.
 - `amount`: a finite fraction in `(0, 0.8]`, not pixels or a percentage integer.
   `0.05` changes the split ratio by five percentage points. `left`/`up` decrease
   the first child's share; `right`/`down` increase it, regardless of which child
@@ -179,6 +192,21 @@ the already-focused sole match succeeds without native actions or a new revision
 Successful observed focus changes use `focus.changed` and clear container
 selection. Failed native focus returns its error and does not assume focus moved.
 Use `cycleDirection`, not the spatial `direction` field.
+
+Directional `focus` searches visible, non-minimized, non-overflow, non-ignored
+windows by geometric distance in the current active workspace. If no local target
+exists, it searches the nearest monitor in that direction and its viewed workspace;
+it does not activate or transfer a workspace view. `moveSpatial` requires an active,
+visible, non-minimized, non-overflow target and a resumed manager. Locally it sets
+the target to floating and places it at the nearest directional window's top-left
+origin, clamped to the work area. Without a local target it transfers the window's
+membership to the neighboring monitor's viewed workspace and centers it there.
+Window size is preserved where destination minimums and work-area bounds allow;
+native failures restore the prior mode and workspace membership as far as the
+observed platform state permits. Existing `move` remains the tiling-tree swap.
+Default manager shortcuts include Alt+H/J/K/L for directional focus and
+Alt+Shift+H/J/K/L for the matching spatial move (H=left, J=down, K=up, L=right).
+They can be disabled or overridden through manager shortcut configuration.
 
 ```powershell
 '{"kind":"focusCycle","cycleDirection":"previous","mode":"floating"}' | & '.\publish\cli\WinManager.Cli.exe' 'command' '-'

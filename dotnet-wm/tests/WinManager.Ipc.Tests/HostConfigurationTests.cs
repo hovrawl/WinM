@@ -19,6 +19,101 @@ public sealed class HostConfigurationTests
         Assert.Equal(config.Workspaces.ToArray(), loaded.Workspaces.ToArray());
         Assert.Equal(8, loaded.InnerGap);
         Assert.Empty(loaded.Shortcuts);
+        Assert.All(loaded.Workspaces, workspace => Assert.Equal(WorkspaceLayout.Layered, workspace.Layout));
+        Assert.Equal(1, LayeredLayoutOptions.Default.WindowWidthRatio);
+        Assert.Equal(32, LayeredLayoutOptions.Default.HorizontalOffset);
+    }
+
+    [Fact]
+    public void WorkspaceLayoutDefaultsToLayeredWhenOmittedButAcceptsExplicitSplit()
+    {
+        using var directory = new TestDirectory();
+        var file = Path.Combine(directory.Path, "config.json");
+        File.WriteAllText(file,
+            "{\"workspaces\":[{\"name\":\"Layered\"},{\"name\":\"Split\",\"layout\":\"split\"}]}");
+
+        var loaded = ManagerConfiguration.Load(file, createDefault: false);
+
+        Assert.Equal(WorkspaceLayout.Layered, loaded.Workspaces.Single(workspace => workspace.Name == "Layered").Layout);
+        Assert.Equal(WorkspaceLayout.Split, loaded.Workspaces.Single(workspace => workspace.Name == "Split").Layout);
+    }
+
+    [Fact]
+    public void DefaultShortcutSetContainsMonitorWorkspaceAndGestureBindingsAndCustomCanOverride()
+    {
+        var defaults = new ManagerConfiguration().BuildShortcutBindings();
+        Assert.Equal(29, defaults.Count);
+        Assert.Contains(defaults, binding => binding.Command.Kind == CommandKind.FocusMonitor &&
+                                             binding.Command.MonitorNumber == 1 && binding.VirtualKey == 0x31);
+        Assert.Contains(defaults, binding => binding.Command.Kind == CommandKind.MoveToWorkspace &&
+                                             binding.Command.WorkspaceNumber == 1 && binding.VirtualKey == 0x31 &&
+                                             (binding.Modifiers & 0xF) == 5);
+        Assert.Contains(defaults, binding => binding.Command.Kind == CommandKind.Focus &&
+                                             binding.Command.Direction == Direction.Left && binding.VirtualKey == 0x25);
+        Assert.Contains(defaults, binding => binding.Command.Kind == CommandKind.MoveSpatial &&
+                                             binding.Command.Direction == Direction.Left &&
+                                             (binding.Modifiers & 0xF) == 7);
+        var vimBindings = new (Direction Direction, uint Key)[]
+        {
+            (Direction.Left, 0x48), (Direction.Down, 0x4A),
+            (Direction.Up, 0x4B), (Direction.Right, 0x4C)
+        };
+        foreach (var (direction, key) in vimBindings)
+        {
+            Assert.Contains(defaults, binding => binding.Command.Kind == CommandKind.Focus &&
+                                                 binding.Command.Direction == direction &&
+                                                 binding.VirtualKey == key && (binding.Modifiers & 0xF) == 1);
+            Assert.Contains(defaults, binding => binding.Command.Kind == CommandKind.MoveSpatial &&
+                                                 binding.Command.Direction == direction &&
+                                                 binding.VirtualKey == key && (binding.Modifiers & 0xF) == 5);
+        }
+        Assert.Equal(defaults.Count, defaults.Select(binding => (binding.Modifiers & 0xF, binding.VirtualKey))
+            .Distinct().Count());
+
+        var custom = new ShortcutBinding(1, 0x31, new(CommandKind.Pause, Paused: true));
+        var overridden = new ManagerConfiguration { Shortcuts = [custom] }.BuildShortcutBindings();
+        Assert.Equal(defaults.Count, overridden.Count);
+        Assert.Equal(custom, Assert.Single(overridden, binding => binding.VirtualKey == 0x31 &&
+                                                                  (binding.Modifiers & 0xF) == 1));
+        var vimOverride = new ShortcutBinding(1, 0x48, new(CommandKind.Redraw));
+        var overriddenVim = new ManagerConfiguration { Shortcuts = [vimOverride] }.BuildShortcutBindings();
+        Assert.Equal(defaults.Count, overriddenVim.Count);
+        Assert.Equal(vimOverride, Assert.Single(overriddenVim, binding => binding.VirtualKey == 0x48 &&
+                                                                          (binding.Modifiers & 0xF) == 1));
+        Assert.Empty(new ManagerConfiguration { EnableDefaultShortcuts = false }.BuildShortcutBindings());
+    }
+
+    [Fact]
+    public void MonitorOrderAndNumberedCommandsValidateAndRoundTrip()
+    {
+        var config = new ManagerConfiguration
+        {
+            Workspaces = [new("One"), new("Two")],
+            MonitorOrder = [@"\\.\DISPLAY2", @"\\.\DISPLAY1"],
+            Shortcuts = [new(5, 0x32, new(CommandKind.MoveToWorkspace, WorkspaceNumber: 2))]
+        };
+        config.Validate();
+        var roundTrip = JsonSerializer.Deserialize<ManagerConfiguration>(
+            JsonSerializer.Serialize(config, Protocol.JsonOptions), Protocol.JsonOptions)!;
+        Assert.Equal(config.MonitorOrder, roundTrip.MonitorOrder);
+        Assert.Equal(config.Shortcuts, roundTrip.Shortcuts);
+        Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration
+        {
+            MonitorOrder = ["display", "DISPLAY"]
+        }).Validate());
+        Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration
+        {
+            Workspaces = [new("One")],
+            Shortcuts = [new(5, 0x32, new(CommandKind.MoveToWorkspace, WorkspaceNumber: 2))]
+        }).Validate());
+        Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration
+        {
+            Shortcuts = [new(1, 0x31, new(CommandKind.FocusMonitor, MonitorNumber: 0))]
+        }).Validate());
+        Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration
+        {
+            Shortcuts = [new(1, 0x31, new(CommandKind.MoveSpatial))]
+        }).Validate());
     }
 
     [Theory]

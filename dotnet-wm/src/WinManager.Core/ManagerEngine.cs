@@ -41,6 +41,7 @@ public sealed class ManagerEngine
     private readonly IWindowPlatform platform;
     private readonly Channel<ManagerInput> inputs;
     private readonly WorkspaceSet workspaces;
+    private readonly string[] monitorDeviceOrder;
     private readonly Dictionary<Guid, WindowMode> modes = [];
     private readonly Dictionary<Guid, PixelRect> floatingBounds = [];
     private readonly Dictionary<Guid, PixelRect> movingWindows = [];
@@ -70,7 +71,8 @@ public sealed class ManagerEngine
     public IReadOnlyList<NativeActionFailure> ShutdownFailures { get; private set; } = [];
 
     public ManagerEngine(IWindowPlatform platform, int innerGap = 8, int outerGap = 8, int capacity = 256,
-        IEnumerable<WorkspaceDefinition>? workspaceDefinitions = null)
+        IEnumerable<WorkspaceDefinition>? workspaceDefinitions = null,
+        IEnumerable<string>? monitorDeviceOrder = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(innerGap);
         ArgumentOutOfRangeException.ThrowIfNegative(outerGap);
@@ -79,6 +81,12 @@ public sealed class ManagerEngine
         this.innerGap = innerGap;
         this.outerGap = outerGap;
         workspaces = new(workspaceDefinitions);
+        this.monitorDeviceOrder = monitorDeviceOrder?.ToArray() ?? [];
+        if (this.monitorDeviceOrder.Length > 10 ||
+            this.monitorDeviceOrder.Any(string.IsNullOrWhiteSpace) ||
+            this.monitorDeviceOrder.Distinct(StringComparer.OrdinalIgnoreCase).Count() != this.monitorDeviceOrder.Length)
+            throw new ArgumentException("Monitor device order must contain at most ten unique names.",
+                nameof(monitorDeviceOrder));
         inputs = Channel.CreateBounded<ManagerInput>(new BoundedChannelOptions(capacity)
         {
             SingleReader = true, FullMode = BoundedChannelFullMode.Wait
@@ -343,7 +351,8 @@ public sealed class ManagerEngine
         Guid? focus = null,
         Guid? droppedWindowId = null, Guid? restoreOverflowWindowId = null,
         Guid? restoreFocusedWindowId = null,
-        (Guid WindowId, WindowMode Mode)? modeChange = null)
+        (Guid WindowId, WindowMode Mode)? modeChange = null,
+        (Guid WindowId, PixelRect Bounds)? floatingPlacement = null)
     {
         var desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
         var restoreFocusedWindowWasMinimized = restoreFocusedWindowId is { } restoreId &&
@@ -446,7 +455,10 @@ public sealed class ManagerEngine
                                                                        !window.Minimized && !window.IsIgnored))
                 {
                     var area = monitor.WorkArea;
-                    var bounds = window.Id == restoreFloatingWindowId &&
+                    var bounds = floatingPlacement is { } explicitPlacement &&
+                                 explicitPlacement.WindowId == window.Id
+                        ? explicitPlacement.Bounds
+                        : window.Id == restoreFloatingWindowId &&
                                  floatingBounds.TryGetValue(window.Id, out var saved)
                         ? saved
                         : window.Bounds;
@@ -718,6 +730,16 @@ public sealed class ManagerEngine
 
     private async Task<CommandResult> HandleAsync(ManagerCommand command, CancellationToken cancellationToken)
     {
+        if (command.WorkspaceNumber is { } workspaceNumber)
+        {
+            if (command.Kind != CommandKind.MoveToWorkspace || command.WorkspaceId is not null ||
+                command.WorkspaceName is not null || workspaceNumber is < 1 or > 10)
+                return Error("invalid_argument", "Workspace number is only valid from 1 through 10 on moveToWorkspace.");
+            var numberedWorkspace = workspaces.Snapshot.ElementAtOrDefault(workspaceNumber - 1);
+            if (numberedWorkspace is null) return Error("not_found", "Numbered workspace does not exist.");
+            command = command with { WorkspaceId = numberedWorkspace.Id, WorkspaceNumber = null };
+        }
+
         if (command.WorkspaceName is { } name)
         {
             if (command.WorkspaceId is not null || string.IsNullOrWhiteSpace(name) ||
@@ -743,6 +765,21 @@ public sealed class ManagerEngine
         if (command.MonitorId is not null &&
             command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToMonitor))
             return Error("invalid_argument", "Monitor ID is only supported by activateWorkspace and moveToMonitor.");
+        if (command.MonitorNumber is { } monitorNumber &&
+            (command.Kind != CommandKind.FocusMonitor || monitorNumber is < 1 or > 10))
+            return Error("invalid_argument", "Monitor number is only valid from 1 through 10 on focusMonitor.");
+        if (command.Kind == CommandKind.FocusMonitor && command.MonitorNumber is null)
+            return Error("invalid_argument", "focusMonitor requires a monitor number.");
+        if (command.Kind != CommandKind.FocusMonitor && command.MonitorNumber is not null)
+            return Error("invalid_argument", "Monitor number is only supported by focusMonitor.");
+        if (command.Kind == CommandKind.FocusMonitor &&
+            (command.WindowId is not null || command.Direction is not null || command.Amount is not null ||
+             command.Orientation is not null || command.Mode is not null || command.Paused is not null ||
+             command.WorkspaceId is not null || command.WorkspaceName is not null || command.WorkspaceNumber is not null ||
+             command.MonitorId is not null || command.NodeId is not null || command.Navigation is not null ||
+             command.CycleDirection is not null || command.Layout is not null || command.Position is not null ||
+             command.LayeredLayoutOptions is not null))
+            return Error("invalid_argument", "focusMonitor accepts only a monitor number.");
         if (command.Kind != CommandKind.SelectContainer &&
             (command.NodeId is not null || command.Navigation is not null))
             return Error("invalid_argument", "Node ID and navigation are only supported by selectContainer.");
@@ -756,6 +793,8 @@ public sealed class ManagerEngine
             return Error("invalid_argument", "Position is only supported by setWorkspacePosition.");
         if (command.Kind == CommandKind.FocusCycle)
             return await FocusCycleAsync(command, cancellationToken);
+        if (command.Kind == CommandKind.FocusMonitor)
+            return await FocusMonitorAsync(command.MonitorNumber!.Value, cancellationToken);
         if (command.Kind == CommandKind.SelectContainer)
         {
             if (command.NodeId is not null && (command.Navigation is not null || command.WindowId is not null))
@@ -900,7 +939,7 @@ public sealed class ManagerEngine
                 case CommandKind.Focus:
                 {
                     var target = command.Direction is { } focusDirection
-                        ? tree.Neighbor(window.Id, focusDirection, desktop.Windows)
+                        ? FindSpatialFocusTarget(window, assigned, focusDirection, desktop)?.Id
                         : window.Id;
                     if (target is null) return Error("not_found", "No directional focus target.");
                     Guid? restoreOverflow = null;
@@ -973,6 +1012,16 @@ public sealed class ManagerEngine
                     }
 
                     return Result(moveFailures);
+                case CommandKind.MoveSpatial:
+                    if (command.Direction is not { } spatialDirection || command.WorkspaceId is not null ||
+                        command.WorkspaceName is not null || command.MonitorId is not null ||
+                        command.MonitorNumber is not null || command.WorkspaceNumber is not null ||
+                        command.Amount is not null || command.Orientation is not null || command.Mode is not null ||
+                        command.Paused is not null || command.NodeId is not null || command.Navigation is not null ||
+                        command.CycleDirection is not null || command.Layout is not null || command.Position is not null ||
+                        command.LayeredLayoutOptions is not null)
+                        return Error("invalid_argument", "moveSpatial accepts only a window and direction.");
+                    return await MoveSpatialAsync(window, assigned, spatialDirection, cancellationToken);
                 default: return Error("invalid_argument", "Unsupported command.");
             }
         }
@@ -1019,6 +1068,120 @@ public sealed class ManagerEngine
             : candidates[(index + 1) % candidates.Length].Id;
         if (target == desktop.FocusedWindowId) return new(true, null, null, revision);
         return Result(await ReconcileAsync(cancellationToken, target));
+    }
+
+    private async Task<CommandResult> FocusMonitorAsync(int monitorNumber, CancellationToken cancellationToken)
+    {
+        if (monitorNumber is < 1 or > 10)
+            return Error("invalid_argument", "Monitor number must be from 1 through 10.");
+        var desktop = Current!.Desktop;
+        var monitor = ResolveMonitorNumber(desktop, monitorNumber);
+        if (monitor is null) return Error("not_found", "Numbered monitor is not connected.");
+        var workspaceId = workspaces.Views.FirstOrDefault(view => view.MonitorId == monitor.Id)?.WorkspaceId;
+        if (workspaceId is null) return Error("not_found", "Monitor has no workspace view.");
+        var candidates = desktop.Windows.Where(window => workspaces.WorkspaceFor(window.Id) == workspaceId &&
+                                                          window.MonitorId == monitor.Id &&
+                                                          SpatialNavigation.IsEligible(window));
+        var target = SpatialNavigation.ClosestWindow(monitor.WorkArea, candidates);
+        if (target is null) return Error("not_found", "The numbered monitor has no eligible window to focus.");
+        if (desktop.FocusedWindowId == target.Id) return new(true, null, null, revision);
+        return Result(await ReconcileAsync(cancellationToken, target.Id));
+    }
+
+    private WindowInfo? FindSpatialFocusTarget(WindowInfo origin, Guid workspaceId, Direction direction,
+        DesktopSnapshot desktop)
+    {
+        if (!workspaces.Snapshot.Any(workspace => workspace.Id == workspaceId && workspace.Active)) return null;
+        var workspaceWindows = desktop.Windows.Where(window => workspaces.WorkspaceFor(window.Id) == workspaceId &&
+                                                                SpatialNavigation.IsEligible(window)).ToArray();
+        var local = SpatialNavigation.ClosestWindowInDirection(origin.Bounds, direction, workspaceWindows,
+            origin.Id);
+        if (local is not null) return local;
+
+        var sourceMonitor = desktop.Monitors.FirstOrDefault(monitor => monitor.Id == origin.MonitorId);
+        if (sourceMonitor is null) return null;
+        var activeViews = workspaces.Views.ToDictionary(view => view.MonitorId, view => view.WorkspaceId);
+        var candidatesByMonitor = desktop.Monitors.Select(monitor => new
+            {
+                Monitor = monitor,
+                Windows = desktop.Windows.Where(window => window.MonitorId == monitor.Id &&
+                    activeViews.TryGetValue(monitor.Id, out var viewedWorkspace) &&
+                    workspaces.WorkspaceFor(window.Id) == viewedWorkspace && SpatialNavigation.IsEligible(window)).ToArray()
+            })
+            .Where(item => item.Windows.Length > 0);
+        var neighbor = SpatialNavigation.ClosestMonitorInDirection(sourceMonitor.Bounds, direction,
+            candidatesByMonitor.Select(item => item.Monitor));
+        return neighbor is null
+            ? null
+            : SpatialNavigation.ClosestWindow(origin.Bounds,
+                candidatesByMonitor.First(item => item.Monitor.Id == neighbor.Id).Windows);
+    }
+
+    private async Task<CommandResult> MoveSpatialAsync(WindowInfo window, Guid sourceWorkspaceId, Direction direction,
+        CancellationToken cancellationToken)
+    {
+        if (paused) return Error("not_ready", "Resume the manager before spatially moving a window.");
+        if (!SpatialNavigation.IsEligible(window))
+            return Error("not_ready", "Only a visible, active, non-overflow managed window can be moved spatially.");
+        var sourceWorkspace = workspaces.Snapshot.FirstOrDefault(workspace =>
+            workspace.Id == sourceWorkspaceId && workspace.Active);
+        if (sourceWorkspace is null) return Error("not_ready", "The window's workspace view is inactive.");
+
+        var desktop = Current!.Desktop;
+        var sourceMonitor = desktop.Monitors.FirstOrDefault(monitor => monitor.Id == sourceWorkspace.MonitorId);
+        if (sourceMonitor is null) return Error("not_found", "The window's monitor is not connected.");
+        var localWindows = desktop.Windows.Where(candidate => workspaces.WorkspaceFor(candidate.Id) == sourceWorkspaceId);
+        var localTarget = SpatialNavigation.ClosestWindowInDirection(window.Bounds, direction, localWindows, window.Id);
+        Guid targetWorkspaceId = sourceWorkspaceId;
+        PixelRect targetBounds;
+        try
+        {
+            if (localTarget is not null)
+            {
+                targetBounds = SpatialNavigation.PlaceAt(window, sourceMonitor.WorkArea,
+                    localTarget.Bounds.X, localTarget.Bounds.Y);
+            }
+            else
+            {
+                var target = FindSpatialFocusTarget(window, sourceWorkspaceId, direction, desktop);
+                if (target is null) return Error("not_found", "No window exists in that direction.");
+                targetWorkspaceId = workspaces.WorkspaceFor(target.Id)!.Value;
+                var targetMonitor = desktop.Monitors.FirstOrDefault(monitor => monitor.Id == target.MonitorId);
+                if (targetMonitor is null) return Error("not_found", "The neighboring monitor is not connected.");
+                targetBounds = SpatialNavigation.CenterIn(window, targetMonitor.WorkArea);
+            }
+        }
+        catch (InvalidOperationException error)
+        {
+            return Error("layout_constraints", error.Message);
+        }
+
+        var movedWorkspace = targetWorkspaceId != sourceWorkspaceId;
+        if (movedWorkspace && !workspaces.MoveWindow(window.Id, targetWorkspaceId))
+            return Error("not_found", "The neighboring workspace is no longer available.");
+        var hadModeOverride = modes.TryGetValue(window.Id, out var previousModeOverride);
+        var failures = await ReconcileAsync(cancellationToken, window.Id,
+            modeChange: (window.Id, WindowMode.Floating), floatingPlacement: (window.Id, targetBounds));
+        if (failures.Count == 0) return Result(failures);
+
+        if (movedWorkspace) workspaces.MoveWindow(window.Id, sourceWorkspaceId);
+        if (hadModeOverride) modes[window.Id] = previousModeOverride;
+        else modes.Remove(window.Id);
+        await ReconcileAsync(cancellationToken);
+        return Result(failures);
+    }
+
+    private MonitorInfo? ResolveMonitorNumber(DesktopSnapshot desktop, int monitorNumber)
+    {
+        var stable = desktop.Monitors.OrderBy(monitor => monitor.Bounds.X == 0 && monitor.Bounds.Y == 0 ? 0 : 1)
+            .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase).ThenBy(monitor => monitor.Id).ToArray();
+        if (monitorDeviceOrder.Length == 0) return stable.ElementAtOrDefault(monitorNumber - 1);
+        if (monitorNumber <= monitorDeviceOrder.Length)
+            return stable.FirstOrDefault(monitor => string.Equals(monitor.DeviceName,
+                monitorDeviceOrder[monitorNumber - 1], StringComparison.OrdinalIgnoreCase));
+        var configuredNames = monitorDeviceOrder.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return stable.Where(monitor => !configuredNames.Contains(monitor.DeviceName))
+            .ElementAtOrDefault(monitorNumber - monitorDeviceOrder.Length - 1);
     }
 
     private static Guid ResolveTargetMonitor(DesktopSnapshot desktop)

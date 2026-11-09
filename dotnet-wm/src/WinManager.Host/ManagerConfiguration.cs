@@ -12,6 +12,8 @@ public sealed record ManagerConfiguration
     public IReadOnlyList<string> IgnoredProcessNames { get; init; } = [];
     public IReadOnlyList<string> IgnoredClassNames { get; init; } = [];
     public IReadOnlyList<ShortcutBinding> Shortcuts { get; init; } = [];
+    public bool EnableDefaultShortcuts { get; init; } = true;
+    public IReadOnlyList<string> MonitorOrder { get; init; } = [];
     public int InputCapacity { get; init; } = 256;
     public int MaximumClients { get; init; } = 16;
     public int OutputCapacity { get; init; } = 128;
@@ -38,6 +40,10 @@ public sealed record ManagerConfiguration
             throw new InvalidDataException("Workspace names must be nonblank and unique.");
         ValidateIgnores(IgnoredProcessNames);
         ValidateIgnores(IgnoredClassNames);
+        if (MonitorOrder is null || MonitorOrder.Count > 10 ||
+            MonitorOrder.Any(name => string.IsNullOrWhiteSpace(name) || name.Length > 256) ||
+            MonitorOrder.Distinct(StringComparer.OrdinalIgnoreCase).Count() != MonitorOrder.Count)
+            throw new InvalidDataException("Monitor order must contain at most ten unique device names.");
         if (Shortcuts is null || Shortcuts.Count > 128 || Shortcuts.Any(binding => binding is null))
             throw new InvalidDataException("Invalid shortcut list.");
         var seen = new HashSet<(uint, uint)>();
@@ -71,13 +77,19 @@ public sealed record ManagerConfiguration
         var valid = command.Kind switch
         {
             CommandKind.Move => command.Direction is not null,
+            CommandKind.MoveSpatial => command.Direction is not null,
             CommandKind.Resize => command.Direction is not null && command.Amount is > 0 and <= 0.8,
+            CommandKind.FocusMonitor => command.MonitorNumber is >= 1 and <= 10,
             CommandKind.SetMode => command.Mode is not null,
             CommandKind.SetSplit => command.Orientation is not null,
             CommandKind.Pause => command.Paused is not null,
-            CommandKind.ActivateWorkspace or CommandKind.MoveToWorkspace =>
+            CommandKind.ActivateWorkspace =>
                 command.WorkspaceId is { } id && id != Guid.Empty || command.WorkspaceName is { } name &&
                 Workspaces.Any(workspace => string.Equals(workspace.Name, name, StringComparison.OrdinalIgnoreCase)),
+            CommandKind.MoveToWorkspace =>
+                command.WorkspaceId is { } id && id != Guid.Empty || command.WorkspaceName is { } name &&
+                Workspaces.Any(workspace => string.Equals(workspace.Name, name, StringComparison.OrdinalIgnoreCase)) ||
+                command.WorkspaceNumber is { } number && number >= 1 && number <= Workspaces.Count,
             CommandKind.SetWorkspacePosition => command.Position is { IsValid: true } &&
                                                 (command.WorkspaceId is { } id && id != Guid.Empty ||
                                                  command.WorkspaceName is { } name &&
@@ -101,6 +113,23 @@ public sealed record ManagerConfiguration
             _ => true
         };
         if (!valid || command.WorkspaceId is not null && command.WorkspaceName is not null ||
+            command.WorkspaceNumber is not null &&
+            (command.Kind != CommandKind.MoveToWorkspace || command.WorkspaceId is not null ||
+             command.WorkspaceName is not null || command.WorkspaceNumber is < 1 or > 10) ||
+            command.Kind != CommandKind.FocusMonitor && command.MonitorNumber is not null ||
+            command.Kind == CommandKind.FocusMonitor && (command.WorkspaceId is not null ||
+                command.WorkspaceName is not null || command.WorkspaceNumber is not null ||
+                command.WindowId is not null || command.MonitorId is not null || command.Direction is not null ||
+                command.Amount is not null || command.Orientation is not null || command.Mode is not null ||
+                command.Paused is not null || command.NodeId is not null || command.Navigation is not null ||
+                command.CycleDirection is not null || command.Layout is not null || command.Position is not null ||
+                command.LayeredLayoutOptions is not null) ||
+            command.Kind == CommandKind.MoveSpatial && (command.WorkspaceId is not null ||
+                command.WorkspaceName is not null || command.WorkspaceNumber is not null ||
+                command.MonitorId is not null || command.MonitorNumber is not null || command.Amount is not null ||
+                command.Orientation is not null || command.Mode is not null || command.Paused is not null ||
+                command.NodeId is not null || command.Navigation is not null || command.CycleDirection is not null ||
+                command.Layout is not null || command.Position is not null || command.LayeredLayoutOptions is not null) ||
             command.Kind == CommandKind.ActivateWorkspace && command.MonitorId == Guid.Empty ||
             command.Kind != CommandKind.SetWorkspaceLayout && command.Layout is not null ||
             command.Kind != CommandKind.SetWorkspaceLayout && command.LayeredLayoutOptions is not null ||
@@ -122,6 +151,70 @@ public sealed record ManagerConfiguration
             (command.NodeId is not null || command.Navigation is not null) ||
             command.Kind != CommandKind.FocusCycle && command.CycleDirection is not null)
             throw new InvalidDataException("Shortcut command arguments are invalid.");
+    }
+
+    public IReadOnlyList<ShortcutBinding> BuildShortcutBindings()
+    {
+        var bindings = EnableDefaultShortcuts ? CreateDefaultShortcuts() : [];
+        foreach (var custom in Shortcuts)
+        {
+            var index = bindings.FindIndex(binding => (binding.Modifiers & 0xF) == (custom.Modifiers & 0xF) &&
+                                                      binding.VirtualKey == custom.VirtualKey);
+            if (index >= 0) bindings[index] = custom;
+            else bindings.Add(custom);
+        }
+
+        return bindings.AsReadOnly();
+    }
+
+    private List<ShortcutBinding> CreateDefaultShortcuts()
+    {
+        const uint alt = 1;
+        const uint control = 2;
+        const uint shift = 4;
+        const uint noRepeat = 0x4000;
+        var bindings = new List<ShortcutBinding>();
+        for (var number = 1; number <= 10; number++)
+        {
+            var virtualKey = number == 10 ? 0x30u : (uint)(0x30 + number);
+            bindings.Add(new(alt | noRepeat, virtualKey,
+                new ManagerCommand(CommandKind.FocusMonitor, MonitorNumber: number)));
+            if (number <= Workspaces.Count)
+                bindings.Add(new(alt | shift | noRepeat, virtualKey,
+                    new ManagerCommand(CommandKind.MoveToWorkspace, WorkspaceNumber: number)));
+        }
+
+        for (var index = 0; index < 4; index++)
+        {
+            var direction = (Direction)index;
+            var virtualKey = direction switch
+            {
+                Direction.Left => 0x25u,
+                Direction.Up => 0x26u,
+                Direction.Right => 0x27u,
+                Direction.Down => 0x28u,
+                _ => throw new ArgumentOutOfRangeException()
+            };
+            bindings.Add(new(control | alt | noRepeat, virtualKey,
+                new ManagerCommand(CommandKind.Focus, Direction: direction)));
+            bindings.Add(new(control | alt | shift | noRepeat, virtualKey,
+                new ManagerCommand(CommandKind.MoveSpatial, Direction: direction)));
+        }
+
+        var vimBindings = new (Direction Direction, uint VirtualKey)[]
+        {
+            (Direction.Left, 0x48), (Direction.Down, 0x4A),
+            (Direction.Up, 0x4B), (Direction.Right, 0x4C)
+        };
+        foreach (var (direction, virtualKey) in vimBindings)
+        {
+            bindings.Add(new(alt | noRepeat, virtualKey,
+                new ManagerCommand(CommandKind.Focus, Direction: direction)));
+            bindings.Add(new(alt | shift | noRepeat, virtualKey,
+                new ManagerCommand(CommandKind.MoveSpatial, Direction: direction)));
+        }
+
+        return bindings;
     }
 
     public static ManagerConfiguration Load(string path, bool createDefault)

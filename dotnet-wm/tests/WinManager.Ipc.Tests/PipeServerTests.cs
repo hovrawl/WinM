@@ -244,6 +244,24 @@ public sealed class PipeServerTests
     }
 
     [Fact]
+    public async Task NumberedMonitorAndWorkspaceCommandsRoundTripThroughStrictPipe()
+    {
+        await using var host = await PipeHost.StartAsync(workspaceDefinitions:
+            [new WorkspaceDefinition("One"), new WorkspaceDefinition("Two")]);
+        await using var client = await host.ConnectAsync();
+        var windowId = Assert.Single(host.Engine.Current!.Desktop.Windows).Id;
+
+        await Send(client, Request("command", new ManagerCommand(CommandKind.FocusMonitor, MonitorNumber: 1)), host.Token);
+        Assert.True((await Response(client, host.Token)).Success);
+        Assert.Equal(windowId, host.Engine.Current!.Desktop.FocusedWindowId);
+
+        await Send(client, Request("command", new ManagerCommand(CommandKind.MoveToWorkspace, WindowId: windowId,
+            WorkspaceNumber: 2)), host.Token);
+        Assert.True((await Response(client, host.Token)).Success);
+        Assert.Contains(windowId, host.Engine.Current!.Workspaces!.Single(workspace => workspace.Name == "Two").WindowIds);
+    }
+
+    [Fact]
     public async Task SubscribeSnapshotPrecedesResponseAndCommandsInterleaveCommittedEvents()
     {
         await using var host = await PipeHost.StartAsync();

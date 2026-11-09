@@ -1,6 +1,8 @@
 using System.Threading.Channels;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Styling;
 using WinManager.Contracts;
@@ -11,6 +13,95 @@ namespace WinManager.Ipc.Tests;
 
 public sealed class SpatialSwitcherTests
 {
+    [Fact]
+    public void WorkspaceLayoutCommandTargetsTheSelectedWorkspaceAndCarriesLayeredOptions()
+    {
+        var workspaceId = Guid.NewGuid();
+        var options = new LayeredLayoutOptions(0.73, 24);
+
+        var command = WorkspaceDetailsControl.CreateLayoutCommand(workspaceId, WorkspaceLayout.Layered, options);
+
+        Assert.Equal(CommandKind.SetWorkspaceLayout, command.Kind);
+        Assert.Equal(workspaceId, command.WorkspaceId);
+        Assert.Equal(WorkspaceLayout.Layered, command.Layout);
+        Assert.Equal(options, command.LayeredLayoutOptions);
+    }
+
+    [Fact]
+    public void WorkspaceLayoutTogglePreservesExistingOptionsAndUsesDefaultsForOlderSnapshots()
+    {
+        var options = new LayeredLayoutOptions(0.65, 12);
+        var workspace = Workspace("Layered", new(0, 0)) with { LayeredLayoutOptions = options };
+
+        var toggle = WorkspaceDetailsControl.CreateToggleLayoutCommand(workspace, WorkspaceLayout.Split);
+        var olderSnapshotToggle = WorkspaceDetailsControl.CreateToggleLayoutCommand(
+            workspace with { LayeredLayoutOptions = null }, WorkspaceLayout.Layered);
+
+        Assert.Equal(workspace.Id, toggle.WorkspaceId);
+        Assert.Equal(WorkspaceLayout.Split, toggle.Layout);
+        Assert.Equal(options, toggle.LayeredLayoutOptions);
+        Assert.Equal(LayeredLayoutOptions.Default, olderSnapshotToggle.LayeredLayoutOptions);
+    }
+
+    [Fact]
+    public async Task WorkspaceDetailsToggleButtonSubmitsForTheCurrentWorkspace()
+    {
+        var commandReceived =
+            new TaskCompletionSource<ManagerCommand>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var details = new WorkspaceDetailsControl(command =>
+        {
+            commandReceived.SetResult(command);
+            return Task.FromResult(new CommandResult(true, null, null, 2));
+        });
+        var options = new LayeredLayoutOptions(0.7, 18);
+        var workspace = Workspace("Code", new(0, 0)) with { LayeredLayoutOptions = options };
+        details.UpdateWorkspace(workspace, true);
+
+        var card = Assert.IsType<Border>(details.Content);
+        var rows = Assert.IsType<StackPanel>(card.Child);
+        var layoutButtons = Assert.IsType<StackPanel>(rows.Children[1]);
+        var settings = Assert.IsType<Grid>(rows.Children[2]);
+        Assert.IsType<TextBox>(Assert.IsType<StackPanel>(settings.Children[0]).Children[1]);
+        Assert.IsType<TextBox>(Assert.IsType<StackPanel>(settings.Children[1]).Children[1]);
+        var layeredButton = Assert.IsType<Button>(layoutButtons.Children[1]);
+        Assert.True(layeredButton.IsEnabled);
+        layeredButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+        var command = await commandReceived.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(workspace.Id, command.WorkspaceId);
+        Assert.Equal(WorkspaceLayout.Layered, command.Layout);
+        Assert.Equal(options, command.LayeredLayoutOptions);
+    }
+
+    [Fact]
+    public void WorkspaceDetailsParsesAndValidatesLayeredOptions()
+    {
+        Assert.True(WorkspaceDetailsControl.TryParseLayeredOptions("72.5", "16", out var options, out _));
+        Assert.Equal(new LayeredLayoutOptions(0.725, 16), options);
+
+        Assert.False(WorkspaceDetailsControl.TryParseLayeredOptions("0", "16", out _, out var widthError));
+        Assert.Contains("Width", widthError);
+        Assert.False(WorkspaceDetailsControl.TryParseLayeredOptions("101", "16", out _, out _));
+        Assert.False(WorkspaceDetailsControl.TryParseLayeredOptions("NaN", "16", out _, out _));
+        Assert.False(WorkspaceDetailsControl.TryParseLayeredOptions("80", "16.5", out _, out var spacingError));
+        Assert.Contains("spacing", spacingError);
+        Assert.False(WorkspaceDetailsControl.TryParseLayeredOptions("80", "257", out _, out _));
+    }
+
+    [Theory]
+    [InlineData(Key.Enter)]
+    [InlineData(Key.Space)]
+    [InlineData(Key.Escape)]
+    [InlineData(Key.Left)]
+    [InlineData(Key.Right)]
+    [InlineData(Key.Up)]
+    [InlineData(Key.Down)]
+    public void PopupKeysRemainAvailableToFocusedWorkspaceEditors(Key key)
+    {
+        Assert.False(WorkspaceDetailsControl.ShouldHandlePopupKey(true, key));
+        Assert.True(WorkspaceDetailsControl.ShouldHandlePopupKey(false, key));
+    }
+
     [Fact]
     public void SwitcherThemeResolvesSystemPaletteAndUpdatesSharedBrushes()
     {

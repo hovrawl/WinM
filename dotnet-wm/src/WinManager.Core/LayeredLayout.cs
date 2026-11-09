@@ -39,16 +39,16 @@ public static class LayeredLayout
         var areaHeight = work.Height - 2L * outer;
         var preferredPageWidth = (long)Math.Round(areaWidth * options.WindowWidthRatio,
             MidpointRounding.AwayFromZero);
-        var pageWidth = Math.Max(maximumMinimumWidth, preferredPageWidth);
-        var availableSpread = Math.Max(0, areaWidth - pageWidth);
-        var requestedSpread = (long)Math.Max(0, fitting.Length - 1) *
-                              GapPixels(options.HorizontalOffset, monitor.Dpi);
-        var spread = Math.Min(requestedSpread, availableSpread);
+        var maximumOffset = fitting.Length <= 1
+            ? 0
+            : Math.Max(0, areaWidth - maximumMinimumWidth) / (fitting.Length - 1);
+        var offset = Math.Min(GapPixels(options.HorizontalOffset, monitor.Dpi), maximumOffset);
+        var spread = offset * Math.Max(0, fitting.Length - 1);
+        var pageWidth = Math.Max(maximumMinimumWidth, Math.Min(preferredPageWidth, areaWidth - spread));
         var placements = new List<WindowPlacement>(fitting.Length);
         for (var index = 0; index < fitting.Length; index++)
         {
-            var offset = fitting.Length <= 1 ? 0 : spread * index / (fitting.Length - 1);
-            placements.Add(new(fitting[index].Id, Rectangle((long)work.X + outer + offset,
+            placements.Add(new(fitting[index].Id, Rectangle((long)work.X + outer + offset * index,
                 (long)work.Y + outer, pageWidth, areaHeight)));
         }
 

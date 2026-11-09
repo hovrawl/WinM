@@ -37,7 +37,7 @@ public enum WorkspaceLayout
     Layered
 }
 
-public sealed record LayeredLayoutOptions(double WindowWidthRatio = 0.8, int HorizontalOffset = 32)
+public sealed record LayeredLayoutOptions(double WindowWidthRatio = 1, int HorizontalOffset = 32)
 {
     public static LayeredLayoutOptions Default { get; } = new();
 
@@ -64,7 +64,9 @@ public enum CommandKind
     ClearSelection,
     FocusCycle,
     SetWorkspaceLayout,
-    SetWorkspacePosition
+    SetWorkspacePosition,
+    FocusMonitor,
+    MoveSpatial
 }
 
 public sealed record DeskPosition(double X, double Y)
@@ -92,7 +94,9 @@ public sealed record ManagerCommand(
     FocusCycleDirection? CycleDirection = null,
     WorkspaceLayout? Layout = null,
     DeskPosition? Position = null,
-    LayeredLayoutOptions? LayeredLayoutOptions = null);
+    LayeredLayoutOptions? LayeredLayoutOptions = null,
+    int? MonitorNumber = null,
+    int? WorkspaceNumber = null);
 
 public sealed record CommandResult(bool Success, string? ErrorCode, string? Message, long StateRevision);
 
@@ -119,7 +123,7 @@ public sealed record ContainerSelection(Guid WorkspaceId, Guid NodeId);
 public sealed record WorkspaceDefinition(
     string Name,
     string? MonitorDeviceName = null,
-    WorkspaceLayout Layout = WorkspaceLayout.Split,
+    WorkspaceLayout Layout = WorkspaceLayout.Layered,
     DeskPosition? Position = null,
     LayeredLayoutOptions? LayeredLayoutOptions = null);
 
@@ -129,7 +133,7 @@ public sealed record WorkspaceInfo(
     Guid MonitorId,
     bool Active,
     IReadOnlyList<Guid> WindowIds,
-    WorkspaceLayout Layout = WorkspaceLayout.Split,
+    WorkspaceLayout Layout = WorkspaceLayout.Layered,
     DeskPosition? Position = null,
     LayeredLayoutOptions? LayeredLayoutOptions = null);
 

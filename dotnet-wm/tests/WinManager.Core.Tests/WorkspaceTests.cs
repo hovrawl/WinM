@@ -454,11 +454,26 @@ public sealed class WorkspaceTests
         var workspace = Assert.Single(set.Snapshot);
         Assert.Equal(monitor.Id, workspace.MonitorId);
         Assert.True(workspace.Active);
+        Assert.Equal(WorkspaceLayout.Layered, workspace.Layout);
         Assert.Empty(workspace.WindowIds);
 
         var window = Window(monitor: monitor.Id);
         set.Reconcile(Desktop([window], monitor));
         Assert.Equal(workspace.Id, set.WorkspaceFor(window.Id));
         Assert.Equal(window.Id, Assert.Single(set.Snapshot.Single().WindowIds));
+    }
+
+    [Fact]
+    public void OmittedWorkspaceLayoutDefaultsToLayeredAndExplicitSplitIsPreserved()
+    {
+        var set = new WorkspaceSet(
+        [
+            new("Default"),
+            new("Split", Layout: WorkspaceLayout.Split)
+        ]);
+        set.Reconcile(Desktop([], Monitor(FirstMonitor)));
+
+        Assert.Equal(WorkspaceLayout.Layered, set.Snapshot.Single(workspace => workspace.Name == "Default").Layout);
+        Assert.Equal(WorkspaceLayout.Split, set.Snapshot.Single(workspace => workspace.Name == "Split").Layout);
     }
 }

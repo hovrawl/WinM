@@ -10,7 +10,8 @@ public sealed class DraggingTests
     public async Task DragMovesFreelyAndDropSwapsTilesWithoutExplicitRedraw()
     {
         await using var fake = new FakeWindowPlatform();
-        var engine = new ManagerEngine(fake);
+        var engine = new ManagerEngine(fake,
+            workspaceDefinitions: [new("Default", Layout: WorkspaceLayout.Split)]);
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(stop.Token);
         await engine.Ready.WaitAsync(stop.Token);
@@ -46,7 +47,8 @@ public sealed class DraggingTests
         await using var fake = new FakeWindowPlatform();
         var destination = new MonitorInfo(Guid.NewGuid(), "second", new(0, 0, 1000, 900), new(0, 0, 1000, 850), 96);
         fake.Desktop = fake.Desktop with { Monitors = fake.Desktop.Monitors.Append(destination).ToArray() };
-        var engine = new ManagerEngine(fake);
+        var engine = new ManagerEngine(fake,
+            workspaceDefinitions: [new("Default", Layout: WorkspaceLayout.Split)]);
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(stop.Token);
         await engine.Ready.WaitAsync(stop.Token);
@@ -76,7 +78,8 @@ public sealed class DraggingTests
     public async Task FloatingAndPausedDropsKeepUserGeometryWithoutSwappingTiles(bool paused)
     {
         await using var fake = new FakeWindowPlatform();
-        var engine = new ManagerEngine(fake);
+        var engine = new ManagerEngine(fake,
+            workspaceDefinitions: [new("Default", Layout: WorkspaceLayout.Split)]);
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(stop.Token);
         await engine.Ready.WaitAsync(stop.Token);
@@ -106,7 +109,8 @@ public sealed class DraggingTests
     public async Task CanceledMoveOrResizeDoesNotSwapTiles(bool resize)
     {
         await using var fake = new FakeWindowPlatform();
-        var engine = new ManagerEngine(fake);
+        var engine = new ManagerEngine(fake,
+            workspaceDefinitions: [new("Default", Layout: WorkspaceLayout.Split)]);
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(stop.Token);
         await engine.Ready.WaitAsync(stop.Token);
@@ -136,7 +140,8 @@ public sealed class DraggingTests
     public async Task DestroyedWindowDuringDragDoesNotPreventRemainingWindowReflow()
     {
         await using var fake = new FakeWindowPlatform();
-        var engine = new ManagerEngine(fake);
+        var engine = new ManagerEngine(fake,
+            workspaceDefinitions: [new("Default", Layout: WorkspaceLayout.Split)]);
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(stop.Token);
         await engine.Ready.WaitAsync(stop.Token);

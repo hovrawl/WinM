@@ -94,7 +94,8 @@ public sealed class WorkspaceManagerTests
             Id = new(2, 0, 0, new byte[8]), MonitorId = monitor.Id, MinimumWidth = 100, MinimumHeight = 100
         };
         fake.Desktop = new([monitor], [oversized, fitting], fitting.Id);
-        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        var engine = new ManagerEngine(fake,
+            workspaceDefinitions: [new("One", Layout: WorkspaceLayout.Split)]);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(timeout.Token);
         try
@@ -155,7 +156,8 @@ public sealed class WorkspaceManagerTests
             template with { Id = new(5, 0, 0, new byte[8]), MonitorId = secondary.Id }
         ];
         fake.Desktop = new([primary, secondary], windows, null);
-        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("1"), new("2")]);
+        var engine = new ManagerEngine(fake, workspaceDefinitions:
+            [new("1", Layout: WorkspaceLayout.Split), new("2", Layout: WorkspaceLayout.Split)]);
         var diagnostics = new List<IReadOnlyList<NativeActionFailure>>();
         engine.ActionsFailed += failures => diagnostics.Add(failures);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -242,7 +244,7 @@ public sealed class WorkspaceManagerTests
         var oversized = ordered[oversizedFirst ? 0 : 1] with { MinimumWidth = 1000000, MinimumHeight = 1000000 };
         var neighbor = ordered[oversizedFirst ? 1 : 0];
         fake.Desktop = fake.Desktop with { Windows = [oversized, neighbor] };
-        var engine = new ManagerEngine(fake);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("Default", Layout: WorkspaceLayout.Split)]);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(timeout.Token);
         try
@@ -274,7 +276,8 @@ public sealed class WorkspaceManagerTests
         var first = template with { Id = new(1, 0, 0, new byte[8]), MonitorId = monitor.Id, MinimumWidth = 600 };
         var second = template with { Id = new(2, 0, 0, new byte[8]), MonitorId = monitor.Id, MinimumWidth = 600 };
         fake.Desktop = new([monitor], [first, second], first.Id);
-        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        var engine = new ManagerEngine(fake,
+            workspaceDefinitions: [new("One", Layout: WorkspaceLayout.Split)]);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(timeout.Token);
         try
@@ -323,7 +326,7 @@ public sealed class WorkspaceManagerTests
             MonitorId = monitor.Id, Minimized = true, MinimumWidth = 100, MinimumHeight = 100
         };
         fake.Desktop = new([monitor], [focused, minimized], focused.Id);
-        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One", Layout: layout)]);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(timeout.Token);
         try
@@ -365,7 +368,8 @@ public sealed class WorkspaceManagerTests
             MonitorId = monitor.Id, Minimized = true, MinimumWidth = 600, MinimumHeight = 100
         };
         fake.Desktop = new([monitor], [focused, minimized], focused.Id);
-        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        var engine = new ManagerEngine(fake,
+            workspaceDefinitions: [new("One", Layout: WorkspaceLayout.Split)]);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(timeout.Token);
         try
@@ -411,7 +415,8 @@ public sealed class WorkspaceManagerTests
             MonitorId = monitor.Id, Minimized = true, MinimumWidth = 1200, MinimumHeight = 100
         };
         fake.Desktop = new([monitor], [focused, oversized], focused.Id);
-        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        var engine = new ManagerEngine(fake,
+            workspaceDefinitions: [new("One", Layout: WorkspaceLayout.Split)]);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(timeout.Token);
         try
@@ -449,7 +454,8 @@ public sealed class WorkspaceManagerTests
             MonitorId = monitor.Id, Minimized = true, MinimumWidth = 100, MinimumHeight = 100
         };
         fake.Desktop = new([monitor], [focused, minimized], focused.Id);
-        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        var engine = new ManagerEngine(fake,
+            workspaceDefinitions: [new("One", Layout: WorkspaceLayout.Split)]);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(timeout.Token);
         try
@@ -780,7 +786,8 @@ public sealed class WorkspaceManagerTests
     {
         await using var fake = new FakeWindowPlatform();
         fake.Desktop = fake.Desktop with { FocusedWindowId = null };
-        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        var engine = new ManagerEngine(fake,
+            workspaceDefinitions: [new("One", Layout: WorkspaceLayout.Split)]);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(timeout.Token);
         try
@@ -854,7 +861,8 @@ public sealed class WorkspaceManagerTests
     public async Task FailedLayeredReflowRestoresWorkspaceLayout()
     {
         await using var fake = new FakeWindowPlatform();
-        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        var engine = new ManagerEngine(fake,
+            workspaceDefinitions: [new("One", Layout: WorkspaceLayout.Split)]);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(timeout.Token);
         try
@@ -903,7 +911,8 @@ public sealed class WorkspaceManagerTests
             Windows = fake.Desktop.Windows.Select(window => window with { MinimumWidth = 600, MinimumHeight = 400 })
                 .ToArray()
         };
-        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        var engine = new ManagerEngine(fake,
+            workspaceDefinitions: [new("One", Layout: WorkspaceLayout.Split)]);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(timeout.Token);
         try

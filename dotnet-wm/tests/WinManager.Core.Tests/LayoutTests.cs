@@ -481,11 +481,11 @@ public sealed class LayoutTests
         var last = plan.Placements[^1].Bounds;
         Assert.Equal(monitor.WorkArea.X + 16, first.X);
         Assert.Equal(monitor.WorkArea.Y + 16, first.Y);
-        Assert.Equal(194, last.X - first.X);
+        Assert.Equal(704, last.X - first.X);
         Assert.Equal(first.Y, last.Y);
         Assert.All(plan.Placements, placement =>
         {
-            Assert.Equal(774, placement.Bounds.Width);
+            Assert.Equal(264, placement.Bounds.Width);
             Assert.Equal(668, placement.Bounds.Height);
             Assert.InRange(placement.Bounds.X, monitor.WorkArea.X,
                 monitor.WorkArea.X + monitor.WorkArea.Width - placement.Bounds.Width);
@@ -493,6 +493,39 @@ public sealed class LayoutTests
             Assert.InRange(placement.Bounds.Y, monitor.WorkArea.Y,
                 monitor.WorkArea.Y + monitor.WorkArea.Height - placement.Bounds.Height);
         });
+        Assert.All(plan.Placements.Zip(plan.Placements.Skip(1)), pair =>
+            Assert.Equal(64, pair.Second.Bounds.X - pair.First.Bounds.X));
+        Assert.Equal(monitor.WorkArea.X + monitor.WorkArea.Width - 16,
+            last.X + last.Width);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(5)]
+    public void LayeredDefaultFillsPaddedWorkAreaAndShrinksEveryPageForEachOffset(int windowCount)
+    {
+        var monitor = Monitor(1200, 900, 96, -100, 10) with
+        {
+            WorkArea = new(-90, 20, 1000, 700)
+        };
+        var windows = Enumerable.Range(1, windowCount).Select(index => Window(index)).ToArray();
+
+        var plan = LayeredLayout.Layout(monitor, windows, 8);
+
+        var first = plan.Placements[0].Bounds;
+        var last = plan.Placements[^1].Bounds;
+        Assert.Equal(984 - (windowCount - 1) * 32, first.Width);
+        Assert.All(plan.Placements, placement =>
+        {
+            Assert.Equal(first.Width, placement.Bounds.Width);
+            Assert.Equal(684, placement.Bounds.Height);
+            Assert.Equal(first.Y, placement.Bounds.Y);
+        });
+        Assert.Equal(monitor.WorkArea.X + 8, first.X);
+        Assert.Equal(monitor.WorkArea.X + monitor.WorkArea.Width - 8, last.X + last.Width);
+        Assert.All(plan.Placements.Zip(plan.Placements.Skip(1)), pair =>
+            Assert.Equal(32, pair.Second.Bounds.X - pair.First.Bounds.X));
     }
 
     [Fact]
@@ -566,6 +599,7 @@ public sealed class LayoutTests
         });
         Assert.Equal(-985, plan.Placements[0].Bounds.X);
         Assert.Equal(20, plan.Placements[1].Bounds.X - plan.Placements[0].Bounds.X);
+        Assert.All(plan.Placements, placement => Assert.Equal(350, placement.Bounds.Width));
         Assert.Equal(35, plan.Placements[0].Bounds.Y);
         Assert.Equal(plan.Placements[0].Bounds.Y, plan.Placements[1].Bounds.Y);
     }

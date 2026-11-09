@@ -46,7 +46,8 @@ try
     builder.Services.AddSingleton<HostRuntimeState>();
     HostComposition.AddNativeServices(builder.Services, configuration, recoveryPath);
     builder.Services.AddSingleton(services => new ManagerEngine(services.GetRequiredService<IWindowPlatform>(),
-        configuration.InnerGap, configuration.OuterGap, configuration.InputCapacity, configuration.Workspaces));
+        configuration.InnerGap, configuration.OuterGap, configuration.InputCapacity, configuration.Workspaces,
+        configuration.MonitorOrder));
     builder.Services.AddSingleton(services => new PipeServer(services.GetRequiredService<ManagerEngine>(), pipeName,
         configuration.MaximumClients, configuration.OutputCapacity));
     builder.Services.AddHostedService<ObservationService>();
@@ -136,7 +137,7 @@ internal sealed class ShortcutService(WindowsDesktopObserver platform, ManagerEn
         {
             await platform.StartAsync(stoppingToken);
             await manager.Ready.WaitAsync(stoppingToken);
-            var failures = await platform.RegisterShortcutsAsync(configuration.Shortcuts, stoppingToken);
+            var failures = await platform.RegisterShortcutsAsync(configuration.BuildShortcutBindings(), stoppingToken);
             if (failures.Count > 0) throw new InvalidOperationException(string.Join("; ", failures.Select(failure => failure.Message)));
             await foreach (var command in platform.ShortcutCommands(stoppingToken))
             {

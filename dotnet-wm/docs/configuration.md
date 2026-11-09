@@ -20,15 +20,21 @@ and `false` for an unviewed workspace. View assignments are not saved across
 manager restarts. See [the project goal](project-goal.md) and
 [the migration plan](desk-model-plan.md) for the remaining overview and persistence work.
 
-Example (shortcuts are disabled in the generated defaults):
+New workspaces use the horizontal `layered` page-stack layout by default. Set
+`layout` to `split` explicitly to use the split-tree layout; existing configuration
+values are preserved.
+
+Example configuration (default manager shortcuts are enabled unless opted out):
 
 ```json
 {
-  "workspaces": [{ "name": "1", "layout": "split", "position": { "x": 0, "y": 0 } }, { "name": "2", "layout": "layered", "position": { "x": 520, "y": -80 }, "layeredLayoutOptions": { "windowWidthRatio": 0.8, "horizontalOffset": 32 } }, { "name": "3" }],
+  "workspaces": [{ "name": "1", "layout": "split", "position": { "x": 0, "y": 0 } }, { "name": "2", "layout": "layered", "position": { "x": 520, "y": -80 }, "layeredLayoutOptions": { "windowWidthRatio": 1.0, "horizontalOffset": 32 } }, { "name": "3" }],
   "innerGap": 8,
   "outerGap": 8,
   "ignoredProcessNames": ["example.exe"],
   "ignoredClassNames": ["ExampleToolWindow"],
+  "enableDefaultShortcuts": true,
+  "monitorOrder": ["\\\\.\\DISPLAY2", "\\\\.\\DISPLAY1"],
   "shortcuts": [
     { "modifiers": 16390, "virtualKey": 80, "command": { "kind": "pause", "paused": true } },
     { "modifiers": 16390, "virtualKey": 82, "command": { "kind": "pause", "paused": false } },
@@ -45,6 +51,9 @@ Example (shortcuts are disabled in the generated defaults):
 }
 ```
 
+`shortcuts` contains optional custom bindings; matching generated key combinations
+are replaced by custom bindings rather than registered twice.
+
 - Names are unique, case-insensitive, nonblank strings (maximum 64 characters).
   An optional `monitorDeviceName` uses the device name from a snapshot, for example
   `\\.\DISPLAY1`, as an initial placement hint. Unbound entries fill currently
@@ -52,9 +61,16 @@ Example (shortcuts are disabled in the generated defaults):
   than available configured workspaces, the manager creates a uniquely named
   workspace for each remaining view. An unviewed workspace retains its identity,
   window assignments, and split tree when a monitor is removed.
+- `monitorOrder` optionally lists up to ten unique monitor device names from the
+  snapshot (for example `\\.\DISPLAY2`). Alt+Number uses this list as fixed
+  numbered slots. A disconnected configured monitor keeps its slot reserved;
+  connected monitors not listed are appended in stable primary/device-name/GUID
+  order. If the list is omitted or empty, all connected monitors use that stable
+  order. Alt+Number focuses the nearest eligible window on that monitor; it does
+  not activate another workspace view. An empty monitor returns `not_found`.
 - Each workspace can set `layout` to `split` or `layered`; omitted values default
-  to `split`. Optional `layeredLayoutOptions` tune `windowWidthRatio` (default
-  `0.8`, greater than zero and at most `1`) and `horizontalOffset` (default `32`
+  to `layered`. Optional `layeredLayoutOptions` tune `windowWidthRatio` (default
+  `1.0`, greater than zero and at most `1`) and `horizontalOffset` (default `32`
   DIPs, from `0` to `256`). Layered pages use the configured share of usable work
   width, remain full-height, and overlap on one horizontal line. The DPI-scaled
   horizontal offset is compressed when a larger stack would exceed the available
@@ -100,6 +116,24 @@ Example (shortcuts are disabled in the generated defaults):
   window list; shell, hidden/cloaked and inaccessible candidates are still filtered.
   Change these configuration lists and restart the host to include a configured-excluded
   window; the built-in companion exemption remains in effect.
+- `enableDefaultShortcuts` defaults to `true`. Alt+`1`…`9` and Alt+`0` focus
+  monitor slots 1–10. Alt+Shift+`1`…`9` and Alt+Shift+`0` move the focused window
+  to workspace slots 1–10 in configured workspace order; unavailable slots have
+  no generated binding. Set `enableDefaultShortcuts` to `false` to disable these
+  generated bindings while retaining custom `shortcuts`.
+- Alt+H/J/K/L focuses the nearest window left/down/up/right, respectively, in the
+  active workspace, falling back to the nearest window on a monitor in that
+  direction. Alt+Shift+H/J/K/L performs the corresponding spatial move: it floats
+  and positions the focused window beside a local neighbor, or moves it to the
+  neighboring monitor's viewed workspace when there is no local neighbor.
+- Three-finger directional gestures can be assigned in Windows Touchpad settings
+  to `Ctrl+Alt+Arrow`; these focus the nearest eligible window in the current
+  workspace, then fall back to the nearest eligible window on a monitor in that
+  direction. Four-finger gestures can be assigned to `Ctrl+Alt+Shift+Arrow`;
+  these float and move the focused window to the nearest directional local
+  window's origin, or, if none exists, move its workspace membership to the
+  neighboring monitor's viewed workspace and center it there. Configure the OS
+  gesture mapping manually; support depends on the touchpad and Windows version.
 - Shortcut modifier bits: Alt `1`, Control `2`, Shift `4`, Win `8`, NoRepeat
   `16384`. The example uses Control+Shift+NoRepeat. `virtualKey` uses Windows
   virtual-key codes; reserved F12 is rejected. Duplicate keys and invalid command
@@ -140,14 +174,18 @@ restarts are not currently configuration options; a fresh host starts with equal
 shares unless changed through runtime commands or resizing.
 
 Layered workspaces place every fitting tiled window in an overlapping horizontal
-page stack. `windowWidthRatio` sets each page's preferred width relative to the
-usable work width (subject to the largest fitting window minimum), while
-`horizontalOffset` sets the preferred start-to-start spacing in DIPs. When the
-whole stack cannot fit at that spacing, offsets compress evenly to the available
-horizontal spread; page width and full work-area height are preserved. A window
-over the work area's own width or height remains overflow; stack size alone does
-not overflow otherwise fitting pages. Focus cycling raises the selected page
-without changing workspace membership or tree order.
+page stack. `windowWidthRatio` is a preferred maximum page width relative to the
+usable work width (default `1.0`, subject to each fitting window's minimum), while
+`horizontalOffset` sets the preferred start-to-start spacing in DIPs. At the
+default 100% width, one page fills the padded work area; each additional page
+reduces every page's width by one offset so the stack still reaches the far edge.
+If the spacing would make any fitting page narrower than its minimum, the manager
+reduces the uniform offset to the largest value that preserves all fitting pages.
+An explicitly smaller width ratio caps each page and can leave unused space at
+the far edge. Pages retain full work-area height. A window over the work area's
+own width or height remains overflow; stack size alone does not overflow otherwise
+fitting pages. Focus cycling raises the selected page without changing workspace
+membership or tree order.
 
 Invalid work areas or gaps that cannot produce valid pixel rectangles return
 `layout_constraints`; windows that do not meet their minimum size remain in

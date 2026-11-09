@@ -30,6 +30,7 @@ internal sealed class SwitcherWindow : Window
     private readonly TextBlock status = new();
     private readonly TextBlock shortcutStatus = new();
     private readonly ComboBox monitorTarget = new();
+    private readonly WorkspaceDetailsControl workspaceDetails;
     private readonly CurrentWorkspaceWindow currentWorkspaceWindow;
     private Task? connectionRetry;
     private Button activateButton = null!;
@@ -54,7 +55,8 @@ internal sealed class SwitcherWindow : Window
         this.demoMode = demoMode;
         this.pipeName = pipeName;
         this.trayStatusChanged = trayStatusChanged;
-        currentWorkspaceWindow = new CurrentWorkspaceWindow(FocusWindowAsync);
+        workspaceDetails = new WorkspaceDetailsControl(ExecuteWorkspaceLayoutAsync);
+        currentWorkspaceWindow = new CurrentWorkspaceWindow(FocusWindowAsync, ExecuteWorkspaceLayoutAsync);
         Title = "Spatial switcher — One desk";
         Width = 716;
         Height = 592;
@@ -243,7 +245,10 @@ internal sealed class SwitcherWindow : Window
             ColumnSpacing = 16
         };
         selectedDetails.TextWrapping = TextWrapping.Wrap;
-        preview.Children.Add(selectedDetails);
+        var selection = new StackPanel { Spacing = 7 };
+        selection.Children.Add(selectedDetails);
+        selection.Children.Add(workspaceDetails);
+        preview.Children.Add(selection);
         var destination = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
         destination.Children.Add(SwitcherTheme.Caption("Activate on monitor"));
         monitorTarget.MinWidth = 190;
@@ -579,6 +584,7 @@ internal sealed class SwitcherWindow : Window
     private void UpdateSelectedDetails()
     {
         var workspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == selectedWorkspaceId);
+        workspaceDetails.UpdateWorkspace(workspace, connected && !demoMode && !commandBusy);
         if (workspace is null)
         {
             selectedDetails.Text = "Select a workspace";
@@ -612,6 +618,8 @@ internal sealed class SwitcherWindow : Window
 
     private void UpdateActions()
     {
+        workspaceDetails.SetAvailable(connected && !demoMode && !commandBusy);
+        currentWorkspaceWindow.SetWorkspaceCommandsAvailable(connected && !demoMode && !commandBusy);
         var workspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == selectedWorkspaceId);
         var capturedWorkspace =
             snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == popupContext.WorkspaceId);
@@ -641,6 +649,8 @@ internal sealed class SwitcherWindow : Window
 
     private void OnKeyDown(object? sender, KeyEventArgs args)
     {
+        if (!WorkspaceDetailsControl.ShouldHandlePopupKey(workspaceDetails.HasKeyboardFocus, args.Key)) return;
+
         if (args.Key == Key.Escape)
         {
             args.Handled = true;
@@ -710,6 +720,43 @@ internal sealed class SwitcherWindow : Window
         if (!connected || session is not { } activeSession)
             throw new InvalidOperationException("The manager is disconnected. Reconnect before focusing a window.");
         return activeSession.ExecuteAsync(SpatialSwitcherPresentation.FocusCommand(windowId), lifetime.Token);
+    }
+
+    private async Task<CommandResult> ExecuteWorkspaceLayoutAsync(ManagerCommand command)
+    {
+        var revision = snapshot?.StateRevision ?? 0;
+        if (!connected || demoMode || commandBusy || command.Kind != CommandKind.SetWorkspaceLayout ||
+            command.WorkspaceId is not { } workspaceId ||
+            snapshot?.Workspaces?.Any(workspace => workspace.Id == workspaceId) != true ||
+            session is not { IsConnected: true } activeSession)
+            return new(false, "not_ready",
+                "Workspace layout changes require a connected manager and a current workspace.",
+                revision);
+
+        var workspace = snapshot.Workspaces.First(candidate => candidate.Id == workspaceId);
+        commandBusy = true;
+        status.Text = $"Updating {workspace.Name} layout…";
+        UpdateActions();
+        try
+        {
+            var result = await activeSession.ExecuteAsync(command, lifetime.Token);
+            status.Text = result.Success
+                ? $"Updated {workspace.Name} layout · revision {result.StateRevision}"
+                : $"Workspace layout update failed · {result.ErrorCode}: {result.Message}";
+            return result;
+        }
+        catch (Exception error)
+        {
+            status.Text = activeSession.IsConnected
+                ? $"Workspace layout update failed · {error.Message}"
+                : $"Connection lost during layout update · outcome may be unknown. Reconnect and inspect state. {error.Message}";
+            throw;
+        }
+        finally
+        {
+            commandBusy = false;
+            UpdateActions();
+        }
     }
 
     private IReadOnlyList<WindowInfo> CurrentWindowCandidates()

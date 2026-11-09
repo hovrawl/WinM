@@ -15,7 +15,7 @@ public sealed class ResizingTests
     public async Task ResizeReflowsNeighborsDuringInteractionAndKeepsGeometryOnRelease(bool vertical, bool second, int delta)
     {
         await using var fake = new FakeWindowPlatform();
-        var engine = new ManagerEngine(fake);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("Default", Layout: WorkspaceLayout.Split)]);
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(stop.Token);
         await engine.Ready.WaitAsync(stop.Token);
@@ -61,7 +61,7 @@ public sealed class ResizingTests
     public async Task FloatingOrPausedResizeKeepsUserBoundsWithoutChangingSplits(bool paused)
     {
         await using var fake = new FakeWindowPlatform();
-        var engine = new ManagerEngine(fake);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("Default", Layout: WorkspaceLayout.Split)]);
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(stop.Token);
         await engine.Ready.WaitAsync(stop.Token);
@@ -90,7 +90,7 @@ public sealed class ResizingTests
     public async Task FinalResizeSampleOnReleaseUpdatesLayoutWithoutAnIntermediateNotification()
     {
         await using var fake = new FakeWindowPlatform();
-        var engine = new ManagerEngine(fake);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("Default", Layout: WorkspaceLayout.Split)]);
         using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var run = engine.RunAsync(stop.Token);
         await engine.Ready.WaitAsync(stop.Token);

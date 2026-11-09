@@ -42,6 +42,22 @@ window-management actions by the host, independent of configured ignore lists.
 
 ## Select and activate
 
+- Both switcher popups include the same workspace details control. In the spatial
+  switcher it follows the selected workspace card; in the window switcher it stays
+  bound to the workspace shown on the monitor captured when the popup opened. Use
+  **Use Split** or **Use Layered** to change the workspace layout, or edit the
+  layered preferred width cap and horizontal spacing in DIPs and choose
+  **Apply settings**. The settings apply to that explicit workspace ID; they are
+  disabled in demo mode, while disconnected, or while another command is running.
+- Layered width is a preferred maximum percentage from greater than 0 through 100
+  of the usable work width. At the 100% default, one page fills the padded work
+  area and each added page reduces every page by one horizontal offset while the
+  stack remains aligned to the far edge. Horizontal spacing is an integer from 0
+  to 256 DIPs; zero overlays pages. Missing layered options show their defaults
+  of 100% and 32 DIPs. Smaller explicit width caps may leave space at the far edge.
+  These runtime
+  changes last until the manager restarts; configure workspace layout options in
+  the manager configuration to establish restart defaults.
 - Workspace cards are positioned from `WorkspaceInfo.Position`, in logical desk
   units independent of monitor pixels, DPI, and the popup's zoom or size.
 - Cards are drawn for every workspace, including unviewed workspaces. Their small

@@ -20,6 +20,7 @@ internal sealed class CurrentWorkspaceWindow : Window
     private static readonly IReadOnlyList<SolidColorBrush> ShapeBrushes = SwitcherTheme.WindowShapePalette;
 
     private readonly Func<Guid, Task<CommandResult>> focusWindow;
+    private readonly WorkspaceDetailsControl workspaceDetails;
     private readonly StackPanel activeCards = new() { Orientation = Orientation.Horizontal, Spacing = 12 };
     private readonly StackPanel inactiveCards = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
     private readonly TextBlock workspaceTitle = new();
@@ -36,14 +37,16 @@ internal sealed class CurrentWorkspaceWindow : Window
     private bool commandBusy;
     private bool allowClose;
 
-    public CurrentWorkspaceWindow(Func<Guid, Task<CommandResult>> focusWindow)
+    public CurrentWorkspaceWindow(Func<Guid, Task<CommandResult>> focusWindow,
+        Func<ManagerCommand, Task<CommandResult>> executeWorkspaceLayout)
     {
         this.focusWindow = focusWindow;
+        workspaceDetails = new WorkspaceDetailsControl(executeWorkspaceLayout);
         Title = "Current workspace · One desk";
         Width = 790;
-        Height = 510;
+        Height = 620;
         MinWidth = 620;
-        MinHeight = 420;
+        MinHeight = 540;
         CanResize = false;
         ShowInTaskbar = false;
         WindowDecorations = Avalonia.Controls.WindowDecorations.None;
@@ -98,6 +101,9 @@ internal sealed class CurrentWorkspaceWindow : Window
         RenderWindows();
     }
 
+    public void SetWorkspaceCommandsAvailable(bool available) =>
+        workspaceDetails.SetAvailable(available && !commandBusy);
+
     public void CycleWindow(bool previous)
     {
         var candidates = Candidates();
@@ -119,8 +125,8 @@ internal sealed class CurrentWorkspaceWindow : Window
         {
             RowDefinitions = new RowDefinitions
             {
-                new(GridLength.Auto), new(GridLength.Auto), new(new GridLength(1, GridUnitType.Star)),
-                new(GridLength.Auto), new(GridLength.Auto)
+                new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Auto),
+                new(new GridLength(1, GridUnitType.Star)), new(GridLength.Auto), new(GridLength.Auto)
             },
             RowSpacing = 11
         };
@@ -156,6 +162,9 @@ internal sealed class CurrentWorkspaceWindow : Window
         Grid.SetRow(workspaceTitle, 1);
         layout.Children.Add(workspaceTitle);
 
+        Grid.SetRow(workspaceDetails, 2);
+        layout.Children.Add(workspaceDetails);
+
         var activeArea = new Grid
         {
             RowDefinitions = new RowDefinitions { new(GridLength.Auto), new(new GridLength(1, GridUnitType.Star)) },
@@ -173,7 +182,7 @@ internal sealed class CurrentWorkspaceWindow : Window
         };
         Grid.SetRow(activeScroll, 1);
         activeArea.Children.Add(activeScroll);
-        Grid.SetRow(activeArea, 2);
+        Grid.SetRow(activeArea, 3);
         layout.Children.Add(activeArea);
 
         var inactiveBar = new Grid
@@ -193,7 +202,7 @@ internal sealed class CurrentWorkspaceWindow : Window
         };
         Grid.SetRow(inactiveScroll, 1);
         inactiveBar.Children.Add(inactiveScroll);
-        Grid.SetRow(inactiveBar, 3);
+        Grid.SetRow(inactiveBar, 4);
         layout.Children.Add(inactiveBar);
 
         var footer = new Grid
@@ -219,7 +228,7 @@ internal sealed class CurrentWorkspaceWindow : Window
         focusButton.Click += async (_, _) => await FocusSelectedWindowAsync();
         Grid.SetColumn(focusButton, 1);
         footer.Children.Add(focusButton);
-        Grid.SetRow(footer, 4);
+        Grid.SetRow(footer, 5);
         layout.Children.Add(footer);
 
         root.Child = layout;
@@ -233,6 +242,7 @@ internal sealed class CurrentWorkspaceWindow : Window
 
         if (workspace is null)
         {
+            workspaceDetails.UpdateWorkspace(null, false);
             workspaceTitle.Text = "Waiting for workspace state";
             activeHeading.Text = "ACTIVE WINDOWS";
             inactiveHeading.Text = "INACTIVE WINDOWS";
@@ -242,6 +252,8 @@ internal sealed class CurrentWorkspaceWindow : Window
             focusButton.IsEnabled = false;
             return;
         }
+
+        workspaceDetails.UpdateWorkspace(workspace, connected && !commandBusy);
 
         var targetMonitor = snapshot?.Desktop.Monitors.FirstOrDefault(candidate => candidate.Id == monitorId);
         workspaceTitle.Text =
@@ -367,6 +379,8 @@ internal sealed class CurrentWorkspaceWindow : Window
 
     private void OnKeyDown(object? sender, KeyEventArgs args)
     {
+        if (!WorkspaceDetailsControl.ShouldHandlePopupKey(workspaceDetails.HasKeyboardFocus, args.Key)) return;
+
         if (args.Key == Key.Escape)
         {
             args.Handled = true;
@@ -397,6 +411,7 @@ internal sealed class CurrentWorkspaceWindow : Window
         commandBusy = true;
         status.Text = $"Focusing {target.Title}…";
         focusButton.IsEnabled = false;
+        workspaceDetails.SetAvailable(false);
         try
         {
             var result = await focusWindow(targetId);
@@ -417,6 +432,7 @@ internal sealed class CurrentWorkspaceWindow : Window
         finally
         {
             commandBusy = false;
+            workspaceDetails.SetAvailable(connected);
             RenderWindows();
         }
     }
@@ -440,5 +456,4 @@ internal sealed class CurrentWorkspaceWindow : Window
         FontWeight = weight ?? FontWeight.Normal,
         VerticalAlignment = VerticalAlignment.Center
     };
-
 }
