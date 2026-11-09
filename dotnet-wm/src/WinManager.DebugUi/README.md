@@ -29,6 +29,9 @@ the SDK's current-user/session pipe. The companion never starts the manager.
 
 - The single desk contains all workspace groups, including unviewed workspaces.
   Every connected monitor view is shown even if its workspace has no windows.
+- Each workspace displays its current `Split` or `Layered` layout. Select a
+  workspace to choose either layout; layered workspaces also provide previous/next
+  page controls that cycle focus through the visible tiled windows.
 - Windows show physical monitor versus workspace membership, native exclusion
   flags, explicit tiling overrides, visibility, minimization, overflow and minimum
   size. The selected-window display identifies the target by title and ID and

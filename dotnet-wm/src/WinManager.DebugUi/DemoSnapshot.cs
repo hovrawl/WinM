@@ -25,12 +25,13 @@ internal static class DemoSnapshot
                 false, WindowMode.Tiling),
             new(overflow, left, "Preview — cannot fit", "Preview", "PreviewWindow", new(0, 0, 1920, 1040), true, true,
                 false, WindowMode.Tiling, MinimumWidth: 2400, LayoutOverflow: true),
-            new(ignored, right, "Full-screen app (default ignored)", "Video", "VideoSurface", new(1920, 0, 1920, 1080), true, false,
+            new(ignored, right, "Full-screen app (default ignored)", "Video", "VideoSurface", new(1920, 0, 1920, 1080),
+                true, false,
                 true, WindowMode.Tiling)
         ];
         WorkspaceInfo[] workspaces =
         [
-            new(code, "Code", left, true, [staged, overflow, ignored]),
+            new(code, "Code", left, true, [staged, overflow, ignored], WorkspaceLayout.Layered),
             new(chat, "Chat", right, true, []),
             new(unviewed, "Unviewed", Guid.Empty, false, [])
         ];

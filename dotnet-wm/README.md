@@ -11,9 +11,9 @@ workspace identity. See [the one-desk goal](docs/project-goal.md) and its
 [migration plan](docs/desk-model-plan.md) for implemented behavior and remaining work.
 
 - Native desktop discovery, stable window identities, serialized commands,
-  horizontal/vertical split layouts, DPI-scaled gaps, minimum-size-aware overflow
-  staging with recovery-protected minimization, directional focus/movement, split
-  resize, floating mode, and application-minimized/fullscreen exclusions.
+  horizontal/vertical split layouts and layered page stacks, DPI-scaled gaps,
+  minimum-size-aware overflow staging with recovery-protected minimization,
+  directional focus/movement, split resize, floating mode, and exclusions.
 - Semantic fullscreen/popup/tool/owned/no-activate exclusions by default, with
   per-window `setMode`/`toggleMode` overrides through shortcuts, CLI, and SDK.
 - Explicitly returning a window to floating restores its last observed pre-tiling
@@ -24,6 +24,9 @@ workspace identity. See [the one-desk goal](docs/project-goal.md) and its
 - Live tiled-window resizing: neighboring tiles reflow as split boundaries move,
   and the new proportions persist on release. Default columns share width equally;
   windows that cannot fit remain managed as minimized layout overflow.
+- Per-workspace `split` or `layered` layout selection. Layered pages overlap at
+  useful sizes and can be navigated with tiling focus-cycle commands; pages that
+  individually exceed the work area remain visible as layout overflow.
 - Desk-owned workspaces with exclusive, transferable monitor views, deterministic
   source fallback, monitor hotplug handling, safe visibility, and an acknowledged
   crash-recovery helper. `WorkspaceViews` exposes current monitor assignments.

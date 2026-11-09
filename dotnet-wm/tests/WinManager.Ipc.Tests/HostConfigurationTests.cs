@@ -28,6 +28,7 @@ public sealed class HostConfigurationTests
     [InlineData("{\"outerGap\":300}")]
     [InlineData("{\"innerGap\":1,\"InnerGap\":2}")]
     [InlineData("{\"workspaces\":[{\"name\":\"one\"},{\"name\":\"ONE\"}]}")]
+    [InlineData("{\"workspaces\":[{\"name\":\"one\",\"layout\":\"unknown\"}]}")]
     [InlineData("{\"workspaces\":null}")]
     [InlineData("{\"ignoredProcessNames\":[\"\"]}")]
     [InlineData("{\"shortcuts\":[{\"modifiers\":16,\"virtualKey\":65,\"command\":{\"kind\":\"redraw\"}}]}")]
@@ -46,7 +47,8 @@ public sealed class HostConfigurationTests
     public void ToggleModeShortcutRequiresNoModeOrWindowId()
     {
         var config = JsonSerializer.Deserialize<ManagerConfiguration>(
-            """{"shortcuts":[{"modifiers":16390,"virtualKey":84,"command":{"kind":"toggleMode"}}]}""", Protocol.JsonOptions)!;
+            """{"shortcuts":[{"modifiers":16390,"virtualKey":84,"command":{"kind":"toggleMode"}}]}""",
+            Protocol.JsonOptions)!;
         config.Validate();
         var command = Assert.Single(config.Shortcuts).Command;
         Assert.Equal(CommandKind.ToggleMode, command.Kind);
@@ -76,7 +78,46 @@ public sealed class HostConfigurationTests
             new(CommandKind.Redraw, CycleDirection: FocusCycleDirection.Next)
         };
         foreach (var command in invalid)
-            Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration { Shortcuts = [new(2, 65, command)] }).Validate());
+            Assert.Throws<InvalidDataException>(() =>
+                (new ManagerConfiguration { Shortcuts = [new(2, 65, command)] }).Validate());
+    }
+
+    [Fact]
+    public void WorkspaceLayoutDefaultsRoundTripAndShortcutsValidateTargets()
+    {
+        using var directory = new TestDirectory();
+        var file = Path.Combine(directory.Path, "config.json");
+        File.WriteAllText(file, """
+                                {
+                                  "workspaces": [{ "name": "Layered", "layout": "layered" }],
+                                  "shortcuts": [{ "modifiers": 2, "virtualKey": 76,
+                                    "command": { "kind": "setWorkspaceLayout", "workspaceName": "Layered", "layout": "layered" } }]
+                                }
+                                """);
+
+        var loaded = ManagerConfiguration.Load(file, createDefault: false);
+
+        Assert.Equal(WorkspaceLayout.Layered, Assert.Single(loaded.Workspaces).Layout);
+        var shortcut = Assert.Single(loaded.Shortcuts).Command;
+        Assert.Equal(CommandKind.SetWorkspaceLayout, shortcut.Kind);
+        Assert.Equal(WorkspaceLayout.Layered, shortcut.Layout);
+        Assert.Equal("Layered", shortcut.WorkspaceName);
+
+        var invalid = new ManagerCommand[]
+        {
+            new(CommandKind.SetWorkspaceLayout, WorkspaceName: "Layered"),
+            new(CommandKind.SetWorkspaceLayout, WorkspaceName: "missing", Layout: WorkspaceLayout.Layered),
+            new(CommandKind.SetWorkspaceLayout, WorkspaceName: "Layered", Layout: (WorkspaceLayout)99),
+            new(CommandKind.SetWorkspaceLayout, WorkspaceId: Guid.Empty, Layout: WorkspaceLayout.Layered),
+            new(CommandKind.SetWorkspaceLayout, WorkspaceName: "Layered", Layout: WorkspaceLayout.Layered,
+                Mode: WindowMode.Tiling),
+            new(CommandKind.Redraw, Layout: WorkspaceLayout.Layered)
+        };
+        foreach (var command in invalid)
+            Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration
+            {
+                Shortcuts = [new(2, 76, command)]
+            }).Validate());
     }
 
     [Fact]
@@ -94,14 +135,16 @@ public sealed class HostConfigurationTests
             new(CommandKind.Redraw, Navigation: ContainerNavigation.Parent)
         };
         foreach (var command in invalid)
-            Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration { Shortcuts = [new(2, 65, command)] }).Validate());
+            Assert.Throws<InvalidDataException>(() =>
+                (new ManagerConfiguration { Shortcuts = [new(2, 65, command)] }).Validate());
     }
 
     [Fact]
     public void DuplicateShortcutsAndUnknownWorkspaceCommandAreRejected()
     {
         var shortcut = new ShortcutBinding(2, 65, new(CommandKind.Redraw));
-        Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration { Shortcuts = [shortcut, shortcut] }).Validate());
+        Assert.Throws<InvalidDataException>(() =>
+            (new ManagerConfiguration { Shortcuts = [shortcut, shortcut] }).Validate());
         Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration
         {
             Shortcuts = [new(2, 65, new(CommandKind.ActivateWorkspace, WorkspaceName: "unknown"))]
@@ -117,8 +160,11 @@ public sealed class HostConfigurationTests
     {
         (new ManagerConfiguration
         {
-            Shortcuts = [new(2, 65, new(CommandKind.ActivateWorkspace,
-                WorkspaceName: "2", MonitorId: Guid.NewGuid()))]
+            Shortcuts =
+            [
+                new(2, 65, new(CommandKind.ActivateWorkspace,
+                    WorkspaceName: "2", MonitorId: Guid.NewGuid()))
+            ]
         }).Validate();
         var invalid = new ManagerCommand[]
         {
@@ -126,7 +172,8 @@ public sealed class HostConfigurationTests
             new(CommandKind.Pause, Paused: true, MonitorId: Guid.NewGuid())
         };
         foreach (var command in invalid)
-            Assert.Throws<InvalidDataException>(() => (new ManagerConfiguration { Shortcuts = [new(2, 65, command)] }).Validate());
+            Assert.Throws<InvalidDataException>(() =>
+                (new ManagerConfiguration { Shortcuts = [new(2, 65, command)] }).Validate());
     }
 
     [Fact]
@@ -151,6 +198,7 @@ public sealed class HostConfigurationTests
             for (var index = 0; index < 40; index++) logger.LogInformation("{Message}", new string('a', 180));
             logger.LogError("{Message}", new string('x', 10000));
         }
+
         var files = Directory.GetFiles(directory.Path);
         Assert.Equal(3, files.Length);
         Assert.All(files, file => Assert.InRange(new FileInfo(file).Length, 1, 1024));
@@ -159,7 +207,9 @@ public sealed class HostConfigurationTests
 
     private sealed class TestDirectory : IDisposable
     {
-        public string Path { get; } = System.IO.Path.Combine(AppContext.BaseDirectory, "HostTestData", Guid.NewGuid().ToString("N"));
+        public string Path { get; } =
+            System.IO.Path.Combine(AppContext.BaseDirectory, "HostTestData", Guid.NewGuid().ToString("N"));
+
         public TestDirectory() => Directory.CreateDirectory(Path);
         public void Dispose() => Directory.Delete(Path, recursive: true);
     }

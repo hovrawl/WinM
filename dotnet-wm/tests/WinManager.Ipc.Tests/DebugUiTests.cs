@@ -1,3 +1,4 @@
+using System.Text.Json;
 using WinManager.Contracts;
 using WinManager.DebugUi;
 using Xunit;
@@ -39,7 +40,8 @@ public sealed class DebugUiTests
         var description = InspectorPresentation.CommandDescription(InspectorCommands.SetMode(window.Id, mode), window);
         var differentSelection = window with { Id = Guid.NewGuid(), Title = "Different selection" };
 
-        foreach (var outcome in new[] { "Sending…", "Command completed", "Command failed", "Connection lost during command" })
+        foreach (var outcome in new[]
+                     { "Sending…", "Command completed", "Command failed", "Connection lost during command" })
         {
             var feedback = InspectorPresentation.CommandFeedback(description, outcome);
             Assert.Contains(mode.ToString(), feedback);
@@ -48,6 +50,7 @@ public sealed class DebugUiTests
             Assert.Contains(outcome, feedback);
             Assert.DoesNotContain(differentSelection.Id.ToString(), feedback);
         }
+
         Assert.Contains(window.Title, InspectorPresentation.SelectedWindow(window));
         Assert.Contains(window.Id.ToString(), InspectorPresentation.SelectedWindow(window));
         Assert.Contains(window.Mode.ToString(), InspectorPresentation.SelectedWindow(window));
@@ -63,14 +66,15 @@ public sealed class DebugUiTests
             IsPopup = false, IsToolWindow = false, IsOwned = false, IsNoActivate = false
         };
         foreach (var excluded in new[]
-        {
-            window with { Fullscreen = true }, window with { IsPopup = true },
-            window with { IsToolWindow = true }, window with { IsOwned = true },
-            window with { IsNoActivate = true }
-        })
+                 {
+                     window with { Fullscreen = true }, window with { IsPopup = true },
+                     window with { IsToolWindow = true }, window with { IsOwned = true },
+                     window with { IsNoActivate = true }
+                 })
         {
             Assert.True(InspectorPresentation.CanSetMode(excluded, WindowMode.Tiling, true));
-            Assert.False(InspectorPresentation.CanSetMode(excluded with { TilingOverride = true }, WindowMode.Tiling, true));
+            Assert.False(InspectorPresentation.CanSetMode(excluded with { TilingOverride = true }, WindowMode.Tiling,
+                true));
         }
     }
 
@@ -82,7 +86,8 @@ public sealed class DebugUiTests
         var description = InspectorPresentation.CommandDescription(command, window);
         Assert.Contains(window.Id.ToString(), description);
         Assert.True(description.Length < 300);
-        Assert.Contains("Untitled window", InspectorPresentation.CommandDescription(command, window with { Title = "" }));
+        Assert.Contains("Untitled window",
+            InspectorPresentation.CommandDescription(command, window with { Title = "" }));
         Assert.Contains(window.Id.ToString(), InspectorPresentation.CommandDescription(command, null));
         var other = window with { Id = Guid.NewGuid(), Title = "Not the command target" };
         var mismatched = InspectorPresentation.CommandDescription(command, other);
@@ -107,6 +112,11 @@ public sealed class DebugUiTests
             InspectorCommands.SetMode(window, WindowMode.Tiling));
         Assert.Equal(new(CommandKind.SetMode, WindowId: window, Mode: WindowMode.Floating),
             InspectorCommands.SetMode(window, WindowMode.Floating));
+        Assert.Equal(new(CommandKind.SetWorkspaceLayout, WorkspaceId: workspace, Layout: WorkspaceLayout.Layered),
+            InspectorCommands.SetWorkspaceLayout(workspace, WorkspaceLayout.Layered));
+        Assert.Equal(new(CommandKind.FocusCycle, WorkspaceId: workspace, Mode: WindowMode.Tiling,
+                CycleDirection: FocusCycleDirection.Next),
+            InspectorCommands.CycleWorkspacePages(workspace, FocusCycleDirection.Next));
     }
 
     [Fact]
@@ -118,6 +128,42 @@ public sealed class DebugUiTests
         Assert.Throws<InvalidOperationException>(() => InspectorCommands.MoveToWorkspace(Guid.NewGuid(), null));
         Assert.Throws<InvalidOperationException>(() => InspectorCommands.Focus(null));
         Assert.Throws<InvalidOperationException>(() => InspectorCommands.SetMode(Guid.Empty, WindowMode.Tiling));
+        Assert.Throws<InvalidOperationException>(() =>
+            InspectorCommands.SetWorkspaceLayout(null, WorkspaceLayout.Layered));
+        Assert.Throws<InvalidOperationException>(() =>
+            InspectorCommands.CycleWorkspacePages(Guid.Empty, FocusCycleDirection.Next));
+    }
+
+    [Fact]
+    public void LayeredPageNavigationRequiresAnActiveLayeredWorkspaceWithMultipleFocusableTiles()
+    {
+        var snapshot = DemoSnapshot.Create();
+        var workspace = snapshot.Workspaces!.Single(candidate => candidate.Layout == WorkspaceLayout.Layered);
+        var secondPage = snapshot.Desktop.Windows[0] with { Id = Guid.NewGuid(), Title = "Second page" };
+        var layered = workspace with { WindowIds = workspace.WindowIds.Append(secondPage.Id).ToArray() };
+        var desktop = snapshot.Desktop with { Windows = snapshot.Desktop.Windows.Append(secondPage).ToArray() };
+
+        Assert.True(InspectorPresentation.CanCyclePages(layered, desktop, true));
+        Assert.False(InspectorPresentation.CanCyclePages(layered with { Active = false }, desktop, true));
+        Assert.False(
+            InspectorPresentation.CanCyclePages(layered with { Layout = WorkspaceLayout.Split }, desktop, true));
+        Assert.False(InspectorPresentation.CanCyclePages(layered, desktop, false));
+        Assert.False(InspectorPresentation.CanCyclePages(layered, desktop with
+        {
+            Windows = desktop.Windows.Select(window => window with { Minimized = true }).ToArray()
+        }, true));
+    }
+
+    [Fact]
+    public void WorkspaceLayoutSurvivesSnapshotSerialization()
+    {
+        var snapshot = DemoSnapshot.Create();
+        var serialized = JsonSerializer.Serialize(snapshot, Protocol.JsonOptions);
+        var restored = JsonSerializer.Deserialize<ManagerSnapshot>(serialized, Protocol.JsonOptions)!;
+
+        Assert.Equal(snapshot.Workspaces!.Select(workspace => workspace.Layout),
+            restored.Workspaces!.Select(workspace => workspace.Layout));
+        Assert.Contains("\"layout\":\"layered\"", serialized);
     }
 
     [Fact]

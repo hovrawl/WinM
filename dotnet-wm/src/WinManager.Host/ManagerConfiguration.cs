@@ -20,15 +20,19 @@ public sealed record ManagerConfiguration
 
     public void Validate()
     {
-        if (InnerGap is < 0 or > 256 || OuterGap is < 0 or > 256) throw new InvalidDataException("Gaps must be between 0 and 256 DIPs.");
+        if (InnerGap is < 0 or > 256 || OuterGap is < 0 or > 256)
+            throw new InvalidDataException("Gaps must be between 0 and 256 DIPs.");
         if (InputCapacity is < 1 or > 4096 || MaximumClients is < 1 or > 64 || OutputCapacity is < 8 or > 1024)
             throw new InvalidDataException("Invalid queue or client limits.");
         if (LogMaximumBytes is < 65536 or > 20971520 || LogFileCount is < 2 or > 10)
             throw new InvalidDataException("Invalid log rotation limits.");
         if (Workspaces is null || Workspaces.Count is < 1 or > 128 ||
-            Workspaces.Any(workspace => workspace is null || string.IsNullOrWhiteSpace(workspace.Name) || workspace.Name.Length > 64 ||
-                workspace.MonitorDeviceName is { Length: > 256 }) ||
-            Workspaces.Select(workspace => workspace.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Workspaces.Count)
+            Workspaces.Any(workspace => workspace is null || string.IsNullOrWhiteSpace(workspace.Name) ||
+                                        workspace.Name.Length > 64 ||
+                                        workspace.MonitorDeviceName is { Length: > 256 } ||
+                                        !Enum.IsDefined(workspace.Layout)) ||
+            Workspaces.Select(workspace => workspace.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() !=
+            Workspaces.Count)
             throw new InvalidDataException("Workspace names must be nonblank and unique.");
         ValidateIgnores(IgnoredProcessNames);
         ValidateIgnores(IgnoredClassNames);
@@ -46,7 +50,8 @@ public sealed record ManagerConfiguration
 
     private static void ValidateIgnores(IReadOnlyList<string>? values)
     {
-        if (values is null || values.Count > 256 || values.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 256))
+        if (values is null || values.Count > 256 ||
+            values.Any(value => string.IsNullOrWhiteSpace(value) || value.Length > 256))
             throw new InvalidDataException("Ignore entries must be nonblank strings.");
     }
 
@@ -54,9 +59,11 @@ public sealed record ManagerConfiguration
     {
         if (command is null || !Enum.IsDefined(command.Kind) ||
             command.Direction is { } direction && !Enum.IsDefined(direction) ||
-            command.Mode is { } mode && !Enum.IsDefined(mode) || command.Orientation is { } orientation && !Enum.IsDefined(orientation) ||
+            command.Mode is { } mode && !Enum.IsDefined(mode) ||
+            command.Orientation is { } orientation && !Enum.IsDefined(orientation) ||
             command.Navigation is { } navigation && !Enum.IsDefined(navigation) ||
-            command.CycleDirection is { } cycleDirection && !Enum.IsDefined(cycleDirection))
+            command.CycleDirection is { } cycleDirection && !Enum.IsDefined(cycleDirection) ||
+            command.Layout is { } layout && !Enum.IsDefined(layout))
             throw new InvalidDataException("Shortcut command has an unknown enum value.");
         var valid = command.Kind switch
         {
@@ -68,19 +75,36 @@ public sealed record ManagerConfiguration
             CommandKind.ActivateWorkspace or CommandKind.MoveToWorkspace =>
                 command.WorkspaceId is { } id && id != Guid.Empty || command.WorkspaceName is { } name &&
                 Workspaces.Any(workspace => string.Equals(workspace.Name, name, StringComparison.OrdinalIgnoreCase)),
+            CommandKind.SetWorkspaceLayout => command.Layout is not null &&
+                                              (command.WorkspaceId is { } id && id != Guid.Empty ||
+                                               command.WorkspaceName is { } name &&
+                                               Workspaces.Any(workspace => string.Equals(workspace.Name, name,
+                                                   StringComparison.OrdinalIgnoreCase))),
             CommandKind.MoveToMonitor => command.MonitorId is { } id && id != Guid.Empty,
             CommandKind.SelectContainer => command.NodeId is null ||
-                command.NodeId != Guid.Empty && command.Navigation is null && command.WindowId is null,
+                                           command.NodeId != Guid.Empty && command.Navigation is null &&
+                                           command.WindowId is null,
             CommandKind.FocusCycle => command.Direction is null &&
-                (command.WorkspaceId is null && command.WorkspaceName is null ||
-                 command.WorkspaceId is { } id && id != Guid.Empty || command.WorkspaceName is { } name &&
-                 Workspaces.Any(workspace => string.Equals(workspace.Name, name, StringComparison.OrdinalIgnoreCase))),
+                                      (command.WorkspaceId is null && command.WorkspaceName is null ||
+                                       command.WorkspaceId is { } id && id != Guid.Empty ||
+                                       command.WorkspaceName is { } name &&
+                                       Workspaces.Any(workspace =>
+                                           string.Equals(workspace.Name, name, StringComparison.OrdinalIgnoreCase))),
             _ => true
         };
         if (!valid || command.WorkspaceId is not null && command.WorkspaceName is not null ||
             command.Kind == CommandKind.ActivateWorkspace && command.MonitorId == Guid.Empty ||
-            command.MonitorId is not null && command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToMonitor) ||
-            command.Kind != CommandKind.SelectContainer && (command.NodeId is not null || command.Navigation is not null) ||
+            command.Kind != CommandKind.SetWorkspaceLayout && command.Layout is not null ||
+            command.Kind == CommandKind.SetWorkspaceLayout && (command.WindowId is not null ||
+                                                               command.Direction is not null ||
+                                                               command.Amount is not null ||
+                                                               command.Orientation is not null ||
+                                                               command.Mode is not null ||
+                                                               command.Paused is not null) ||
+            command.MonitorId is not null &&
+            command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToMonitor) ||
+            command.Kind != CommandKind.SelectContainer &&
+            (command.NodeId is not null || command.Navigation is not null) ||
             command.Kind != CommandKind.FocusCycle && command.CycleDirection is not null)
             throw new InvalidDataException("Shortcut command arguments are invalid.");
     }
@@ -96,11 +120,14 @@ public sealed record ManagerConfiguration
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
             File.WriteAllText(path, JsonSerializer.Serialize(new ManagerConfiguration(), options));
         }
-        if (new FileInfo(path).Length > Protocol.MaximumFrameBytes) throw new InvalidDataException("Configuration is too large.");
+
+        if (new FileInfo(path).Length > Protocol.MaximumFrameBytes)
+            throw new InvalidDataException("Configuration is too large.");
         using var stream = File.OpenRead(path);
         using var document = JsonDocument.Parse(stream, new JsonDocumentOptions { MaxDepth = 64 });
         RejectDuplicateProperties(document.RootElement);
-        var result = document.RootElement.Deserialize<ManagerConfiguration>(options) ?? throw new InvalidDataException("Configuration is null.");
+        var result = document.RootElement.Deserialize<ManagerConfiguration>(options) ??
+                     throw new InvalidDataException("Configuration is null.");
         result.Validate();
         return result;
     }
@@ -117,6 +144,7 @@ public sealed record ManagerConfiguration
             }
         }
         else if (element.ValueKind == JsonValueKind.Array)
-            foreach (var value in element.EnumerateArray()) RejectDuplicateProperties(value);
+            foreach (var value in element.EnumerateArray())
+                RejectDuplicateProperties(value);
     }
 }

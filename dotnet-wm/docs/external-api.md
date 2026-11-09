@@ -32,9 +32,10 @@ The separate [one-desk Avalonia inspector](../src/WinManager.DebugUi/README.md)
 uses this SDK/IPC contract for its display and explicit controls. It does not
 create desks or own manager state.
 
-View activation is implemented, but logical desk positions, workspace bounds,
-workspace-level columns/rows/Fibonacci rules, persistence of view assignments, and
-the spatial overview/quick switcher are not. See [the project goal](project-goal.md) and
+View activation and per-workspace `split`/`layered` layout selection are implemented.
+Logical desk positions, workspace bounds, columns/rows/Fibonacci rules, persistence
+of runtime layout and view changes, and the spatial overview/quick switcher are not.
+See [the project goal](project-goal.md) and
 [the migration plan](desk-model-plan.md).
 
 ## Choose an integration
@@ -67,8 +68,8 @@ The response is a complete `ManagerSnapshot`:
   explain their eligibility (see below).
 - `desktop.focusedWindowId`: the current focused managed window, or `null`.
 - `desktop.monitors`: monitor `id`, device name, bounds, work area, and DPI.
-- `workspaces`: workspace `id`, configured name, monitor ID, active flag, and
-  assigned window IDs.
+- `workspaces`: workspace `id`, configured name, `layout` (`split` or `layered`),
+  monitor ID, active flag, and assigned window IDs.
 - `trees`: split trees keyed by **workspace ID**, not monitor ID. Each node has
   an ID, optional window ID, orientation, ratio, and first/second children.
 - `paused`: whether automatic layout application is paused.
@@ -96,7 +97,7 @@ replace `<window-guid>`, `<workspace-guid>`, and
 | `kind` | Required fields | Behavior | Example command JSON |
 | --- | --- | --- | --- |
 | `focus` | None; optional `direction` | Focus the target window or its directional neighbor. Focusing a `layoutOverflow` window in its active workspace prioritizes it for staging and can minimize the focused tile in its place. | `{"kind":"focus","windowId":"<overflow-window-guid>"}` |
-| `focusCycle` | None; optional `cycleDirection`, `mode`, workspace target, `windowId` | Cycle eligible windows within an active workspace, wrapping at either end. | `{"kind":"focusCycle","cycleDirection":"next","mode":"tiling"}` |
+| `focusCycle` | None; optional `cycleDirection`, `mode`, workspace target, `windowId` | Cycle eligible windows within an active workspace, wrapping at either end; for layered mode, this brings the selected page to the front. | `{"kind":"focusCycle","cycleDirection":"next","mode":"tiling"}` |
 | `move` | `direction` | Swap the target tile with a directional tiling neighbor in its workspace; not a pixel-position move. | `{"kind":"move","direction":"left"}` |
 | `resize` | `direction`, `amount` | Adjust the nearest ancestor split on the direction's axis. | `{"kind":"resize","direction":"right","amount":0.05}` |
 | `setSplit` | `orientation` | Change the selected split when selection exists and `windowId` is omitted; otherwise change the target tile's parent split (or the next appended split for a single tile). | `{"kind":"setSplit","orientation":"vertical"}` |
@@ -110,6 +111,7 @@ replace `<window-guid>`, `<workspace-guid>`, and
 | `activateWorkspace` | Exactly one of `workspaceId`, `workspaceName`; optional `monitorId` | Show the workspace on the target monitor. If it is visible elsewhere, transfer its view; the destination's prior workspace remains unviewed. Without `monitorId`, use the focused window's connected monitor, then the primary monitor. | `{"kind":"activateWorkspace","workspaceName":"2","monitorId":"<monitor-guid>"}` |
 | `moveToWorkspace` | Exactly one of `workspaceId`, `workspaceName` | Assign the target window to an existing workspace; does not activate the destination. | `{"kind":"moveToWorkspace","windowId":"<window-guid>","workspaceId":"<workspace-guid>"}` |
 | `moveToMonitor` | `monitorId` | Assign the target window to the workspace currently shown by the destination monitor; this does not transfer a workspace view. | `{"kind":"moveToMonitor","monitorId":"<monitor-guid>"}` |
+| `setWorkspaceLayout` | Exactly one of `workspaceId`, `workspaceName`; `layout` | Set a workspace's `split` or `layered` layout and reflow its active view unless paused; native action failure restores the previous layout selection. | `{"kind":"setWorkspaceLayout","workspaceName":"2","layout":"layered"}` |
 
 Argument details:
 
@@ -117,6 +119,10 @@ Argument details:
 - `orientation`: `horizontal` means side-by-side tiles; `vertical` means stacked
   tiles.
 - `mode`: `tiling` or `floating`.
+- `layout`: `split` or `layered`. `split` uses the saved split tree and gap settings.
+  `layered` overlays every individually fitting tiled window in a large page stack;
+  it caps the cascade at 48 DIPs and reduces offsets to respect minimum sizes.
+  Only windows whose own minimum width or height exceeds the work area overflow.
 - `amount`: a finite fraction in `(0, 0.8]`, not pixels or a percentage integer.
   `0.05` changes the split ratio by five percentage points. `left`/`up` decrease
   the first child's share; `right`/`down` increase it, regardless of which child
@@ -146,6 +152,8 @@ cycle. Optional `mode: "tiling"` or `"floating"` filters candidates; omitting
 `mode` includes both. Invisible, minimized, default-ignored, and zero-area
 windows are excluded. Tiles follow split-tree leaf order, including manual
 reordering; floating windows follow tiles in stable GUID order.
+For layered workspaces, use `mode: "tiling"` to cycle pages; native focus raises
+the selected window without changing the saved split tree or workspace membership.
 
 The starting window is `windowId` or the observed focused window. The workspace
 defaults to that window's assignment; without a managed focused window, it is

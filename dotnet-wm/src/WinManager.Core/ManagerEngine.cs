@@ -7,16 +7,28 @@ namespace WinManager.Core;
 public sealed class ManagerEngine
 {
     private abstract record ManagerInput;
+
     private sealed record ReconcileInput : ManagerInput;
+
     private sealed record MoveInput(NativeNotification Notification) : ManagerInput;
-    private sealed record CommandInput(ManagerCommand Command, CancellationToken Cancellation,
+
+    private sealed record CommandInput(
+        ManagerCommand Command,
+        CancellationToken Cancellation,
         TaskCompletionSource<CommandResult> Completion) : ManagerInput;
-    private sealed record SubscribeInput(IManagerEventSink Sink, IReadOnlyList<string>? Types,
+
+    private sealed record SubscribeInput(
+        IManagerEventSink Sink,
+        IReadOnlyList<string>? Types,
         TaskCompletionSource<SubscriptionResult> Completion) : ManagerInput;
+
     private sealed record UnsubscribeInput(Guid Id, TaskCompletionSource<CommandResult> Completion) : ManagerInput;
+
     private sealed record Subscriber(IManagerEventSink Sink, HashSet<string>? Types);
+
     private readonly Dictionary<Guid, Subscriber> subscribers = [];
     private long sequence;
+
     public static IReadOnlySet<string> EventTypes { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         ManagerEventTypes.Snapshot, ManagerEventTypes.WindowManaged, ManagerEventTypes.WindowUnmanaged,
@@ -25,6 +37,7 @@ public sealed class ManagerEngine
         ManagerEventTypes.WorkspaceDeactivated, ManagerEventTypes.WorkspaceUpdated, ManagerEventTypes.LayoutChanged,
         ManagerEventTypes.PauseChanged, ManagerEventTypes.ApplicationExiting, ManagerEventTypes.SelectionChanged
     };
+
     private readonly IWindowPlatform platform;
     private readonly Channel<ManagerInput> inputs;
     private readonly WorkspaceSet workspaces;
@@ -80,21 +93,25 @@ public sealed class ManagerEngine
         return await completion.Task.WaitAsync(cancellationToken);
     }
 
-    public async Task<SubscriptionResult> SubscribeAsync(IManagerEventSink sink, IReadOnlyList<string>? eventTypes = null,
+    public async Task<SubscriptionResult> SubscribeAsync(IManagerEventSink sink,
+        IReadOnlyList<string>? eventTypes = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sink);
         cancellationToken.ThrowIfCancellationRequested();
-        if (eventTypes is not null && (eventTypes.Count > EventTypes.Count || eventTypes.Any(type => !EventTypes.Contains(type))))
+        if (eventTypes is not null &&
+            (eventTypes.Count > EventTypes.Count || eventTypes.Any(type => !EventTypes.Contains(type))))
             return new(false, null, "invalid_argument", Current?.StateRevision ?? 0);
-        var completion = new TaskCompletionSource<SubscriptionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completion =
+            new TaskCompletionSource<SubscriptionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!inputs.Writer.TryWrite(new SubscribeInput(sink, eventTypes?.ToArray(), completion)))
             return new(false, null, exiting ? "exiting" : "busy", Current?.StateRevision ?? 0);
         // Admission commits even if the caller disconnects; transport must unsubscribe its resulting ID.
         return await completion.Task;
     }
 
-    public async Task<CommandResult> UnsubscribeAsync(Guid subscriptionId, CancellationToken cancellationToken = default)
+    public async Task<CommandResult> UnsubscribeAsync(Guid subscriptionId,
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var completion = new TaskCompletionSource<CommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -123,6 +140,7 @@ public sealed class ManagerEngine
                     await completed;
                     throw new InvalidOperationException("Desktop notification source stopped unexpectedly.");
                 }
+
                 var input = await read;
                 if (input is CommandInput command)
                 {
@@ -130,11 +148,19 @@ public sealed class ManagerEngine
                         command.Completion.TrySetCanceled(command.Cancellation);
                     else
                     {
-                        try { command.Completion.TrySetResult(await HandleAsync(command.Command, linked.Token)); }
+                        try
+                        {
+                            command.Completion.TrySetResult(await HandleAsync(command.Command, linked.Token));
+                        }
                         catch (OperationCanceledException) when (linked.IsCancellationRequested)
-                        { command.Completion.TrySetCanceled(linked.Token); throw; }
+                        {
+                            command.Completion.TrySetCanceled(linked.Token);
+                            throw;
+                        }
                         catch (Exception error)
-                        { command.Completion.TrySetResult(new(false, "platform_failure", error.Message, revision)); }
+                        {
+                            command.Completion.TrySetResult(new(false, "platform_failure", error.Message, revision));
+                        }
                     }
                 }
                 else if (input is SubscribeInput subscribe)
@@ -143,7 +169,9 @@ public sealed class ManagerEngine
                     var initial = Envelope(ManagerEventTypes.Snapshot, Current!);
                     if (PublishTo(subscribe.Sink, initial))
                     {
-                        subscribers.Add(id, new(subscribe.Sink, subscribe.Types is null ? null : new(subscribe.Types, StringComparer.Ordinal)));
+                        subscribers.Add(id,
+                            new(subscribe.Sink,
+                                subscribe.Types is null ? null : new(subscribe.Types, StringComparer.Ordinal)));
                         subscribe.Completion.TrySetResult(new(true, id, null, revision));
                     }
                     else subscribe.Completion.TrySetResult(new(false, null, "slow_client", revision));
@@ -157,7 +185,8 @@ public sealed class ManagerEngine
                 {
                     if (move.Notification.Kind == NativeNotificationKind.MoveStarted)
                     {
-                        var bounds = move.Notification.Bounds ?? Current?.Desktop.Windows.FirstOrDefault(window => window.Id == windowId)?.Bounds;
+                        var bounds = move.Notification.Bounds ?? Current?.Desktop.Windows
+                            .FirstOrDefault(window => window.Id == windowId)?.Bounds;
                         if (bounds is not null) movingWindows.TryAdd(windowId, bounds);
                         await ReconcileAsync(linked.Token);
                     }
@@ -165,6 +194,7 @@ public sealed class ManagerEngine
                         await ReconcileAsync(linked.Token, droppedWindowId: windowId);
                 }
                 else await ReconcileAsync(linked.Token);
+
                 if (Interlocked.Exchange(ref dirty, 0) != 0 && !exiting)
                     await ReconcileAsync(linked.Token);
             }
@@ -183,21 +213,43 @@ public sealed class ManagerEngine
                 else if (pending is UnsubscribeInput unsubscribe)
                     unsubscribe.Completion.TrySetResult(new(true, null, null, revision));
             }
-            try { await Task.WhenAll(notifications, periodic); }
-            catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
+
+            try
+            {
+                await Task.WhenAll(notifications, periodic);
+            }
+            catch (OperationCanceledException) when (linked.IsCancellationRequested)
+            {
+            }
             finally
             {
                 using var restoreTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                try { ShutdownFailures = (await platform.RestoreAsync(restoreTimeout.Token)).Failures; }
-                catch (Exception error) { ShutdownFailures = [new(null, "restore_failed", error.Message)]; }
+                try
+                {
+                    ShutdownFailures = (await platform.RestoreAsync(restoreTimeout.Token)).Failures;
+                }
+                catch (Exception error)
+                {
+                    ShutdownFailures = [new(null, "restore_failed", error.Message)];
+                }
+
                 if (Current is not null)
                 {
-                    try { Commit(ApplyModes(await platform.CaptureAsync(restoreTimeout.Token))); }
-                    catch (Exception) { /* Keep the last committed observation if final capture is unavailable. */ }
+                    try
+                    {
+                        Commit(ApplyModes(await platform.CaptureAsync(restoreTimeout.Token)));
+                    }
+                    catch (Exception)
+                    {
+                        /* Keep the last committed observation if final capture is unavailable. */
+                    }
+
                     Publish(ManagerEventTypes.ApplicationExiting, Current!);
                 }
+
                 subscribers.Clear();
-                if (Current is null) ready.TrySetException(new InvalidOperationException("Manager failed to initialize."));
+                if (Current is null)
+                    ready.TrySetException(new InvalidOperationException("Manager failed to initialize."));
                 stopped.TrySetResult();
             }
         }
@@ -230,7 +282,10 @@ public sealed class ManagerEngine
         Windows = desktop.Windows.Select(window =>
         {
             var mode = modes.TryGetValue(window.Id, out var selectedMode)
-                ? selectedMode : window.IsIgnored ? WindowMode.Floating : window.Mode;
+                ? selectedMode
+                : window.IsIgnored
+                    ? WindowMode.Floating
+                    : window.Mode;
             return window with
             {
                 Mode = mode,
@@ -255,26 +310,30 @@ public sealed class ManagerEngine
         workspaces.Reconcile(desktop);
     }
 
-    private async Task<IReadOnlyList<NativeActionFailure>> ReconcileAsync(CancellationToken cancellationToken, Guid? focus = null,
+    private async Task<IReadOnlyList<NativeActionFailure>> ReconcileAsync(CancellationToken cancellationToken,
+        Guid? focus = null,
         Guid? droppedWindowId = null, Guid? restoreOverflowWindowId = null,
         (Guid WindowId, WindowMode Mode)? modeChange = null)
     {
         var desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
-        foreach (var window in desktop.Windows.Where(window => window.Visible && !window.Minimized && !window.ManagerHidden &&
-            window.Bounds.Width > 0 && window.Bounds.Height > 0))
+        foreach (var window in desktop.Windows.Where(window =>
+                     window.Visible && !window.Minimized && !window.ManagerHidden &&
+                     window.Bounds.Width > 0 && window.Bounds.Height > 0))
         {
             if (window.Mode == WindowMode.Floating || !floatingBounds.ContainsKey(window.Id))
                 floatingBounds[window.Id] = window.Bounds;
         }
+
         Guid? restoreFloatingWindowId = null;
         if (modeChange is { } change)
         {
             if (change.Mode == WindowMode.Floating && desktop.Windows.Any(window => window.Id == change.WindowId &&
-                window.Mode == WindowMode.Tiling && !window.IsIgnored))
+                    window.Mode == WindowMode.Tiling && !window.IsIgnored))
                 restoreFloatingWindowId = change.WindowId;
             modes[change.WindowId] = change.Mode;
             desktop = ApplyModes(desktop);
         }
+
         ReconcileTrees(desktop);
         if (!paused)
             foreach (var (id, originalBounds) in movingWindows)
@@ -284,6 +343,7 @@ public sealed class ManagerEngine
             var resized = resizingWindows.Remove(dropped);
             if (!paused && !resized) ReflowDrop(desktop, dropped, original);
         }
+
         List<NativeActionFailure> failures = [];
         List<WindowPlacement> placements = [];
         if (!paused)
@@ -292,7 +352,9 @@ public sealed class ManagerEngine
             var activeWindowIds = activeWorkspaces.SelectMany(workspace => workspace.WindowIds).ToHashSet();
             var windowsById = desktop.Windows.ToDictionary(window => window.Id);
             var nextOverflow = overflowWindowIds.Where(id => !activeWindowIds.Contains(id) &&
-                windowsById.TryGetValue(id, out var window) && window.Mode == WindowMode.Tiling && !window.IsIgnored).ToHashSet();
+                                                             windowsById.TryGetValue(id, out var window) &&
+                                                             window.Mode == WindowMode.Tiling && !window.IsIgnored)
+                .ToHashSet();
             foreach (var workspace in activeWorkspaces)
             {
                 var monitor = desktop.Monitors.SingleOrDefault(monitor => monitor.Id == workspace.MonitorId);
@@ -305,31 +367,44 @@ public sealed class ManagerEngine
                     if (stagedWindowIds.TryGetValue(workspace.Id, out var staged))
                     {
                         var displacedFocus = restoreOverflowWindowId is not null &&
-                            desktop.FocusedWindowId is { } focused && workspace.WindowIds.Contains(focused)
-                            ? focused : (Guid?)null;
+                                             desktop.FocusedWindowId is { } focused &&
+                                             workspace.WindowIds.Contains(focused)
+                            ? focused
+                            : (Guid?)null;
                         priority.AddRange(staged.Where(id => id != displacedFocus));
                         if (displacedFocus is { } displaced) priority.Add(displaced);
                     }
-                    var plan = workspaces.Trees[workspace.Id].Layout(monitor, innerGap, outerGap, priority);
+
+                    var plan = Layout(workspace, monitor, windowsById, priority);
                     placements.AddRange(plan.Placements);
                     nextOverflow.ExceptWith(workspace.WindowIds);
                     nextOverflow.UnionWith(plan.OverflowWindowIds ?? []);
                     stagedWindowIds[workspace.Id] = plan.Placements.Select(placement => placement.WindowId).ToHashSet();
                 }
-                catch (InvalidOperationException error) { failures.Add(new(null, "layout_constraints", error.Message)); }
+                catch (InvalidOperationException error)
+                {
+                    failures.Add(new(null, "layout_constraints", error.Message));
+                }
+
                 foreach (var window in desktop.Windows.Where(window => workspace.WindowIds.Contains(window.Id) &&
-                    window.Mode == WindowMode.Floating && (window.Visible || window.ManagerHidden) && !window.Minimized && !window.IsIgnored))
+                                                                       window.Mode == WindowMode.Floating &&
+                                                                       (window.Visible || window.ManagerHidden) &&
+                                                                       !window.Minimized && !window.IsIgnored))
                 {
                     var area = monitor.WorkArea;
-                    var bounds = window.Id == restoreFloatingWindowId && floatingBounds.TryGetValue(window.Id, out var saved)
-                        ? saved : window.Bounds;
+                    var bounds = window.Id == restoreFloatingWindowId &&
+                                 floatingBounds.TryGetValue(window.Id, out var saved)
+                        ? saved
+                        : window.Bounds;
                     var width = Math.Min(bounds.Width, area.Width);
                     var height = Math.Min(bounds.Height, area.Height);
                     if (width < window.MinimumWidth || height < window.MinimumHeight)
                     {
-                        failures.Add(new(window.Id, "layout_constraints", "Floating window minimum size exceeds the work area."));
+                        failures.Add(new(window.Id, "layout_constraints",
+                            "Floating window minimum size exceeds the work area."));
                         continue;
                     }
+
                     var x = window.MonitorId == monitor.Id ? bounds.X : area.X + (area.Width - width) / 2;
                     var y = window.MonitorId == monitor.Id ? bounds.Y : area.Y + (area.Height - height) / 2;
                     var target = new PixelRect(Math.Clamp(x, area.X, area.X + area.Width - width),
@@ -337,19 +412,25 @@ public sealed class ManagerEngine
                     if (target != window.Bounds) placements.Add(new(window.Id, target));
                 }
             }
+
             overflowWindowIds.Clear();
             overflowWindowIds.UnionWith(nextOverflow);
         }
+
         desktop = ApplyModes(desktop);
         var changes = placements.Where(placement => desktop.Windows.Any(window =>
-            window.Id == placement.WindowId && window.Bounds != placement.Bounds) && !movingWindows.ContainsKey(placement.WindowId)).ToArray();
-        var visibility = workspaces.Visibility(desktop).Where(change => !movingWindows.ContainsKey(change.WindowId)).ToArray();
+                                                        window.Id == placement.WindowId &&
+                                                        window.Bounds != placement.Bounds) &&
+                                                    !movingWindows.ContainsKey(placement.WindowId)).ToArray();
+        var visibility = workspaces.Visibility(desktop).Where(change => !movingWindows.ContainsKey(change.WindowId))
+            .ToArray();
         var minimizations = desktop.Windows.Where(window =>
         {
             if (overflowWindowIds.Contains(window.Id)) return !window.Minimized;
             return managerMinimizedWindowIds.Contains(window.Id) && window.Minimized;
         }).Select(window => new WindowMinimization(window.Id, overflowWindowIds.Contains(window.Id))).ToArray();
-        if (changes.Length > 0 || focus is not null || visibility.Length > 0 || minimizations.Length > 0 || droppedWindowId is not null)
+        if (changes.Length > 0 || focus is not null || visibility.Length > 0 || minimizations.Length > 0 ||
+            droppedWindowId is not null)
         {
             failures.AddRange((await platform.ApplyAsync(new(changes, focus, visibility,
                 droppedWindowId is { } completed ? [completed] : null, minimizations), cancellationToken)).Failures);
@@ -363,9 +444,11 @@ public sealed class ManagerEngine
                 else if (!minimization.Minimized && managerMinimizedWindowIds.Contains(window.Id))
                     overflowWindowIds.Add(window.Id);
             }
+
             desktop = ApplyModes(desktop);
             ReconcileTrees(desktop);
         }
+
         Commit(desktop);
         var diagnostics = failures.ToArray();
         if (!reportedFailures.SequenceEqual(diagnostics))
@@ -373,27 +456,38 @@ public sealed class ManagerEngine
             reportedFailures = diagnostics;
             if (reportedFailures.Count > 0) ActionsFailed?.Invoke(reportedFailures);
         }
+
         return failures;
     }
 
     private void ReflowResize(DesktopSnapshot desktop, Guid windowId, PixelRect original)
     {
         var window = desktop.Windows.FirstOrDefault(window => window.Id == windowId);
-        if (window is null || !window.Visible || window.Minimized || window.IsIgnored || window.Mode != WindowMode.Tiling)
+        if (window is null || !window.Visible || window.Minimized || window.IsIgnored ||
+            window.Mode != WindowMode.Tiling)
             return;
         var bounds = window.Bounds;
         var widthChanged = bounds.Width != original.Width;
         var heightChanged = bounds.Height != original.Height;
         if ((widthChanged || heightChanged) &&
-            (!widthChanged || bounds.X == original.X || (long)bounds.X + bounds.Width == (long)original.X + original.Width) &&
-            (!heightChanged || bounds.Y == original.Y || (long)bounds.Y + bounds.Height == (long)original.Y + original.Height))
+            (!widthChanged || bounds.X == original.X ||
+             (long)bounds.X + bounds.Width == (long)original.X + original.Width) &&
+            (!heightChanged || bounds.Y == original.Y ||
+             (long)bounds.Y + bounds.Height == (long)original.Y + original.Height))
             resizingWindows.Add(windowId);
         if (!resizingWindows.Contains(windowId)) return;
-        var workspace = workspaces.Snapshot.FirstOrDefault(workspace => workspace.Active && workspace.WindowIds.Contains(windowId));
+        var workspace =
+            workspaces.Snapshot.FirstOrDefault(workspace => workspace.Active && workspace.WindowIds.Contains(windowId));
         var monitor = desktop.Monitors.FirstOrDefault(monitor => monitor.Id == workspace?.MonitorId);
         if (workspace is null || monitor is null) return;
-        try { workspaces.Trees[workspace.Id].ResizeToBounds(windowId, window.Bounds, monitor, innerGap, outerGap); }
-        catch (InvalidOperationException) { /* The normal layout pass reports unsatisfied constraints. */ }
+        try
+        {
+            workspaces.Trees[workspace.Id].ResizeToBounds(windowId, window.Bounds, monitor, innerGap, outerGap);
+        }
+        catch (InvalidOperationException)
+        {
+            /* The normal layout pass reports unsatisfied constraints. */
+        }
     }
 
     private void ReflowDrop(DesktopSnapshot desktop, Guid windowId, PixelRect original)
@@ -404,25 +498,45 @@ public sealed class ManagerEngine
         var x = window.Bounds.X + window.Bounds.Width / 2.0;
         var y = window.Bounds.Y + window.Bounds.Height / 2.0;
         var monitor = desktop.Monitors.FirstOrDefault(monitor => x >= monitor.Bounds.X && y >= monitor.Bounds.Y &&
-            x < (long)monitor.Bounds.X + monitor.Bounds.Width && y < (long)monitor.Bounds.Y + monitor.Bounds.Height)
-            ?? desktop.Monitors.FirstOrDefault(monitor => monitor.Id == window.MonitorId);
+                                                                 x < (long)monitor.Bounds.X + monitor.Bounds.Width &&
+                                                                 y < (long)monitor.Bounds.Y + monitor.Bounds.Height)
+                      ?? desktop.Monitors.FirstOrDefault(monitor => monitor.Id == window.MonitorId);
         if (monitor is null) return;
-        var workspace = workspaces.Snapshot.FirstOrDefault(workspace => workspace.Active && workspace.MonitorId == monitor.Id);
+        var workspace =
+            workspaces.Snapshot.FirstOrDefault(workspace => workspace.Active && workspace.MonitorId == monitor.Id);
         if (workspace is null) return;
         Guid? target = null;
         if (window.Mode == WindowMode.Tiling)
         {
             try
             {
-                target = workspaces.Trees[workspace.Id].Layout(monitor, innerGap, outerGap).Placements
-                    .OrderBy(placement => DistanceToTile(placement.Bounds, x, y)).ThenBy(placement => placement.WindowId)
+                target = Layout(workspace, monitor, desktop.Windows.ToDictionary(candidate => candidate.Id)).Placements
+                    .OrderBy(placement => DistanceToTile(placement.Bounds, x, y))
+                    .ThenBy(placement => placement.WindowId)
                     .FirstOrDefault()?.WindowId;
             }
-            catch (InvalidOperationException) { /* The normal layout pass reports unsatisfied constraints. */ }
+            catch (InvalidOperationException)
+            {
+                /* The normal layout pass reports unsatisfied constraints. */
+            }
         }
+
         workspaces.MoveWindow(windowId, workspace.Id);
         if (target is { } targetId && targetId != windowId)
             workspaces.Trees[workspace.Id].Swap(windowId, targetId);
+    }
+
+    private LayoutPlan Layout(WorkspaceInfo workspace, MonitorInfo monitor,
+        IReadOnlyDictionary<Guid, WindowInfo> windowsById, IReadOnlyList<Guid>? priorityOrder = null)
+    {
+        var tree = workspaces.Trees[workspace.Id];
+        return workspace.Layout switch
+        {
+            WorkspaceLayout.Split => tree.Layout(monitor, innerGap, outerGap, priorityOrder),
+            WorkspaceLayout.Layered => LayeredLayout.Layout(monitor,
+                tree.WindowOrder.Select(windowId => windowsById[windowId]).ToArray(), outerGap),
+            _ => throw new InvalidOperationException("Workspace layout is not supported.")
+        };
     }
 
     private static double DistanceToTile(PixelRect bounds, double x, double y)
@@ -463,8 +577,18 @@ public sealed class ManagerEngine
         {
             if (sink.TryPublish(envelope)) return true;
         }
-        catch (Exception) { }
-        try { sink.Disconnect("slow_client"); } catch (Exception) { }
+        catch (Exception)
+        {
+        }
+
+        try
+        {
+            sink.Disconnect("slow_client");
+        }
+        catch (Exception)
+        {
+        }
+
         return false;
     }
 
@@ -488,10 +612,12 @@ public sealed class ManagerEngine
             if (!oldWindows.TryGetValue(id, out var old)) Publish(ManagerEventTypes.WindowManaged, next);
             else if (old != window) Publish(ManagerEventTypes.WindowUpdated, next);
         }
+
         if ((previous?.Desktop.ConfiguredExclusions is null) != (next.Desktop.ConfiguredExclusions is null) ||
             !(previous?.Desktop.ConfiguredExclusions ?? []).SequenceEqual(next.Desktop.ConfiguredExclusions ?? []))
             Publish(ManagerEventTypes.WindowUpdated, next);
-        if (previous?.Desktop.FocusedWindowId != next.Desktop.FocusedWindowId) Publish(ManagerEventTypes.FocusChanged, next);
+        if (previous?.Desktop.FocusedWindowId != next.Desktop.FocusedWindowId)
+            Publish(ManagerEventTypes.FocusChanged, next);
         if (previous?.Selection != next.Selection) Publish(ManagerEventTypes.SelectionChanged, next);
         var oldMonitors = previous?.Desktop.Monitors.ToDictionary(monitor => monitor.Id) ?? [];
         var newMonitors = next.Desktop.Monitors.ToDictionary(monitor => monitor.Id);
@@ -501,15 +627,20 @@ public sealed class ManagerEngine
             if (!oldMonitors.TryGetValue(id, out var old)) Publish(ManagerEventTypes.MonitorAdded, next);
             else if (old != monitor) Publish(ManagerEventTypes.MonitorUpdated, next);
         }
+
         var oldWorkspaces = previous?.Workspaces?.ToDictionary(workspace => workspace.Id) ?? [];
         foreach (var workspace in next.Workspaces ?? [])
         {
-            if (!oldWorkspaces.TryGetValue(workspace.Id, out var old)) Publish(ManagerEventTypes.WorkspaceUpdated, next);
+            if (!oldWorkspaces.TryGetValue(workspace.Id, out var old))
+                Publish(ManagerEventTypes.WorkspaceUpdated, next);
             else if (old.Name != workspace.Name || old.MonitorId != workspace.MonitorId ||
-                !old.WindowIds.SequenceEqual(workspace.WindowIds)) Publish(ManagerEventTypes.WorkspaceUpdated, next);
+                     old.Layout != workspace.Layout ||
+                     !old.WindowIds.SequenceEqual(workspace.WindowIds))
+                Publish(ManagerEventTypes.WorkspaceUpdated, next);
             if (old?.Active == true && !workspace.Active) Publish(ManagerEventTypes.WorkspaceDeactivated, next);
             if (old?.Active != true && workspace.Active) Publish(ManagerEventTypes.WorkspaceActivated, next);
         }
+
         if (previous is null || JsonSerializer.Serialize(previous.Trees) != JsonSerializer.Serialize(next.Trees) ||
             newWindows.Any(pair => !oldWindows.TryGetValue(pair.Key, out var old) || old.Bounds != pair.Value.Bounds))
             Publish(ManagerEventTypes.LayoutChanged, next);
@@ -521,25 +652,33 @@ public sealed class ManagerEngine
         if (command.WorkspaceName is { } name)
         {
             if (command.WorkspaceId is not null || string.IsNullOrWhiteSpace(name) ||
-                command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToWorkspace or CommandKind.FocusCycle))
+                command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToWorkspace or
+                    CommandKind.FocusCycle or CommandKind.SetWorkspaceLayout))
                 return Error("invalid_argument", "Specify exactly one workspace name or ID for a workspace command.");
-            var named = workspaces.Snapshot.SingleOrDefault(workspace => string.Equals(workspace.Name, name, StringComparison.OrdinalIgnoreCase));
+            var named = workspaces.Snapshot.SingleOrDefault(workspace =>
+                string.Equals(workspace.Name, name, StringComparison.OrdinalIgnoreCase));
             if (named is null) return Error("not_found", "Workspace name does not exist.");
             command = command with { WorkspaceId = named.Id };
         }
+
         if (!Enum.IsDefined(command.Kind) ||
             command.Direction is { } direction && !Enum.IsDefined(direction) ||
             command.Mode is { } mode && !Enum.IsDefined(mode) ||
             command.Orientation is { } orientation && !Enum.IsDefined(orientation) ||
             command.Navigation is { } navigation && !Enum.IsDefined(navigation) ||
-            command.CycleDirection is { } cycleDirection && !Enum.IsDefined(cycleDirection))
+            command.CycleDirection is { } cycleDirection && !Enum.IsDefined(cycleDirection) ||
+            command.Layout is { } layout && !Enum.IsDefined(layout))
             return Error("invalid_argument", "Unknown command or enum value.");
-        if (command.MonitorId is not null && command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToMonitor))
+        if (command.MonitorId is not null &&
+            command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToMonitor))
             return Error("invalid_argument", "Monitor ID is only supported by activateWorkspace and moveToMonitor.");
-        if (command.Kind != CommandKind.SelectContainer && (command.NodeId is not null || command.Navigation is not null))
+        if (command.Kind != CommandKind.SelectContainer &&
+            (command.NodeId is not null || command.Navigation is not null))
             return Error("invalid_argument", "Node ID and navigation are only supported by selectContainer.");
         if (command.Kind != CommandKind.FocusCycle && command.CycleDirection is not null)
             return Error("invalid_argument", "Cycle direction is only supported by focusCycle.");
+        if (command.Kind != CommandKind.SetWorkspaceLayout && command.Layout is not null)
+            return Error("invalid_argument", "Layout is only supported by setWorkspaceLayout.");
         if (command.Kind == CommandKind.FocusCycle)
             return await FocusCycleAsync(command, cancellationToken);
         if (command.Kind == CommandKind.SelectContainer)
@@ -569,17 +708,20 @@ public sealed class ManagerEngine
                     if (node is not null) target = new(origin.WorkspaceId, node.Id);
                 }
             }
+
             if (target is null) return Error("not_found", "No active tiling container matches the selection.");
             selection = target;
             Commit(Current!.Desktop);
             return new(true, null, null, revision);
         }
+
         if (command.Kind == CommandKind.ClearSelection)
         {
             selection = null;
             Commit(Current!.Desktop);
             return new(true, null, null, revision);
         }
+
         if (command.Kind == CommandKind.SetSplit && command.WindowId is null && selection is { } selected)
         {
             if (command.Orientation is not { } split) return Error("invalid_argument", "Split requires orientation.");
@@ -587,11 +729,13 @@ public sealed class ManagerEngine
                 return Error("not_found", "Selected container is not a split.");
             return Result(await ReconcileAsync(cancellationToken));
         }
+
         if (command.Kind == CommandKind.Exit)
         {
             exiting = true;
             return new(true, null, null, revision);
         }
+
         if (command.Kind == CommandKind.Pause)
         {
             if (command.Paused is null) return Error("invalid_argument", "Pause requires a boolean.");
@@ -599,12 +743,14 @@ public sealed class ManagerEngine
         }
         else if (command.Kind == CommandKind.ActivateWorkspace)
         {
-            if (command.WorkspaceId is not { } workspaceId) return Error("invalid_argument", "Workspace ID is required.");
+            if (command.WorkspaceId is not { } workspaceId)
+                return Error("invalid_argument", "Workspace ID is required.");
             if (!workspaces.Snapshot.Any(workspace => workspace.Id == workspaceId))
                 return Error("not_found", "Workspace does not exist.");
             var desktop = Current!.Desktop;
             var monitorId = command.MonitorId ?? ResolveTargetMonitor(desktop);
-            if (monitorId == Guid.Empty) return Error("not_ready", "No connected monitor is available for a workspace view.");
+            if (monitorId == Guid.Empty)
+                return Error("not_ready", "No connected monitor is available for a workspace view.");
             if (!desktop.Monitors.Any(monitor => monitor.Id == monitorId))
                 return Error("not_found", "Target monitor is not connected.");
             if (workspaces.Views.Any(view => view.MonitorId == monitorId && view.WorkspaceId == workspaceId))
@@ -618,12 +764,37 @@ public sealed class ManagerEngine
                 workspaces.RestoreState(previous);
                 await ReconcileAsync(cancellationToken);
             }
+
+            return Result(failures);
+        }
+        else if (command.Kind == CommandKind.SetWorkspaceLayout)
+        {
+            if (command.WorkspaceId is not { } workspaceId || workspaceId == Guid.Empty ||
+                command.Layout is not { } requestedLayout)
+                return Error("invalid_argument", "setWorkspaceLayout requires a workspace target and layout.");
+            if (command.WindowId is not null || command.MonitorId is not null || command.Mode is not null ||
+                command.Paused is not null ||
+                command.Direction is not null || command.Amount is not null || command.Orientation is not null ||
+                command.NodeId is not null || command.Navigation is not null || command.CycleDirection is not null)
+                return Error("invalid_argument", "setWorkspaceLayout accepts only a workspace target and layout.");
+            var previousLayout = workspaces.LayoutFor(workspaceId);
+            if (previousLayout is null) return Error("not_found", "Workspace does not exist.");
+            if (previousLayout == requestedLayout) return new(true, null, null, revision);
+            workspaces.SetLayout(workspaceId, requestedLayout);
+            var failures = await ReconcileAsync(cancellationToken);
+            if (failures.Count > 0)
+            {
+                workspaces.SetLayout(workspaceId, previousLayout.Value);
+                await ReconcileAsync(cancellationToken);
+            }
+
             return Result(failures);
         }
         else if (command.Kind != CommandKind.Redraw)
         {
             var desktop = Current!.Desktop;
-            var window = desktop.Windows.SingleOrDefault(window => window.Id == (command.WindowId ?? desktop.FocusedWindowId));
+            var window =
+                desktop.Windows.SingleOrDefault(window => window.Id == (command.WindowId ?? desktop.FocusedWindowId));
             if (window is null) return Error("not_found", "Target window is not managed.");
             var assignedWorkspace = workspaces.WorkspaceFor(window.Id);
             if (assignedWorkspace is not { } assigned || !workspaces.Trees.TryGetValue(assigned, out var tree))
@@ -633,14 +804,17 @@ public sealed class ManagerEngine
                 case CommandKind.Focus:
                 {
                     var target = command.Direction is { } focusDirection
-                        ? tree.Neighbor(window.Id, focusDirection, desktop.Windows) : window.Id;
+                        ? tree.Neighbor(window.Id, focusDirection, desktop.Windows)
+                        : window.Id;
                     if (target is null) return Error("not_found", "No directional focus target.");
                     Guid? restoreOverflow = null;
                     if (window.Id == target.Value && window.LayoutOverflow)
                     {
-                        if (paused) return Error("not_ready", "Resume the manager before restoring an overflow window.");
+                        if (paused)
+                            return Error("not_ready", "Resume the manager before restoring an overflow window.");
                         if (!workspaces.Snapshot.Any(workspace => workspace.Id == assigned && workspace.Active))
-                            return Error("not_ready", "Activate the workspace view before restoring an overflow window.");
+                            return Error("not_ready",
+                                "Activate the workspace view before restoring an overflow window.");
                         restoreOverflow = window.Id;
                         if (desktop.FocusedWindowId is { } focused && focused != window.Id &&
                             workspaces.WorkspaceFor(focused) == assigned &&
@@ -649,31 +823,40 @@ public sealed class ManagerEngine
                             tree.NodeForWindow(focused) is not null)
                             tree.Swap(window.Id, focused);
                     }
-                    var failures = await ReconcileAsync(cancellationToken, target, restoreOverflowWindowId: restoreOverflow);
+
+                    var failures = await ReconcileAsync(cancellationToken, target,
+                        restoreOverflowWindowId: restoreOverflow);
                     return Result(failures);
                 }
                 case CommandKind.Move:
-                    if (command.Direction is not { } moveDirection) return Error("invalid_argument", "Move requires direction.");
+                    if (command.Direction is not { } moveDirection)
+                        return Error("invalid_argument", "Move requires direction.");
                     var neighbor = tree.Neighbor(window.Id, moveDirection, desktop.Windows.Where(candidate =>
-                        workspaces.WorkspaceFor(candidate.Id) == assigned && candidate.Mode == WindowMode.Tiling).ToArray());
-                    if (neighbor is null || !tree.Swap(window.Id, neighbor.Value)) return Error("not_found", "No tiling movement target.");
+                            workspaces.WorkspaceFor(candidate.Id) == assigned && candidate.Mode == WindowMode.Tiling)
+                        .ToArray());
+                    if (neighbor is null || !tree.Swap(window.Id, neighbor.Value))
+                        return Error("not_found", "No tiling movement target.");
                     break;
                 case CommandKind.Resize:
                     if (command.Direction is not { } resizeDirection || command.Amount is not { } amount ||
                         !double.IsFinite(amount) || amount <= 0 || amount > 0.8)
                         return Error("invalid_argument", "Resize requires direction and a fraction in (0, 0.8].");
-                    if (!tree.Resize(window.Id, resizeDirection, amount)) return Error("not_found", "No matching split to resize.");
+                    if (!tree.Resize(window.Id, resizeDirection, amount))
+                        return Error("not_found", "No matching split to resize.");
                     break;
                 case CommandKind.SetSplit:
-                    if (command.Orientation is not { } split) return Error("invalid_argument", "Split requires orientation.");
+                    if (command.Orientation is not { } split)
+                        return Error("invalid_argument", "Split requires orientation.");
                     tree.SetOrientation(window.Id, split);
                     break;
                 case CommandKind.SetMode:
-                    if (command.Mode is not { } requestedMode) return Error("invalid_argument", "Mode requires tiling or floating.");
+                    if (command.Mode is not { } requestedMode)
+                        return Error("invalid_argument", "Mode requires tiling or floating.");
                     return Result(await ReconcileAsync(cancellationToken, modeChange: (window.Id, requestedMode)));
                 case CommandKind.ToggleMode:
                     var toggledMode = window.Mode == WindowMode.Tiling && !window.IsIgnored
-                        ? WindowMode.Floating : WindowMode.Tiling;
+                        ? WindowMode.Floating
+                        : WindowMode.Tiling;
                     return Result(await ReconcileAsync(cancellationToken, modeChange: (window.Id, toggledMode)));
                 case CommandKind.MoveToWorkspace:
                 case CommandKind.MoveToMonitor:
@@ -694,10 +877,12 @@ public sealed class ManagerEngine
                         workspaces.MoveWindow(window.Id, assigned);
                         await ReconcileAsync(cancellationToken);
                     }
+
                     return Result(moveFailures);
                 default: return Error("invalid_argument", "Unsupported command.");
             }
         }
+
         return Result(await ReconcileAsync(cancellationToken));
     }
 
@@ -706,7 +891,8 @@ public sealed class ManagerEngine
         if (command.Direction is not null)
             return Error("invalid_argument", "Use cycleDirection, not direction, for focusCycle.");
         var desktop = Current!.Desktop;
-        var anchor = desktop.Windows.FirstOrDefault(window => window.Id == (command.WindowId ?? desktop.FocusedWindowId));
+        var anchor =
+            desktop.Windows.FirstOrDefault(window => window.Id == (command.WindowId ?? desktop.FocusedWindowId));
         if (command.WindowId is not null && anchor is null)
             return Error("not_found", "Target window is not managed.");
         var workspaceId = command.WorkspaceId ?? (anchor is not null ? workspaces.WorkspaceFor(anchor.Id) : null);
@@ -716,17 +902,21 @@ public sealed class ManagerEngine
         else
         {
             var monitor = desktop.Monitors.OrderBy(monitor => monitor.Bounds.X == 0 && monitor.Bounds.Y == 0 ? 0 : 1)
-                .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase).ThenBy(monitor => monitor.Id).FirstOrDefault();
-            workspace = workspaces.Snapshot.FirstOrDefault(workspace => workspace.Active && workspace.MonitorId == monitor?.Id);
+                .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase).ThenBy(monitor => monitor.Id)
+                .FirstOrDefault();
+            workspace = workspaces.Snapshot.FirstOrDefault(workspace =>
+                workspace.Active && workspace.MonitorId == monitor?.Id);
         }
+
         if (workspace is null) return Error("not_found", "No active workspace matches the focus cycle.");
         if (command.WindowId is not null && !workspace.WindowIds.Contains(command.WindowId.Value))
             return Error("invalid_argument", "Target window must belong to the requested workspace.");
         var order = workspaces.Trees[workspace.Id].WindowOrder.Select((id, index) => (id, index))
             .ToDictionary(pair => pair.id, pair => pair.index);
         var candidates = desktop.Windows.Where(window => workspace.WindowIds.Contains(window.Id) &&
-                window.Visible && !window.Minimized && !window.IsIgnored && window.Bounds.Width > 0 && window.Bounds.Height > 0 &&
-                (command.Mode is null || window.Mode == command.Mode))
+                                                         window.Visible && !window.Minimized && !window.IsIgnored &&
+                                                         window.Bounds.Width > 0 && window.Bounds.Height > 0 &&
+                                                         (command.Mode is null || window.Mode == command.Mode))
             .OrderBy(window => order.GetValueOrDefault(window.Id, int.MaxValue)).ThenBy(window => window.Id).ToArray();
         if (candidates.Length == 0) return Error("not_found", "No windows match the focus cycle filter.");
         var index = Array.FindIndex(candidates, window => window.Id == anchor?.Id);
@@ -751,5 +941,6 @@ public sealed class ManagerEngine
     private CommandResult Result(IReadOnlyList<NativeActionFailure> failures) => failures.Count == 0
         ? new(true, null, null, revision)
         : new(false, failures[0].Code, string.Join("; ", failures.Select(failure => failure.Message)), revision);
+
     private CommandResult Error(string code, string message) => new(false, code, message, revision);
 }

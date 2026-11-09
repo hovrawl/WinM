@@ -1,8 +1,8 @@
 ### Local IPC, version 1
 
-This section documents the current version 1 protocol, including the first
-workspace-view transfer contracts. Logical desk positions, workspace bounds,
-workspace-level layout rules, persistent view assignments, and spatial visualization
+This section documents the current version 1 protocol, including workspace-view
+transfer and per-workspace split/layered layout contracts. Logical desk positions,
+workspace bounds, additional layout rules, persistent desk state, and spatial visualization
 remain planned; a separate debug/control inspector is available. See [the project goal](project-goal.md) and
 [the migration plan](desk-model-plan.md).
 
@@ -42,12 +42,12 @@ ID receives `Guid.Empty` as its response ID. Errors do not mutate manager state.
 | `subscribe` | `{"eventTypes": null}` or `{}` for all events; otherwise an array of known event names | `SubscriptionResult`, including `subscriptionId` |
 | `unsubscribe` | `{"subscriptionId": "<GUID>"}` | None |
 
-Commands support `focus`, `move`, `resize`, `setSplit`, `setMode`, `pause`,
+Commands support `focus`, `move`, `resize`, `setSplit`, `setMode`, `setWorkspaceLayout`, `pause`,
 `redraw`, `exit`, `activateWorkspace`, `moveToWorkspace`, `moveToMonitor`, `toggleMode`,
 `selectContainer`, `clearSelection`, and `focusCycle`.
 Optional command fields are `windowId`, `direction`, `amount`, `orientation`,
 `mode`, `paused`, `workspaceId`, `workspaceName`, `monitorId`, `nodeId`, `navigation`,
-and `cycleDirection`. Workspace
+`cycleDirection`, and `layout`. Workspace
 commands accept exactly one workspace GUID or case-insensitive configured name;
 named targets are resolved atomically in the manager. Command-specific argument and
 target validation is performed by the manager actor. For example, `pause`
@@ -59,6 +59,11 @@ returns `not_ready`. Selecting a workspace visible on another monitor transfers
 its exclusive view; the destination's prior workspace remains unviewed. If a
 source monitor needs a fallback, the manager uses another pre-existing unviewed
 workspace or creates an empty one, without using the displaced destination view.
+`setWorkspaceLayout` accepts `layout: split|layered` and exactly one workspace ID or
+configured name. It reflows the active view unless paused; on a native action failure the manager
+reports the error and restores the previous layout selection. The layout field is
+included in each `WorkspaceInfo` and saved in workspace configuration as the restart
+default; runtime changes are not persisted to configuration.
 `toggleMode` needs no arguments; an optional `windowId` selects the target,
 otherwise it uses the focused observable window. `setMode: tiling` and toggling
 into tiling override fullscreen/popup/tool/owned/no-activate defaults for that
@@ -94,7 +99,8 @@ branch when no explicit `windowId` is supplied. See the [command reference](exte
 `ManagerSnapshot.WorkspaceViews` is an optional additive version 1 field containing
 `monitorId`/`workspaceId` pairs. Use it as the authoritative monitor view map.
 `WorkspaceInfo.MonitorId` and `Active` remain compatibility projections; an
-unviewed workspace has `Guid.Empty` and `false`. Older hosts may omit
+unviewed workspace has `Guid.Empty` and `false`. `WorkspaceInfo.Layout` reports
+`split` or `layered`. Older hosts may omit
 `WorkspaceViews`; the named-pipe framing and protocol version do not change.
 Other newer commands and fields may still require a matching host version.
 
@@ -103,6 +109,8 @@ Other newer commands and fields may still require a matching host version.
 visible eligible tiles in tree order, then floating windows in GUID order, and
 wraps. `windowId` is an optional starting anchor. Without an anchor/focus, it
 starts at the first/last candidate in the primary monitor's active workspace.
+For layered workspaces, use `mode: tiling` to cycle pages; native focus raises the
+selected window without changing the saved split tree or workspace membership.
 Focus is reported through the existing `focus.changed` event, not a new event.
 See [focus cycling](external-api.md#filtered-focus-cycling) for scope and error behavior.
 

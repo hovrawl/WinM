@@ -24,7 +24,7 @@ Example (shortcuts are disabled in the generated defaults):
 
 ```json
 {
-  "workspaces": [{ "name": "1" }, { "name": "2" }, { "name": "3" }],
+  "workspaces": [{ "name": "1", "layout": "split" }, { "name": "2", "layout": "layered" }, { "name": "3" }],
   "innerGap": 8,
   "outerGap": 8,
   "ignoredProcessNames": ["example.exe"],
@@ -34,7 +34,8 @@ Example (shortcuts are disabled in the generated defaults):
     { "modifiers": 16390, "virtualKey": 82, "command": { "kind": "pause", "paused": false } },
     { "modifiers": 16390, "virtualKey": 84, "command": { "kind": "toggleMode" } },
     { "modifiers": 16390, "virtualKey": 49, "command": { "kind": "activateWorkspace", "workspaceName": "1" } },
-    { "modifiers": 16390, "virtualKey": 50, "command": { "kind": "activateWorkspace", "workspaceName": "2" } }
+    { "modifiers": 16390, "virtualKey": 50, "command": { "kind": "activateWorkspace", "workspaceName": "2" } },
+    { "modifiers": 16390, "virtualKey": 76, "command": { "kind": "setWorkspaceLayout", "workspaceName": "2", "layout": "layered" } }
   ],
   "inputCapacity": 256,
   "maximumClients": 16,
@@ -51,6 +52,11 @@ Example (shortcuts are disabled in the generated defaults):
   than available configured workspaces, the manager creates a uniquely named
   workspace for each remaining view. An unviewed workspace retains its identity,
   window assignments, and split tree when a monitor is removed.
+- Each workspace can set `layout` to `split` or `layered`; omitted values default
+  to `split`. Layered pages overlap in a bounded cascade, with offsets reduced to
+  preserve window minimum sizes. Only a page whose own minimum size exceeds the
+  monitor work area overflows. A runtime `setWorkspaceLayout` change lasts until
+  the manager restarts; configure the workspace layout to select the restart default.
 - `activateWorkspace` accepts an optional `monitorId`. Without it, the manager
   targets the focused window's observed connected monitor, then the primary
   monitor in stable device-name/GUID order. If no monitor is connected, activation
@@ -59,6 +65,12 @@ Example (shortcuts are disabled in the generated defaults):
   unviewed workspace or on a new empty workspace. This operation changes a view,
   not workspace membership. `moveToMonitor` remains a separate window-membership
   command.
+- `setWorkspaceLayout` requires a workspace ID or configured name and a `layout`
+  value (`split` or `layered`). It reflows the active view and preserves workspace
+  membership and the saved split tree. A native reflow failure reports the error
+  and restores the previous layout selection. While the manager is paused, reflow
+  waits until resume. `focusCycle` with `mode: "tiling"`
+  and `cycleDirection: "next"` or `"previous"` navigates the layered page stack.
 - Gaps are DIPs in `[0,256]`, converted per-monitor to physical pixels.
 - Process/class ignores are case-insensitive exact names, not regex rules.
   The `WinManager.DebugUi` companion process is always excluded, even when
@@ -114,6 +126,13 @@ order, and workspace assignments are preserved, including mixed-axis layouts.
 Per-window startup widths and saving/restoring split proportions across host
 restarts are not currently configuration options; a fresh host starts with equal
 shares unless changed through runtime commands or resizing.
+
+Layered workspaces place every fitting tiled window in a large overlapping page
+stack. The cascade advances in small DPI-scaled offsets and stops at 48 DIPs; it
+shrinks when needed to preserve each page's minimum dimensions. A window over the
+work area's own width or height remains overflow; splits elsewhere in that stack
+do not force otherwise fitting pages to overflow. Focus cycling raises the selected
+page without changing workspace membership or tree order.
 
 Invalid work areas or gaps that cannot produce valid pixel rectangles return
 `layout_constraints`; windows that do not meet their minimum size remain in

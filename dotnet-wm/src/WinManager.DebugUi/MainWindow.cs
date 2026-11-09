@@ -33,6 +33,10 @@ internal sealed class MainWindow : Window
     private Button focusButton = null!;
     private Button tilingButton = null!;
     private Button floatingButton = null!;
+    private Button splitLayoutButton = null!;
+    private Button layeredLayoutButton = null!;
+    private Button previousPageButton = null!;
+    private Button nextPageButton = null!;
     private Button pauseButton = null!;
     private Button redrawButton = null!;
     private WinManagerClient? client;
@@ -77,11 +81,13 @@ internal sealed class MainWindow : Window
             Margin = new Thickness(18),
             RowDefinitions = new RowDefinitions
             {
-                new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Auto), new(new GridLength(1, GridUnitType.Star)),
+                new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Auto),
+                new(new GridLength(1, GridUnitType.Star)),
                 new(new GridLength(190))
             }
         };
-        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14, VerticalAlignment = VerticalAlignment.Center };
+        var header = new StackPanel
+            { Orientation = Orientation.Horizontal, Spacing = 14, VerticalAlignment = VerticalAlignment.Center };
         header.Children.Add(new TextBlock
         {
             Text = "One shared desk", FontSize = 25, FontWeight = FontWeight.SemiBold,
@@ -97,7 +103,8 @@ internal sealed class MainWindow : Window
 
         var explanation = new TextBlock
         {
-            Text = "We manage one desk. Workspaces are window groups on that desk; monitors only show a workspace view.",
+            Text =
+                "We manage one desk. Workspaces are window groups on that desk; monitors only show a workspace view.",
             TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0)
         };
         Grid.SetRow(explanation, 1);
@@ -113,6 +120,15 @@ internal sealed class MainWindow : Window
             await ExecuteAsync(InspectorCommands.SetMode(SelectedWindowId(), WindowMode.Tiling)));
         floatingButton = AddAction(actions, "Set floating", async () =>
             await ExecuteAsync(InspectorCommands.SetMode(SelectedWindowId(), WindowMode.Floating)));
+        splitLayoutButton = AddAction(actions, "Use split layout", async () =>
+            await ExecuteAsync(InspectorCommands.SetWorkspaceLayout(SelectedWorkspaceId(), WorkspaceLayout.Split)));
+        layeredLayoutButton = AddAction(actions, "Use layered layout", async () =>
+            await ExecuteAsync(InspectorCommands.SetWorkspaceLayout(SelectedWorkspaceId(), WorkspaceLayout.Layered)));
+        previousPageButton = AddAction(actions, "Previous page", async () =>
+            await ExecuteAsync(
+                InspectorCommands.CycleWorkspacePages(SelectedWorkspaceId(), FocusCycleDirection.Previous)));
+        nextPageButton = AddAction(actions, "Next page", async () =>
+            await ExecuteAsync(InspectorCommands.CycleWorkspacePages(SelectedWorkspaceId(), FocusCycleDirection.Next)));
         pauseButton = AddAction(actions, "Pause manager", async () =>
             await ExecuteAsync(new(CommandKind.Pause, Paused: !(snapshot?.Paused ?? false))));
         redrawButton = AddAction(actions, "Rescan / redraw", async () =>
@@ -140,7 +156,10 @@ internal sealed class MainWindow : Window
         root.Children.Add(desk);
 
         exclusions.MinHeight = 110;
-        var exclusionsPanel = MakePanel("Configured exclusions · read-only; edit ignored process/class configuration and restart to include", exclusions);
+        var exclusionsPanel =
+            MakePanel(
+                "Configured exclusions · read-only; edit ignored process/class configuration and restart to include",
+                exclusions);
         ConfigureItems(exclusions);
         Grid.SetRow(exclusionsPanel, 4);
         Grid.SetColumnSpan(exclusionsPanel, 3);
@@ -166,7 +185,10 @@ internal sealed class MainWindow : Window
         var button = new Button { Content = label, Padding = new Thickness(12, 8), Margin = new Thickness(0, 0, 8, 8) };
         button.Click += async (_, _) =>
         {
-            try { await action(); }
+            try
+            {
+                await action();
+            }
             catch (Exception error)
             {
                 lastMessage = $"Command was not sent: {error.Message}";
@@ -187,9 +209,13 @@ internal sealed class MainWindow : Window
 
     private static Border MakePanel(string title, Control content)
     {
-        var stack = new Grid { RowDefinitions = new RowDefinitions { new(GridLength.Auto), new(new GridLength(1, GridUnitType.Star)) } };
-        stack.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeight.SemiBold,
-            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
+        var stack = new Grid
+            { RowDefinitions = new RowDefinitions { new(GridLength.Auto), new(new GridLength(1, GridUnitType.Star)) } };
+        stack.Children.Add(new TextBlock
+        {
+            Text = title, FontSize = 15, FontWeight = FontWeight.SemiBold,
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8)
+        });
         Grid.SetRow(content, 1);
         stack.Children.Add(content);
         return new Border
@@ -233,11 +259,14 @@ internal sealed class MainWindow : Window
                 var monitorId = viewMap.FirstOrDefault(view => view.Value == workspace.Id).Key;
                 var monitor = next.Desktop.Monitors.FirstOrDefault(candidate => candidate.Id == monitorId);
                 var view = monitorId != Guid.Empty ? $"view on {monitor?.DeviceName ?? "monitor"}" : "unviewed";
-                return new IdentifiedItem(workspace.Id, $"{workspace.Name} · {view} · {workspace.WindowIds.Count} windows");
+                return new IdentifiedItem(workspace.Id,
+                    $"{workspace.Name} · {workspace.Layout} · {view} · {workspace.WindowIds.Count} windows");
             }), selectedWorkspaceId);
         selectedWindowId = Populate(windows, next.Desktop.Windows.Select(window =>
         {
-            var monitorName = next.Desktop.Monitors.FirstOrDefault(monitor => monitor.Id == window.MonitorId)?.DeviceName ?? "unknown monitor";
+            var monitorName =
+                next.Desktop.Monitors.FirstOrDefault(monitor => monitor.Id == window.MonitorId)?.DeviceName ??
+                "unknown monitor";
             var workspace = next.Workspaces?.FirstOrDefault(candidate => candidate.WindowIds.Contains(window.Id));
             var state = InspectorPresentation.WindowState(window);
             return new IdentifiedItem(window.Id,
@@ -246,18 +275,23 @@ internal sealed class MainWindow : Window
 
         exclusions.Items.Clear();
         if (next.Desktop.ConfiguredExclusions is null)
-            exclusions.Items.Add("Unavailable: this manager version does not publish configured-exclusion diagnostics.");
+            exclusions.Items.Add(
+                "Unavailable: this manager version does not publish configured-exclusion diagnostics.");
         else if (next.Desktop.ConfiguredExclusions.Count == 0)
             exclusions.Items.Add("No windows matched configured process/class exclusions.");
         else
             foreach (var excluded in next.Desktop.ConfiguredExclusions)
             {
-                var monitor = next.Desktop.Monitors.FirstOrDefault(candidate => candidate.Id == excluded.MonitorId)?.DeviceName ?? "unknown monitor";
+                var monitor =
+                    next.Desktop.Monitors.FirstOrDefault(candidate => candidate.Id == excluded.MonitorId)?.DeviceName ??
+                    "unknown monitor";
                 var reasons = new List<string>();
                 if (excluded.ProcessNameExcluded) reasons.Add("configured process name");
                 if (excluded.ClassNameExcluded) reasons.Add("configured class name");
-                exclusions.Items.Add($"{excluded.Title} · {excluded.ProcessName} / {excluded.ClassName} · {string.Join(" + ", reasons)} · {monitor}");
+                exclusions.Items.Add(
+                    $"{excluded.Title} · {excluded.ProcessName} / {excluded.ClassName} · {string.Join(" + ", reasons)} · {monitor}");
             }
+
         if (connected) connectionText.Text = $"Connected · revision {next.StateRevision}";
         UpdateActionStates();
     }
@@ -289,13 +323,25 @@ internal sealed class MainWindow : Window
         selectedWindowText.Text = InspectorPresentation.SelectedWindow(selectedWindow);
         tilingButton.IsEnabled = InspectorPresentation.CanSetMode(selectedWindow, WindowMode.Tiling, canCommand);
         floatingButton.IsEnabled = InspectorPresentation.CanSetMode(selectedWindow, WindowMode.Floating, canCommand);
+        var selectedWorkspace =
+            snapshot?.Workspaces?.FirstOrDefault(workspace => workspace.Id == SelectedWorkspaceId());
+        splitLayoutButton.IsEnabled = canCommand && selectedWorkspace is not null &&
+                                      selectedWorkspace.Layout != WorkspaceLayout.Split;
+        layeredLayoutButton.IsEnabled = canCommand && selectedWorkspace is not null &&
+                                        selectedWorkspace.Layout != WorkspaceLayout.Layered;
+        previousPageButton.IsEnabled =
+            InspectorPresentation.CanCyclePages(selectedWorkspace, snapshot?.Desktop, canCommand);
+        nextPageButton.IsEnabled = previousPageButton.IsEnabled;
         pauseButton.IsEnabled = canCommand;
         redrawButton.IsEnabled = canCommand;
         pauseButton.Content = snapshot?.Paused == true ? "Resume manager" : "Pause manager";
         statusText.Text = lastMessage ?? (demoMode
             ? "Demo mode: sample state only; actions are disabled."
-            : connected ? "Live snapshot updates are subscribed. Commands are sent once; reconnect and inspect state if a connection is lost."
-            : connecting ? "Connecting…" : "Disconnected. Use Connect / reconnect to request a fresh snapshot.");
+            : connected
+                ? "Live snapshot updates are subscribed. Commands are sent once; reconnect and inspect state if a connection is lost."
+                : connecting
+                    ? "Connecting…"
+                    : "Disconnected. Use Connect / reconnect to request a fresh snapshot.");
         if (statusText.Text?.Length > 1200) statusText.Text = statusText.Text[..1200] + "…";
     }
 
@@ -322,7 +368,9 @@ internal sealed class MainWindow : Window
             UpdateActionStates();
             _ = PumpEventsAsync(connectedClient, nextSubscription, lifetime.Token);
         }
-        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+        }
         catch (Exception error)
         {
             lastMessage = $"Connect failed: {error.Message}";
@@ -336,7 +384,8 @@ internal sealed class MainWindow : Window
         }
     }
 
-    private async Task PumpEventsAsync(WinManagerClient source, ManagerSubscription subscription, CancellationToken cancellationToken)
+    private async Task PumpEventsAsync(WinManagerClient source, ManagerSubscription subscription,
+        CancellationToken cancellationToken)
     {
         string? failure = null;
         try
@@ -344,12 +393,17 @@ internal sealed class MainWindow : Window
             await foreach (var envelope in subscription.ReadEventsAsync(cancellationToken))
             {
                 var next = envelope.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)
-                    ?? throw new InvalidDataException("Manager event did not contain a snapshot.");
+                           ?? throw new InvalidDataException("Manager event did not contain a snapshot.");
                 await Dispatcher.UIThread.InvokeAsync(() => ApplySnapshot(next));
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        catch (Exception error) { failure = error.Message; }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception error)
+        {
+            failure = error.Message;
+        }
         finally
         {
             await source.DisposeAsync();

@@ -8,18 +8,22 @@ public sealed class LayoutTests
 {
     private static readonly Guid MonitorId = new("00000000-0000-0000-0000-000000000100");
     private static Guid Id(int value) => new(value, 0, 0, new byte[8]);
+
     private static WindowInfo Window(int value, int minimumWidth = 1, int minimumHeight = 1) =>
         new(Id(value), MonitorId, "window", "test", "test", new(0, 0, 100, 100),
             true, false, false, WindowMode.Tiling, minimumWidth, minimumHeight);
+
     private static MonitorInfo Monitor(int width = 1000, int height = 800, uint dpi = 96,
         int x = 0, int y = 0) => new(MonitorId, "display", new(x, y, width, height),
-            new(x, y, width, height), dpi);
+        new(x, y, width, height), dpi);
+
     private static SplitTree Tree(params WindowInfo[] windows)
     {
         var tree = new SplitTree();
         tree.Reconcile(windows);
         return tree;
     }
+
     private static IEnumerable<SplitNodeInfo> Nodes(SplitNodeInfo? node)
     {
         if (node is null) yield break;
@@ -31,9 +35,12 @@ public sealed class LayoutTests
     [Fact]
     public void ReconcileExcludesIneligibleWindowsAndIsIndependentOfInputOrder()
     {
-        WindowInfo[] windows = [Window(2), Window(1), Window(3) with { Visible = false },
+        WindowInfo[] windows =
+        [
+            Window(2), Window(1), Window(3) with { Visible = false },
             Window(4) with { Minimized = true }, Window(5) with { Fullscreen = true },
-            Window(6) with { Mode = WindowMode.Floating }];
+            Window(6) with { Mode = WindowMode.Floating }
+        ];
         var tree = Tree(windows);
         Assert.Equal(Id(1), tree.Snapshot!.First!.WindowId);
         Assert.Equal(Id(2), tree.Snapshot.Second!.WindowId);
@@ -168,8 +175,11 @@ public sealed class LayoutTests
         var monitor = Monitor(1000, 800, 144, -1200, -900);
         var before = tree.Layout(monitor, 8, 8).Placements.ToDictionary(placement => placement.WindowId);
         var source = before[Id(3)].Bounds;
-        var desired = source with { X = source.X + 100, Y = source.Y + 80,
-            Width = source.Width - 100, Height = source.Height - 80 };
+        var desired = source with
+        {
+            X = source.X + 100, Y = source.Y + 80,
+            Width = source.Width - 100, Height = source.Height - 80
+        };
         Assert.True(tree.ResizeToBounds(Id(3), desired, monitor, 8, 8));
         var after = tree.Layout(monitor, 8, 8).Placements.ToDictionary(placement => placement.WindowId);
         Assert.Equal(desired, after[Id(3)].Bounds);
@@ -264,8 +274,10 @@ public sealed class LayoutTests
         Assert.True(plan.Placements[0].Bounds.Width >= 40 && plan.Placements[0].Bounds.Height >= 60);
         Assert.True(plan.Placements[1].Bounds.Width >= 70 && plan.Placements[1].Bounds.Height >= 30);
         Assert.True(plan.Placements[2].Bounds.Width >= 20 && plan.Placements[2].Bounds.Height >= 40);
-        Assert.Equal(new[] { Id(1), Id(2) }, tree.Layout(Monitor(94, 105), 5, 0).Placements.Select(placement => placement.WindowId));
-        Assert.Equal(new[] { Id(1), Id(2) }, tree.Layout(Monitor(95, 104), 5, 0).Placements.Select(placement => placement.WindowId));
+        Assert.Equal(new[] { Id(1), Id(2) },
+            tree.Layout(Monitor(94, 105), 5, 0).Placements.Select(placement => placement.WindowId));
+        Assert.Equal(new[] { Id(1), Id(2) },
+            tree.Layout(Monitor(95, 104), 5, 0).Placements.Select(placement => placement.WindowId));
     }
 
     [Theory]
@@ -365,11 +377,14 @@ public sealed class LayoutTests
     [Fact]
     public void NeighborIncludesFloatingAndExcludesInvisibleMinimizedAndFullscreen()
     {
-        WindowInfo[] windows = [Window(1), Window(2) with { Bounds = new(150, 0, 100, 100), Mode = WindowMode.Floating },
+        WindowInfo[] windows =
+        [
+            Window(1), Window(2) with { Bounds = new(150, 0, 100, 100), Mode = WindowMode.Floating },
             Window(3) with { Bounds = new(100, 0, 100, 100), Visible = false },
             Window(4) with { Bounds = new(100, 0, 100, 100), Minimized = true },
             Window(5) with { Bounds = new(100, 0, 100, 100), Fullscreen = true },
-            Window(6) with { Bounds = new(0, -200, 100, 100) }];
+            Window(6) with { Bounds = new(0, -200, 100, 100) }
+        ];
         var tree = Tree(windows);
         Assert.Equal(Id(2), tree.Neighbor(Id(1), Direction.Right, windows));
         Assert.Equal(Id(6), tree.Neighbor(Id(1), Direction.Up, windows));
@@ -382,9 +397,12 @@ public sealed class LayoutTests
     [Fact]
     public void NeighborUsesDistanceAndStableGuidTieBreaking()
     {
-        WindowInfo[] windows = [Window(1), Window(3) with { Bounds = new(100, -100, 100, 100) },
+        WindowInfo[] windows =
+        [
+            Window(1), Window(3) with { Bounds = new(100, -100, 100, 100) },
             Window(2) with { Bounds = new(100, 100, 100, 100) },
-            Window(4) with { Bounds = new(200, 0, 100, 100) }];
+            Window(4) with { Bounds = new(200, 0, 100, 100) }
+        ];
         var tree = Tree(windows);
         Assert.Equal(Id(2), tree.Neighbor(Id(1), Direction.Right, windows));
         Assert.Equal(Id(2), tree.Neighbor(Id(1), Direction.Right, windows.Reverse().ToArray()));
@@ -393,10 +411,13 @@ public sealed class LayoutTests
     [Fact]
     public void NeighborHandlesNegativeAndExtremeCoordinatesWithoutIntegerOverflow()
     {
-        WindowInfo[] windows = [Window(1) with { Bounds = new(int.MinValue, -200, 10, 10) },
+        WindowInfo[] windows =
+        [
+            Window(1) with { Bounds = new(int.MinValue, -200, 10, 10) },
             Window(2) with { Bounds = new(int.MinValue + 20, -200, 10, 10) },
             Window(3) with { Bounds = new(int.MaxValue - 10, -200, 10, 10) },
-            Window(4) with { Bounds = new(int.MinValue + 1, -200, 0, 10) }];
+            Window(4) with { Bounds = new(int.MinValue + 1, -200, 0, 10) }
+        ];
         Assert.Equal(Id(2), new SplitTree().Neighbor(Id(1), Direction.Right, windows));
         Assert.Equal(Id(2), new SplitTree().Neighbor(Id(3), Direction.Left, windows));
     }
@@ -423,6 +444,7 @@ public sealed class LayoutTests
             tree.Resize(Id(i), i % 2 == 0 ? Direction.Up : Direction.Right, .17);
             tree.Swap(Id(i), Id(13 - i));
         }
+
         var leaves = Nodes(tree.Snapshot).Where(n => n.WindowId is not null).ToArray();
         Assert.Equal(12, leaves.Length);
         Assert.Equal(12, leaves.Select(n => n.WindowId).Distinct().Count());
@@ -435,9 +457,72 @@ public sealed class LayoutTests
             Assert.InRange(placement.Bounds.X, -9991, 9991 - placement.Bounds.Width);
             Assert.InRange(placement.Bounds.Y, -9991, 9991 - placement.Bounds.Height);
         }
+
         foreach (var a in placements)
         foreach (var b in placements.Where(b => b.WindowId != a.WindowId))
             Assert.True(a.Bounds.X + a.Bounds.Width <= b.Bounds.X || b.Bounds.X + b.Bounds.Width <= a.Bounds.X ||
-                a.Bounds.Y + a.Bounds.Height <= b.Bounds.Y || b.Bounds.Y + b.Bounds.Height <= a.Bounds.Y);
+                        a.Bounds.Y + a.Bounds.Height <= b.Bounds.Y || b.Bounds.Y + b.Bounds.Height <= a.Bounds.Y);
+    }
+
+    [Fact]
+    public void LayeredLayoutKeepsEveryPageLargeAndCapsDpiScaledCascade()
+    {
+        var windows = Enumerable.Range(1, 12).Select(index => Window(index)).ToArray();
+        var monitor = Monitor(1200, 900, 192, -1400, 300) with
+        {
+            WorkArea = new(-1380, 320, 1000, 700)
+        };
+
+        var plan = LayeredLayout.Layout(monitor, windows, 8);
+
+        Assert.Empty(plan.OverflowWindowIds!);
+        Assert.Equal(windows.Select(window => window.Id), plan.Placements.Select(placement => placement.WindowId));
+        var first = plan.Placements[0].Bounds;
+        var last = plan.Placements[^1].Bounds;
+        Assert.Equal(monitor.WorkArea.X + 16, first.X);
+        Assert.Equal(monitor.WorkArea.Y + 16, first.Y);
+        Assert.Equal(96, last.X - first.X);
+        Assert.Equal(96, last.Y - first.Y);
+        Assert.All(plan.Placements, placement =>
+        {
+            Assert.True(placement.Bounds.Width >= 1);
+            Assert.True(placement.Bounds.Height >= 1);
+            Assert.InRange(placement.Bounds.X, monitor.WorkArea.X,
+                monitor.WorkArea.X + monitor.WorkArea.Width - placement.Bounds.Width);
+            Assert.InRange(placement.Bounds.Y, monitor.WorkArea.Y,
+                monitor.WorkArea.Y + monitor.WorkArea.Height - placement.Bounds.Height);
+        });
+    }
+
+    [Fact]
+    public void LayeredLayoutOnlyOverflowsPagesIndividuallyTooLargeForWorkArea()
+    {
+        var windows = new[] { Window(1, 1200), Window(2), Window(3) };
+
+        var plan = LayeredLayout.Layout(Monitor(), windows, 8);
+
+        Assert.Equal(new[] { Id(2), Id(3) }, plan.Placements.Select(placement => placement.WindowId));
+        Assert.Equal([Id(1)], plan.OverflowWindowIds);
+    }
+
+    [Fact]
+    public void LayeredLayoutReducesMarginsAndSpreadToRespectFittingMinimums()
+    {
+        var monitor = Monitor(400, 300, 144, -1000, 0) with { WorkArea = new(-1000, 20, 400, 300) };
+        var windows = new[] { Window(1, 350, 270), Window(2, 300, 250) };
+
+        var plan = LayeredLayout.Layout(monitor, windows, 30);
+
+        Assert.Empty(plan.OverflowWindowIds!);
+        Assert.Equal(2, plan.Placements.Count);
+        Assert.All(plan.Placements, placement =>
+        {
+            var window = windows.Single(candidate => candidate.Id == placement.WindowId);
+            Assert.True(placement.Bounds.Width >= window.MinimumWidth);
+            Assert.True(placement.Bounds.Height >= window.MinimumHeight);
+        });
+        Assert.Equal(-985, plan.Placements[0].Bounds.X);
+        Assert.Equal(35, plan.Placements[0].Bounds.Y);
+        Assert.Equal(plan.Placements[0].Bounds, plan.Placements[1].Bounds);
     }
 }

@@ -28,6 +28,24 @@ public sealed class ClientIntegrationTests
     }
 
     [Fact]
+    public async Task SdkSetsWorkspaceLayoutThroughPipeAndReadsItFromSnapshot()
+    {
+        await using var host = await PipeHost.StartAsync();
+        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        var initial = await client.QuerySnapshotAsync(host.Token);
+        var workspace = Assert.Single(initial.Workspaces!);
+        var tree = initial.Trees[workspace.Id];
+
+        var result = await client.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
+            WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered), host.Token);
+
+        Assert.True(result.Success);
+        var updated = await client.QuerySnapshotAsync(host.Token);
+        Assert.Equal(WorkspaceLayout.Layered, Assert.Single(updated.Workspaces!).Layout);
+        Assert.Equal(tree, updated.Trees[workspace.Id]);
+    }
+
+    [Fact]
     public async Task SdkCyclesFilteredFocusAndReceivesObservedFocusEvents()
     {
         await using var host = await PipeHost.StartAsync();

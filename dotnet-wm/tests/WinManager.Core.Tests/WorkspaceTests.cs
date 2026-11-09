@@ -8,19 +8,44 @@ public sealed class WorkspaceTests
 {
     private static readonly Guid FirstMonitor = new("00000000-0000-0000-0000-000000000001");
     private static readonly Guid SecondMonitor = new("00000000-0000-0000-0000-000000000002");
+
     private static MonitorInfo Monitor(Guid id, string name = "Display", uint dpi = 96) =>
         new(id, name, new(-1920, 0, 1920, 1080), new(-1920, 0, 1920, 1040), dpi);
+
     private static WindowInfo Window(Guid? id = null, Guid? monitor = null) =>
         new(id ?? Guid.NewGuid(), monitor ?? FirstMonitor, "Window", "test", "test",
             new(-1920, 0, 800, 600), true, false, false, WindowMode.Tiling);
-    private static DesktopSnapshot Desktop(WindowInfo[] windows, params MonitorInfo[] monitors) => new(monitors, windows, null);
+
+    private static DesktopSnapshot Desktop(WindowInfo[] windows, params MonitorInfo[] monitors) =>
+        new(monitors, windows, null);
+
+    [Fact]
+    public void WorkspaceLayoutIsConfigurableAndChangesWithoutChangingIdentityOrMembership()
+    {
+        var window = Window();
+        var set = new WorkspaceSet([new("Layered", Layout: WorkspaceLayout.Layered)]);
+        set.Reconcile(Desktop([window], Monitor(FirstMonitor)));
+        var workspace = Assert.Single(set.Snapshot);
+
+        Assert.Equal(WorkspaceLayout.Layered, workspace.Layout);
+        Assert.Equal(window.Id, Assert.Single(workspace.WindowIds));
+        Assert.True(set.SetLayout(workspace.Id, WorkspaceLayout.Split));
+        Assert.Equal(WorkspaceLayout.Split, Assert.Single(set.Snapshot).Layout);
+        Assert.Equal(workspace.Id, set.Snapshot.Single().Id);
+        Assert.Equal(window.Id, Assert.Single(set.Snapshot.Single().WindowIds));
+        Assert.False(set.SetLayout(Guid.NewGuid(), WorkspaceLayout.Layered));
+        Assert.False(set.SetLayout(workspace.Id, (WorkspaceLayout)99));
+    }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void UnboundConfiguredWorkspacesFillAvailableMonitorViewsInStableOrder(bool reverse)
     {
-        var primary = Monitor(SecondMonitor, "Primary") with { Bounds = new(0, 0, 1920, 1080), WorkArea = new(0, 0, 1920, 1040) };
+        var primary = Monitor(SecondMonitor, "Primary") with
+        {
+            Bounds = new(0, 0, 1920, 1080), WorkArea = new(0, 0, 1920, 1040)
+        };
         var secondary = Monitor(FirstMonitor, "Secondary");
         var set = new WorkspaceSet([new("1"), new("2"), new("3")]);
         set.Reconcile(Desktop([], reverse ? [primary, secondary] : [secondary, primary]));
@@ -75,6 +100,7 @@ public sealed class WorkspaceTests
             Assert.Equal(workspace.Id, set.WorkspaceFor(workspace.WindowIds.Single()));
             Assert.Equal(workspace.WindowIds.Single(), set.Trees[workspace.Id].Snapshot!.WindowId);
         }
+
         Assert.Equal(FirstMonitor, set.Snapshot.Single(w => w.Id == set.WorkspaceFor(first.Id)).MonitorId);
         Assert.Equal(SecondMonitor, set.Snapshot.Single(w => w.Id == set.WorkspaceFor(second.Id)).MonitorId);
     }
@@ -121,7 +147,10 @@ public sealed class WorkspaceTests
         var before = tree.Snapshot;
         Assert.True(set.Activate(two));
         Assert.Equal(2, set.Visibility(Desktop([first, second], Monitor(FirstMonitor))).Count);
-        var hidden = new[] { first with { Visible = false, ManagerHidden = true }, second with { Visible = false, ManagerHidden = true } };
+        var hidden = new[]
+        {
+            first with { Visible = false, ManagerHidden = true }, second with { Visible = false, ManagerHidden = true }
+        };
         set.Reconcile(Desktop(hidden, Monitor(FirstMonitor)));
         Assert.Equal(before, tree.Snapshot);
         Assert.Same(tree, set.Trees[one]);
@@ -252,7 +281,10 @@ public sealed class WorkspaceTests
         Assert.Equal(new WindowVisibility(managed.Id, true), Assert.Single(set.Visibility(desktop)));
         set.Activate(set.Snapshot[1].Id);
         Assert.Empty(set.Visibility(desktop));
-        Assert.Empty(set.Visibility(desktop with { Windows = [minimized with { Visible = true }, fullscreen with { Visible = true }] }));
+        Assert.Empty(set.Visibility(desktop with
+        {
+            Windows = [minimized with { Visible = true }, fullscreen with { Visible = true }]
+        }));
     }
 
     [Fact]
@@ -352,7 +384,8 @@ public sealed class WorkspaceTests
         var two = set.Snapshot.Single(workspace => workspace.Name == "Two");
         var three = set.Snapshot.Single(workspace => workspace.Name == "Three");
         var tree = set.Trees[one.Id];
-        var membership = set.Snapshot.ToDictionary(workspace => workspace.Id, workspace => workspace.WindowIds.ToArray());
+        var membership =
+            set.Snapshot.ToDictionary(workspace => workspace.Id, workspace => workspace.WindowIds.ToArray());
 
         Assert.True(set.Activate(one.Id, SecondMonitor));
 

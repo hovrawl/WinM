@@ -53,7 +53,8 @@ public sealed class WorkspaceManagerTests
         try
         {
             await engine.Ready.WaitAsync(timeout.Token);
-            var emptyWorkspace = Assert.Single(engine.Current!.Workspaces!, workspace => workspace.MonitorId == emptyMonitor.Id);
+            var emptyWorkspace = Assert.Single(engine.Current!.Workspaces!,
+                workspace => workspace.MonitorId == emptyMonitor.Id);
             Assert.Empty(emptyWorkspace.WindowIds);
 
             var arriving = fake.Desktop.Windows[0] with
@@ -64,7 +65,8 @@ public sealed class WorkspaceManagerTests
             Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
 
             var current = engine.Current!;
-            Assert.Contains(arriving.Id, current.Workspaces!.Single(workspace => workspace.Id == emptyWorkspace.Id).WindowIds);
+            Assert.Contains(arriving.Id,
+                current.Workspaces!.Single(workspace => workspace.Id == emptyWorkspace.Id).WindowIds);
             var tiled = Assert.Single(current.Desktop.Windows, window => window.Id == arriving.Id);
             Assert.False(tiled.Minimized);
             Assert.True(tiled.Visible);
@@ -112,6 +114,7 @@ public sealed class WorkspaceManagerTests
             await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
             await run;
         }
+
         Assert.All(fake.Desktop.Windows, window =>
         {
             Assert.False(window.Minimized);
@@ -125,14 +128,30 @@ public sealed class WorkspaceManagerTests
     {
         await using var fake = new FakeWindowPlatform();
         var primary = new MonitorInfo(Guid.NewGuid(), "Primary", new(0, 0, 1920, 1200), new(0, 0, 1920, 1200), 144);
-        var secondary = primary with { Id = Guid.NewGuid(), DeviceName = "Secondary", Bounds = new(-1920, 0, 1920, 1200), WorkArea = new(-1920, 0, 1920, 1200) };
+        var secondary = primary with
+        {
+            Id = Guid.NewGuid(), DeviceName = "Secondary", Bounds = new(-1920, 0, 1920, 1200),
+            WorkArea = new(-1920, 0, 1920, 1200)
+        };
         var template = fake.Desktop.Windows[0];
         WindowInfo[] windows =
         [
-            template with { Id = new(1, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 1200, MinimumHeight = 500 },
-            template with { Id = new(2, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 1200, MinimumHeight = 500 },
-            template with { Id = new(3, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 1200, MinimumHeight = 500 },
-            template with { Id = new(4, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 1200, MinimumHeight = 500 },
+            template with
+            {
+                Id = new(1, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 1200, MinimumHeight = 500
+            },
+            template with
+            {
+                Id = new(2, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 1200, MinimumHeight = 500
+            },
+            template with
+            {
+                Id = new(3, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 1200, MinimumHeight = 500
+            },
+            template with
+            {
+                Id = new(4, 0, 0, new byte[8]), MonitorId = primary.Id, MinimumWidth = 1200, MinimumHeight = 500
+            },
             template with { Id = new(5, 0, 0, new byte[8]), MonitorId = secondary.Id }
         ];
         fake.Desktop = new([primary, secondary], windows, null);
@@ -152,15 +171,26 @@ public sealed class WorkspaceManagerTests
                 Assert.True(overflow.LayoutOverflow && overflow.Minimized);
             });
             Assert.NotEqual(windows[4].Bounds, current.Desktop.Windows.Single(w => w.Id == windows[4].Id).Bounds);
-            Assert.All(current.Desktop.Windows, w => { Assert.True(w.Visible); Assert.False(w.ManagerHidden); Assert.Equal(WindowMode.Tiling, w.Mode); });
+            Assert.All(current.Desktop.Windows, w =>
+            {
+                Assert.True(w.Visible);
+                Assert.False(w.ManagerHidden);
+                Assert.Equal(WindowMode.Tiling, w.Mode);
+            });
             Assert.Equal(4, current.Workspaces!.Single(w => w.Name == "1").WindowIds.Count);
             var result = await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token);
             Assert.True(result.Success);
             Assert.Empty(diagnostics);
 
-            fake.Desktop = fake.Desktop with { Windows = fake.Desktop.Windows.Select(w => w with { MinimumWidth = 100, MinimumHeight = 100 }).ToArray() };
+            fake.Desktop = fake.Desktop with
+            {
+                Windows = fake.Desktop.Windows.Select(w => w with { MinimumWidth = 100, MinimumHeight = 100 })
+                    .ToArray()
+            };
             Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
-            Assert.All(engine.Current!.Desktop.Windows.Where(window => windows.Take(4).Any(original => original.Id == window.Id)),
+            Assert.All(
+                engine.Current!.Desktop.Windows.Where(window =>
+                    windows.Take(4).Any(original => original.Id == window.Id)),
                 window => Assert.False(window.Minimized || window.LayoutOverflow));
             fake.Desktop = fake.Desktop with
             {
@@ -168,23 +198,30 @@ public sealed class WorkspaceManagerTests
                 Windows = windows
             };
             Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
-            Assert.All(engine.Current!.Desktop.Windows.Where(window => windows.Take(4).Any(original => original.Id == window.Id)),
+            Assert.All(
+                engine.Current!.Desktop.Windows.Where(window =>
+                    windows.Take(4).Any(original => original.Id == window.Id)),
                 window => Assert.False(window.Minimized || window.LayoutOverflow));
             fake.Desktop = fake.Desktop with { Monitors = [primary, secondary], Windows = windows };
             Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
             Assert.Empty(diagnostics);
 
             var destination = engine.Current!.Workspaces!.Single(w => w.Name == "2");
-            Assert.True((await engine.ExecuteAsync(new(CommandKind.MoveToWorkspace, windows[3].Id, WorkspaceId: destination.Id), timeout.Token)).Success);
+            Assert.True((await engine.ExecuteAsync(
+                new(CommandKind.MoveToWorkspace, windows[3].Id, WorkspaceId: destination.Id), timeout.Token)).Success);
             Assert.Equal(2, engine.Current!.Workspaces!.Single(w => w.Id == destination.Id).WindowIds.Count);
-            Assert.True((await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceId: destination.Id), timeout.Token)).Success);
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceId: destination.Id),
+                timeout.Token)).Success);
             Assert.True(engine.Current!.Workspaces!.Single(w => w.Id == destination.Id).Active);
             Assert.True(engine.Current.Desktop.Windows.Single(w => w.Id == windows[3].Id).Visible);
-            Assert.NotEqual(windows[3].Bounds, engine.Current.Desktop.Windows.Single(w => w.Id == windows[3].Id).Bounds);
+            Assert.NotEqual(windows[3].Bounds,
+                engine.Current.Desktop.Windows.Single(w => w.Id == windows[3].Id).Bounds);
             var hidden = engine.Current.Desktop.Windows.Single(window => window.Id == windows[0].Id);
             Assert.False(hidden.Visible);
             Assert.True(hidden.ManagerHidden);
-            Assert.All(engine.Current.Desktop.Windows.Where(window => windows.Skip(1).Take(2).Any(original => original.Id == window.Id)),
+            Assert.All(
+                engine.Current.Desktop.Windows.Where(window =>
+                    windows.Skip(1).Take(2).Any(original => original.Id == window.Id)),
                 window => Assert.True(window.Minimized && window.LayoutOverflow));
             Assert.True(engine.Current.Desktop.Windows.Single(w => w.Id == windows[4].Id).Visible);
         }
@@ -260,7 +297,8 @@ public sealed class WorkspaceManagerTests
 
             fake.Desktop = fake.Desktop with { Monitors = [monitor with { WorkArea = new(0, 0, 1400, 800) }] };
             Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
-            Assert.All(engine.Current!.Desktop.Windows, window => Assert.False(window.Minimized || window.LayoutOverflow));
+            Assert.All(engine.Current!.Desktop.Windows,
+                window => Assert.False(window.Minimized || window.LayoutOverflow));
         }
         finally
         {
@@ -363,15 +401,22 @@ public sealed class WorkspaceManagerTests
             Assert.Equal(original[workspace.Name].WindowIds, workspace.WindowIds);
             Assert.Equal(original[workspace.Name].Active, workspace.Active);
         }
+
         AssertTiled();
         await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
         await run;
 
         void AssertTiled()
         {
-            Assert.Equal(new PixelRect(8, 8, 984, 834), engine.Current!.Desktop.Windows.Single(w => w.Id == mainWindow.Id).Bounds);
-            Assert.Equal(new PixelRect(-992, 8, 984, 834), engine.Current.Desktop.Windows.Single(w => w.Id == otherWindow.Id).Bounds);
-            Assert.All(engine.Current.Desktop.Windows, w => { Assert.True(w.Visible); Assert.False(w.ManagerHidden); });
+            Assert.Equal(new PixelRect(8, 8, 984, 834),
+                engine.Current!.Desktop.Windows.Single(w => w.Id == mainWindow.Id).Bounds);
+            Assert.Equal(new PixelRect(-992, 8, 984, 834),
+                engine.Current.Desktop.Windows.Single(w => w.Id == otherWindow.Id).Bounds);
+            Assert.All(engine.Current.Desktop.Windows, w =>
+            {
+                Assert.True(w.Visible);
+                Assert.False(w.ManagerHidden);
+            });
         }
     }
 
@@ -386,7 +431,8 @@ public sealed class WorkspaceManagerTests
         var run = engine.RunAsync(timeout.Token);
         var id = fake.Desktop.Windows[0].Id;
         await engine.ExecuteAsync(new(CommandKind.SetMode, id, Mode: WindowMode.Floating), timeout.Token);
-        Assert.True((await engine.ExecuteAsync(new(CommandKind.MoveToMonitor, id, MonitorId: target.Id), timeout.Token)).Success);
+        Assert.True((await engine.ExecuteAsync(new(CommandKind.MoveToMonitor, id, MonitorId: target.Id), timeout.Token))
+            .Success);
         var actual = engine.Current!.Desktop.Windows.Single(window => window.Id == id).Bounds;
         Assert.InRange(actual.X, target.WorkArea.X, target.WorkArea.X + target.WorkArea.Width - actual.Width);
         Assert.InRange(actual.Y, target.WorkArea.Y, target.WorkArea.Y + target.WorkArea.Height - actual.Height);
@@ -405,13 +451,22 @@ public sealed class WorkspaceManagerTests
         var run = engine.RunAsync(timeout.Token);
         await ready.Task.WaitAsync(timeout.Token);
         var second = engine.Current!.Workspaces!.Single(workspace => workspace.Name == "two");
-        var result = await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceId: second.Id), timeout.Token);
+        var result =
+            await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceId: second.Id), timeout.Token);
         Assert.True(result.Success);
-        Assert.All(engine.Current!.Desktop.Windows, window => { Assert.False(window.Visible); Assert.True(window.ManagerHidden); });
+        Assert.All(engine.Current!.Desktop.Windows, window =>
+        {
+            Assert.False(window.Visible);
+            Assert.True(window.ManagerHidden);
+        });
         Assert.Equal(2, engine.Current.Workspaces!.Sum(workspace => workspace.WindowIds.Count));
         await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
         await run;
-        Assert.All(fake.Desktop.Windows, window => { Assert.True(window.Visible); Assert.False(window.ManagerHidden); });
+        Assert.All(fake.Desktop.Windows, window =>
+        {
+            Assert.True(window.Visible);
+            Assert.False(window.ManagerHidden);
+        });
         Assert.Empty(engine.ShutdownFailures);
     }
 
@@ -441,7 +496,8 @@ public sealed class WorkspaceManagerTests
     {
         await using var fake = new FakeWindowPlatform();
         var primary = new MonitorInfo(Guid.NewGuid(), "Primary", new(0, 0, 1000, 900), new(0, 0, 1000, 850), 96);
-        var secondary = new MonitorInfo(Guid.NewGuid(), "Secondary", new(1000, 0, 1000, 900), new(1000, 0, 1000, 850), 96);
+        var secondary = new MonitorInfo(Guid.NewGuid(), "Secondary", new(1000, 0, 1000, 900), new(1000, 0, 1000, 850),
+            96);
         var window = fake.Desktop.Windows[0] with { MonitorId = primary.Id, Bounds = new(50, 50, 300, 300) };
         fake.Desktop = new([primary, secondary], [window], window.Id);
         var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One"), new("Two"), new("Three")]);
@@ -468,18 +524,23 @@ public sealed class WorkspaceManagerTests
                 WorkspaceId: one.Id, MonitorId: secondary.Id), timeout.Token);
 
             Assert.True(transfer.Success);
-            Assert.Equal(one.Id, engine.Current!.WorkspaceViews!.Single(view => view.MonitorId == secondary.Id).WorkspaceId);
-            Assert.Equal(three.Id, engine.Current.WorkspaceViews!.Single(view => view.MonitorId == primary.Id).WorkspaceId);
+            Assert.Equal(one.Id,
+                engine.Current!.WorkspaceViews!.Single(view => view.MonitorId == secondary.Id).WorkspaceId);
+            Assert.Equal(three.Id,
+                engine.Current.WorkspaceViews!.Single(view => view.MonitorId == primary.Id).WorkspaceId);
             Assert.DoesNotContain(engine.Current.WorkspaceViews!, view => view.WorkspaceId == two.Id);
-            Assert.All(engine.Current.Workspaces!, workspace => Assert.Equal(membership[workspace.Id], workspace.WindowIds));
+            Assert.All(engine.Current.Workspaces!,
+                workspace => Assert.Equal(membership[workspace.Id], workspace.WindowIds));
             Assert.True(engine.Current.Desktop.Windows.Single(candidate => candidate.Id == window.Id).Visible);
             Assert.InRange(engine.Current.Desktop.Windows.Single(candidate => candidate.Id == window.Id).Bounds.X,
                 secondary.WorkArea.X, secondary.WorkArea.X + secondary.WorkArea.Width);
 
-            var focusedDefault = await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceId: two.Id), timeout.Token);
+            var focusedDefault =
+                await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceId: two.Id), timeout.Token);
 
             Assert.True(focusedDefault.Success);
-            Assert.Equal(two.Id, engine.Current!.WorkspaceViews!.Single(view => view.MonitorId == primary.Id).WorkspaceId);
+            Assert.Equal(two.Id,
+                engine.Current!.WorkspaceViews!.Single(view => view.MonitorId == primary.Id).WorkspaceId);
             Assert.Equal(one.Id, engine.Current.Workspaces!.Single(workspace => workspace.Name == "One").Id);
         }
         finally
@@ -494,7 +555,8 @@ public sealed class WorkspaceManagerTests
     {
         await using var fake = new FakeWindowPlatform();
         var primary = new MonitorInfo(Guid.NewGuid(), "Primary", new(0, 0, 1000, 900), new(0, 0, 1000, 850), 96);
-        var secondary = new MonitorInfo(Guid.NewGuid(), "Secondary", new(1000, 0, 1000, 900), new(1000, 0, 1000, 850), 96);
+        var secondary = new MonitorInfo(Guid.NewGuid(), "Secondary", new(1000, 0, 1000, 900), new(1000, 0, 1000, 850),
+            96);
         var window = fake.Desktop.Windows[0] with { MonitorId = primary.Id };
         fake.Desktop = new([primary, secondary], [window], window.Id);
         var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One"), new("Two")]);
@@ -533,10 +595,134 @@ public sealed class WorkspaceManagerTests
         {
             await engine.Ready.WaitAsync(timeout.Token);
             var workspace = engine.Current!.Workspaces!.Single();
-            var result = await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceId: workspace.Id), timeout.Token);
+            var result = await engine.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceId: workspace.Id),
+                timeout.Token);
             Assert.False(result.Success);
             Assert.Equal("not_ready", result.ErrorCode);
             Assert.Empty(engine.Current.WorkspaceViews!);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task LayeredLayoutReflowsAndPageCyclingPreservesWorkspaceTreeAndMembership()
+    {
+        await using var fake = new FakeWindowPlatform();
+        fake.Desktop = fake.Desktop with { FocusedWindowId = null };
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var before = engine.Current!;
+            var workspace = Assert.Single(before.Workspaces!);
+            var savedTree = before.Trees[workspace.Id];
+            var windowOrder = fake.Desktop.Windows.OrderBy(window => window.Id).Select(window => window.Id).ToArray();
+
+            var changed = await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
+                WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered), timeout.Token);
+
+            Assert.True(changed.Success);
+            Assert.Equal(WorkspaceLayout.Layered, Assert.Single(engine.Current!.Workspaces!).Layout);
+            Assert.Equal(savedTree, engine.Current.Trees[workspace.Id]);
+            Assert.Equal(workspace.WindowIds, engine.Current.Workspaces!.Single().WindowIds);
+            Assert.Equal(windowOrder, fake.Plans[^1].Placements.Select(placement => placement.WindowId));
+            Assert.Equal(2, fake.Plans[^1].Placements.Count);
+            Assert.NotEqual(fake.Plans[^1].Placements[0].Bounds, fake.Plans[^1].Placements[1].Bounds);
+
+            var cycles = new[]
+            {
+                (FocusCycleDirection.Next, windowOrder[0]), (FocusCycleDirection.Next, windowOrder[1]),
+                (FocusCycleDirection.Next, windowOrder[0]), (FocusCycleDirection.Previous, windowOrder[1])
+            };
+            foreach (var (direction, expected) in cycles)
+            {
+                Assert.True((await engine.ExecuteAsync(new(CommandKind.FocusCycle, WorkspaceId: workspace.Id,
+                    Mode: WindowMode.Tiling, CycleDirection: direction), timeout.Token)).Success);
+                Assert.Equal(expected, engine.Current.Desktop.FocusedWindowId);
+            }
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task FailedLayeredReflowRestoresWorkspaceLayout()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var before = engine.Current!;
+            var workspace = Assert.Single(before.Workspaces!);
+            var tree = before.Trees[workspace.Id];
+            Assert.Equal("invalid_argument", (await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
+                WorkspaceId: workspace.Id), timeout.Token)).ErrorCode);
+            Assert.Equal("not_found", (await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
+                WorkspaceId: Guid.NewGuid(), Layout: WorkspaceLayout.Layered), timeout.Token)).ErrorCode);
+            Assert.Equal("invalid_argument", (await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
+                    WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered, Mode: WindowMode.Tiling),
+                timeout.Token))
+                .ErrorCode);
+            fake.FailActions = true;
+
+            var result = await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
+                WorkspaceId: workspace.Id, Layout: WorkspaceLayout.Layered), timeout.Token);
+
+            Assert.False(result.Success);
+            Assert.Equal("access_denied", result.ErrorCode);
+            Assert.Equal(WorkspaceLayout.Split, Assert.Single(engine.Current!.Workspaces!).Layout);
+            Assert.Equal(tree, engine.Current.Trees[workspace.Id]);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task LayeredLayoutRestoresWindowsThatOverflowedTheSplitLayout()
+    {
+        await using var fake = new FakeWindowPlatform();
+        fake.Desktop = fake.Desktop with
+        {
+            Windows = fake.Desktop.Windows.Select(window => window with { MinimumWidth = 600, MinimumHeight = 400 })
+                .ToArray()
+        };
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One")]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var workspace = Assert.Single(engine.Current!.Workspaces!);
+            Assert.Single(engine.Current.Desktop.Windows, window => window.LayoutOverflow);
+            Assert.Single(engine.Current.Desktop.Windows, window => window.Minimized);
+
+            var result = await engine.ExecuteAsync(new(CommandKind.SetWorkspaceLayout,
+                WorkspaceName: workspace.Name, Layout: WorkspaceLayout.Layered), timeout.Token);
+
+            Assert.True(result.Success);
+            Assert.All(engine.Current!.Desktop.Windows, window =>
+            {
+                Assert.False(window.LayoutOverflow);
+                Assert.False(window.Minimized);
+            });
+            Assert.Equal(2, engine.Current.Workspaces!.Single().WindowIds.Count);
+            Assert.Equal(2, fake.Plans[^1].Placements.Count);
+            Assert.Contains(fake.Plans[^1].Minimizations!, minimization => !minimization.Minimized);
         }
         finally
         {

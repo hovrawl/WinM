@@ -22,6 +22,12 @@ internal static class InspectorPresentation
 
     public static string CommandFeedback(string description, string outcome) => $"{description} · {outcome}";
 
+    public static bool CanCyclePages(WorkspaceInfo? workspace, DesktopSnapshot? desktop, bool canCommand) =>
+        canCommand && workspace is { Active: true, Layout: WorkspaceLayout.Layered } && desktop is not null &&
+        desktop.Windows.Count(window => workspace.WindowIds.Contains(window.Id) && window.Mode == WindowMode.Tiling &&
+                                        window.Visible && !window.Minimized && !window.IsIgnored &&
+                                        window.Bounds.Width > 0 && window.Bounds.Height > 0) > 1;
+
     private static string WindowTarget(WindowInfo window)
     {
         var title = string.IsNullOrWhiteSpace(window.Title) ? "Untitled window" : window.Title;
@@ -50,7 +56,8 @@ internal static class InspectorPresentation
         if (window.IsToolWindow) flags.Add("tool");
         if (window.IsOwned) flags.Add("owned");
         if (window.IsNoActivate) flags.Add("no-activate");
-        if (flags.Count > 0) state.Add((window.IsIgnored ? "default ignored: " : "native flags: ") + string.Join(", ", flags));
+        if (flags.Count > 0)
+            state.Add((window.IsIgnored ? "default ignored: " : "native flags: ") + string.Join(", ", flags));
         if (window.TilingOverride is { } tiling) state.Add(tiling ? "tiling override" : "floating override");
         return string.Join(" · ", state);
     }
