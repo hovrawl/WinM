@@ -57,15 +57,15 @@ public sealed class HostConfigurationTests
     }
 
     [Theory]
-    [InlineData(TouchpadSwipeDirection.Left, Direction.Right)]
-    [InlineData(TouchpadSwipeDirection.Right, Direction.Left)]
-    public void ThreeFingerHorizontalSwipesInvertDirectionalFocus(TouchpadSwipeDirection physical,
-        Direction expected)
+    [InlineData(TouchpadSwipeDirection.Left, FocusCycleDirection.Next)]
+    [InlineData(TouchpadSwipeDirection.Right, FocusCycleDirection.Previous)]
+    public void ThreeFingerHorizontalSwipesCycleFocusWithinTheWorkspace(TouchpadSwipeDirection physical,
+        FocusCycleDirection expected)
     {
         var command = TouchpadGesturePolicy.CreateCommand(
             new TouchpadGesture(TouchpadGestureKind.Swipe, 3, physical, 0, 100), AvailableTouchpad());
 
-        Assert.Equal(new ManagerCommand(CommandKind.Focus, Direction: expected), command);
+        Assert.Equal(new ManagerCommand(CommandKind.FocusCycle, CycleDirection: expected), command);
     }
 
     [Theory]
@@ -98,7 +98,7 @@ public sealed class HostConfigurationTests
         var blocked = new TouchpadCapabilityResult(TouchpadCapabilityState.GestureConflictBlocked, 1, true, false,
             "unverified");
 
-        Assert.Equal(new ManagerCommand(CommandKind.Focus, Direction: Direction.Right),
+        Assert.Equal(new ManagerCommand(CommandKind.FocusCycle, CycleDirection: FocusCycleDirection.Next),
             TouchpadGesturePolicy.CreateCommand(
                 new TouchpadGesture(TouchpadGestureKind.Swipe, 3, TouchpadSwipeDirection.Left, 0, 100), blocked));
     }

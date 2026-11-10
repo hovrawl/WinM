@@ -17,9 +17,10 @@ internal static class TouchpadGesturePolicy
         if (gesture.FingerCount == 3 && direction is TouchpadSwipeDirection.Left or TouchpadSwipeDirection.Right)
         {
             if (!capability.CanRecognizeGestures) return null;
-            return new ManagerCommand(CommandKind.Focus, Direction: direction == TouchpadSwipeDirection.Left
-                ? Direction.Right
-                : Direction.Left);
+            // Cycling wraps within the workspace instead of spilling focus onto another monitor.
+            return new ManagerCommand(CommandKind.FocusCycle, CycleDirection: direction == TouchpadSwipeDirection.Left
+                ? FocusCycleDirection.Next
+                : FocusCycleDirection.Previous);
         }
 
         if (!capability.CanDispatchActions || gesture.FingerCount != 4) return null;
