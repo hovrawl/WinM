@@ -17,6 +17,10 @@ public sealed record TouchpadCapabilityResult(
     bool GestureConflictSuppressionVerified,
     string? Detail)
 {
+    public bool CanRecognizeGestures => DeviceCount > 0 && ContactReportsObserved &&
+                                        State is TouchpadCapabilityState.GestureConflictBlocked or
+                                            TouchpadCapabilityState.Available;
+
     public bool CanDispatchActions => State == TouchpadCapabilityState.Available && DeviceCount > 0 &&
                                       ContactReportsObserved && GestureConflictSuppressionVerified;
 }

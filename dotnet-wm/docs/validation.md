@@ -176,12 +176,16 @@ once per key press, consumes the matching release, and leaves existing Alt/Win
 switcher chords unchanged. The carousel state tests verify that browsing only
 changes the selected ID, acceptance creates a `Focus` command for that ID, and
 cancel or external activation never creates an acceptance command. Escape and a
-verified three-finger swipe down cancel to the captured original window; external
-activation closes without restoring focus. Native vertical gestures remain
-blocked until exclusive shell ownership is established. Deterministic scroll tests
+three-finger swipe down cancel to the captured original window; external
+activation closes without restoring focus. Once contact reports are observed,
+three-finger vertical gestures and two-finger scrolling route locally even though
+exclusive shell ownership is unverified; Windows may also perform its configured
+gesture, and the switcher displays that warning. This local routing does not enable
+Host window-changing gestures, which remain gated on verified shell suppression.
+Deterministic scroll tests
 cover coalescing, bounds, viewport anchoring, selection preservation, and preview
 source clipping; snapshot reconciliation closes on a changed workspace view or
 monitor and rebinds when candidate identities change. These presentation paths
 have not been exercised with live touchpad reports or visually confirmed DWM
-composition in this session, and native scrolling remains blocked by the same
-ownership gate.
+composition in this session; physical touchpad routing and shell coexistence remain
+unverified.

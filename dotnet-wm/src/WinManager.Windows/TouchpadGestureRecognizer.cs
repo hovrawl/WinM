@@ -34,7 +34,7 @@ public sealed class TouchpadGestureRecognizer
             return [];
         }
 
-        if (active && (frame.DeviceHandle != deviceHandle || frame.TimestampMilliseconds <= lastTimestamp ||
+        if (active && (frame.DeviceHandle != deviceHandle || frame.TimestampMilliseconds < lastTimestamp ||
                        frame.TimestampMilliseconds - lastTimestamp > MaximumFrameGapMilliseconds))
             Reset();
 

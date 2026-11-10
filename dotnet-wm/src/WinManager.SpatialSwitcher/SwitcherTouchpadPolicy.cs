@@ -14,7 +14,7 @@ internal static class SwitcherTouchpadPolicy
         out double horizontalDelta)
     {
         horizontalDelta = 0;
-        if (!capability.CanDispatchActions || gesture.Kind != TouchpadGestureKind.HorizontalDelta ||
+        if (!capability.CanRecognizeGestures || gesture.Kind != TouchpadGestureKind.HorizontalDelta ||
             gesture.FingerCount != 2 || !double.IsFinite(gesture.HorizontalDelta)) return false;
         horizontalDelta = gesture.HorizontalDelta;
         return true;
@@ -22,7 +22,7 @@ internal static class SwitcherTouchpadPolicy
 
     public static CarouselGestureAction? Route(TouchpadGesture gesture, TouchpadCapabilityResult capability)
     {
-        if (!capability.CanDispatchActions || gesture.Kind != TouchpadGestureKind.Swipe || gesture.FingerCount != 3)
+        if (!capability.CanRecognizeGestures || gesture.Kind != TouchpadGestureKind.Swipe || gesture.FingerCount != 3)
             return null;
         return gesture.Direction switch
         {

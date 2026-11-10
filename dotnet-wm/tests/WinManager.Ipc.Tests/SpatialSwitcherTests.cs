@@ -416,49 +416,57 @@ public sealed class SpatialSwitcherTests
     [Theory]
     [InlineData(TouchpadSwipeDirection.Up, "Open")]
     [InlineData(TouchpadSwipeDirection.Down, "Cancel")]
-    public void SwitcherRoutesOnlyVerticalThreeFingerSwipesWhenOwnershipIsVerified(
+    public void SwitcherRoutesVerticalThreeFingerSwipesWhenContactsAreObserved(
         TouchpadSwipeDirection direction, string expected)
     {
-        var capability = new TouchpadCapabilityResult(TouchpadCapabilityState.Available, 1, true, true, null);
+        var capability = new TouchpadCapabilityResult(TouchpadCapabilityState.GestureConflictBlocked, 1, true,
+            false, "shell suppression unverified");
         var gesture = new TouchpadGesture(TouchpadGestureKind.Swipe, 3, direction, 0, 100);
 
         Assert.Equal(Enum.Parse<CarouselGestureAction>(expected), SwitcherTouchpadPolicy.Route(gesture, capability));
     }
 
     [Fact]
-    public void SwitcherDoesNotRouteHostHorizontalOrUnverifiedNativeGestures()
+    public void SwitcherDoesNotRouteHostHorizontalGestures()
     {
         var available = new TouchpadCapabilityResult(TouchpadCapabilityState.Available, 1, true, true, null);
-        var blocked = available with
-        {
-            State = TouchpadCapabilityState.GestureConflictBlocked,
-            GestureConflictSuppressionVerified = false
-        };
 
         Assert.Null(SwitcherTouchpadPolicy.Route(
             new TouchpadGesture(TouchpadGestureKind.Swipe, 3, TouchpadSwipeDirection.Left, 0, 100), available));
-        Assert.Null(SwitcherTouchpadPolicy.Route(
-            new TouchpadGesture(TouchpadGestureKind.Swipe, 3, TouchpadSwipeDirection.Up, 0, 100), blocked));
-        Assert.Null(SwitcherTouchpadPolicy.Route(
-            new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 2, null, 0.1, 100), available));
     }
 
     [Fact]
-    public void SwitcherRoutesTwoFingerHorizontalDeltasOnlyWhenCapabilityIsAvailable()
+    public void SwitcherRoutesLocalInputWithoutClaimingExclusiveShellOwnership()
     {
-        var available = new TouchpadCapabilityResult(TouchpadCapabilityState.Available, 1, true, true, null);
-        var blocked = available with
-        {
-            State = TouchpadCapabilityState.GestureConflictBlocked,
-            GestureConflictSuppressionVerified = false
-        };
-        var gesture = new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 2, null, -0.07, 100);
+        var capability = new TouchpadCapabilityResult(TouchpadCapabilityState.GestureConflictBlocked, 1, true,
+            false, "shell suppression unverified");
 
-        Assert.True(SwitcherTouchpadPolicy.TryGetScrollDelta(gesture, available, out var delta));
+        Assert.Equal(CarouselGestureAction.Open, SwitcherTouchpadPolicy.Route(
+            new TouchpadGesture(TouchpadGestureKind.Swipe, 3, TouchpadSwipeDirection.Up, 0, 100), capability));
+        Assert.True(SwitcherTouchpadPolicy.TryGetScrollDelta(
+            new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 2, null, -0.07, 100), capability,
+            out var delta));
         Assert.Equal(-0.07, delta, 6);
-        Assert.False(SwitcherTouchpadPolicy.TryGetScrollDelta(gesture, blocked, out _));
         Assert.False(SwitcherTouchpadPolicy.TryGetScrollDelta(
-            new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 3, null, 0.1, 100), available, out _));
+            new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 3, null, 0.1, 100), capability, out _));
+    }
+
+    [Theory]
+    [InlineData(TouchpadCapabilityState.Disabled, 1, true)]
+    [InlineData(TouchpadCapabilityState.UnsupportedDevice, 0, true)]
+    [InlineData(TouchpadCapabilityState.RegistrationFailed, 1, true)]
+    [InlineData(TouchpadCapabilityState.DecodingFailed, 1, true)]
+    [InlineData(TouchpadCapabilityState.GestureConflictBlocked, 0, true)]
+    [InlineData(TouchpadCapabilityState.GestureConflictBlocked, 1, false)]
+    public void SwitcherRejectsLocalInputWithoutUsableContactReports(TouchpadCapabilityState state, int deviceCount,
+        bool contactsObserved)
+    {
+        var capability = new TouchpadCapabilityResult(state, deviceCount, contactsObserved, false, "diagnostic");
+
+        Assert.Null(SwitcherTouchpadPolicy.Route(
+            new TouchpadGesture(TouchpadGestureKind.Swipe, 3, TouchpadSwipeDirection.Up, 0, 100), capability));
+        Assert.False(SwitcherTouchpadPolicy.TryGetScrollDelta(
+            new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 2, null, 0.1, 100), capability, out _));
     }
 
     [Fact]

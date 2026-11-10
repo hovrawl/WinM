@@ -35,10 +35,10 @@ public sealed class TouchpadInputSource : IAsyncDisposable
     private readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly WNDPROC windowProcedure;
     private readonly string windowClass = $"WinManager.Touchpad.{Guid.NewGuid():N}";
+    private readonly Dictionary<nint, TouchpadDeviceProcessor> processors = [];
     private Thread? thread;
     private Task? processor;
     private HWND notificationWindow;
-    private nint activeDevice;
     private TouchpadCapabilityResult capability = new(TouchpadCapabilityState.Disabled, 0, false, false, null);
     private bool disposing;
     private int disposed;
@@ -174,7 +174,8 @@ public sealed class TouchpadInputSource : IAsyncDisposable
             {
                 foreach (var device in devices.Values) device.Dispose();
                 devices.Clear();
-                activeDevice = 0;
+                foreach (var processor in processors.Values) processor.Cancel();
+                processors.Clear();
             }
 
             if (window != default)
@@ -238,7 +239,9 @@ public sealed class TouchpadInputSource : IAsyncDisposable
                 if ((uint)wParam.Value == RawInputDeviceArrival || (uint)wParam.Value == RawInputDeviceRemoval)
                 {
                     input.MarkInputLost();
-                    lock (devicesGate) activeDevice = 0;
+                    lock (devicesGate)
+                        foreach (var processor in processors.Values)
+                            processor.Cancel();
                     _ = Task.Run(() =>
                     {
                         try
@@ -294,7 +297,10 @@ public sealed class TouchpadInputSource : IAsyncDisposable
             {
                 foreach (var handle in devices.Keys.Where(handle => !currentHandles.Contains(handle)).ToArray())
                     if (devices.TryRemove(handle, out var removedDevice))
+                    {
                         removedDevice.Dispose();
+                        processors.Remove(handle);
+                    }
             }
 
             var descriptorFailure = false;
@@ -302,7 +308,15 @@ public sealed class TouchpadInputSource : IAsyncDisposable
             {
                 if (devices.ContainsKey(rawDevice.Device)) continue;
                 if (RawHidTouchpadDevice.TryCreate(rawDevice.Device, out var device, out var failure))
-                    devices.TryAdd(device!.Handle, device);
+                {
+                    lock (devicesGate)
+                    {
+                        if (devices.TryAdd(device!.Handle, device))
+                            processors.Add(device.Handle, new TouchpadDeviceProcessor(device.Handle));
+                        else
+                            device.Dispose();
+                    }
+                }
                 else if (failure is "unsupported_descriptor" or "descriptor_decode_failed")
                     descriptorFailure = true;
             }
@@ -310,7 +324,6 @@ public sealed class TouchpadInputSource : IAsyncDisposable
             int deviceCount;
             lock (devicesGate)
             {
-                activeDevice = devices.Keys.Order().FirstOrDefault();
                 deviceCount = devices.Count;
             }
 
@@ -367,17 +380,14 @@ public sealed class TouchpadInputSource : IAsyncDisposable
 
     private async Task ProcessInputAsync()
     {
-        var assembler = new TouchpadFrameAssembler();
-        var recognizer = new TouchpadGestureRecognizer();
         try
         {
             await foreach (var queued in input.ReadAllAsync())
             {
                 if (queued.ResetBefore)
-                {
-                    assembler.Cancel();
-                    recognizer.Cancel();
-                }
+                    lock (devicesGate)
+                        foreach (var processor in processors.Values)
+                            processor.Cancel();
 
                 var batch = queued.Value;
 
@@ -389,7 +399,8 @@ public sealed class TouchpadInputSource : IAsyncDisposable
                 int deviceCount;
                 lock (devicesGate)
                 {
-                    if (batch.DeviceHandle != activeDevice || !devices.TryGetValue(batch.DeviceHandle, out var device))
+                    if (!devices.TryGetValue(batch.DeviceHandle, out var device) ||
+                        !processors.TryGetValue(batch.DeviceHandle, out var processor))
                         continue;
                     deviceCount = devices.Count;
                     foreach (var report in batch.Reports)
@@ -397,27 +408,24 @@ public sealed class TouchpadInputSource : IAsyncDisposable
                         if (!device.Decoder.TryDecode(batch.DeviceHandle, batch.TimestampMilliseconds, report,
                                 out var decoded))
                         {
-                            assembler.Cancel();
-                            recognizer.Cancel();
+                            processor.Cancel();
                             failure = "A touchpad report did not match its HID descriptor.";
                             continue;
                         }
 
                         if (decoded is null) continue;
-                        var assembled = assembler.Process(decoded);
-                        if (assembled.Malformed)
+                        var result = processor.Process(decoded);
+                        if (result.Malformed)
                         {
-                            recognizer.Cancel();
                             failure = "A touchpad contact frame was malformed.";
                             continue;
                         }
 
-                        if (assembled.DiscardedIncompleteFrame) recognizer.Cancel();
-                        if (assembled.Frame is not { } frame) continue;
+                        if (result.Frame is not { } frame) continue;
                         contactsObserved = true;
                         frameObserved = true;
                         frames.Add(frame);
-                        gestures.AddRange(recognizer.Process(frame));
+                        gestures.AddRange(result.Gestures);
                     }
                 }
 

@@ -24,6 +24,22 @@ public sealed class TouchpadGestureRecognizerTests
     }
 
     [Fact]
+    public void ThreeFingerSwipeSurvivesConsecutiveFramesWithTheSameMillisecondTimestamp()
+    {
+        var recognizer = new TouchpadGestureRecognizer();
+        recognizer.Process(Frame(100, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(140, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(156, 3, 0.25, 0.45, 0.65));
+        recognizer.Process(Frame(156, 3, 0.1, 0.3, 0.5));
+
+        var completed = recognizer.Process(Frame(172, 0));
+
+        var gesture = Assert.Single(completed);
+        Assert.Equal(3, gesture.FingerCount);
+        Assert.Equal(TouchpadSwipeDirection.Left, gesture.Direction);
+    }
+
+    [Fact]
     public void FourFingerTransitionCancelsThreeFingerCandidateAndFollowsSwipeDirection()
     {
         var recognizer = new TouchpadGestureRecognizer();

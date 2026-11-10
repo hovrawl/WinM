@@ -194,3 +194,9 @@ The open carousel scrolls smoothly through non-overlapping previews and cleans u
 - Preserve selection across snapshot changes and release/rebind thumbnails when windows disappear, identities change, or the monitor/view is invalidated.
 - Tune initial spacing, preview sizing, and external selection decoration within the DWM experiment’s established limits.
 - Add geometry/scroll/cleanup tests, run existing switcher and spatial-navigation regressions, and document measured DWM/native-input limits and deferred composition enhancements.
+
+### ✓ Step 6: Restore three-finger gesture propagation to SpatialSwitcher
+Recognized touchpad frames reach the carousel policy across timestamp-coalesced reports and all detected touchpads, while preserving the Host's suppression safety gate.
+- Accept equal frame timestamps and maintain independent frame assembly and recognition per device.
+- Separate local contact recognition from verified exclusive gesture ownership, and route carousel actions on the UI thread.
+- Add timestamp, multi-device, policy-routing, capability, and explicit shell-conflict-warning regressions; document the remaining hardware limitation.

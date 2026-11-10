@@ -865,25 +865,28 @@ internal sealed class SwitcherWindow : Window
         var shortcuts = keyboardHook is null
             ? "Keyboard shortcuts unavailable"
             : "Alt+Tab windows · Win+Tab / Space workspaces · Ctrl+Alt+Space carousel";
-        return touchpadEnabled
-            ? $"{shortcuts} · Touchpad {touchpadCapabilityState}"
-            : $"{shortcuts} · Touchpad disabled";
+        if (!touchpadEnabled) return $"{shortcuts} · Touchpad disabled";
+        var touchpadStatus = touchpadCapabilityState == TouchpadCapabilityState.GestureConflictBlocked
+            ? "Touchpad detected · Windows gestures may also run"
+            : $"Touchpad {touchpadCapabilityState}";
+        return $"{shortcuts} · {touchpadStatus}";
     }
 
     private void OnTouchpadGesture(TouchpadGesture gesture)
     {
-        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063) || !touchpadEnabled ||
-            touchpadInput is not { } input) return;
-        if (SwitcherTouchpadPolicy.TryGetScrollDelta(gesture, input.Capability, out var horizontalDelta))
-        {
-            if (carouselWindow.IsVisible) scrollAccumulator.Add(horizontalDelta);
-            return;
-        }
-
-        var action = SwitcherTouchpadPolicy.Route(gesture, input.Capability);
-        if (action is null) return;
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063)) return;
         Dispatcher.UIThread.Post(() =>
         {
+            if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063)) return;
+            if (!touchpadEnabled || touchpadInput is not { } input) return;
+            if (SwitcherTouchpadPolicy.TryGetScrollDelta(gesture, input.Capability, out var horizontalDelta))
+            {
+                if (carouselWindow.IsVisible) scrollAccumulator.Add(horizontalDelta);
+                return;
+            }
+
+            var action = SwitcherTouchpadPolicy.Route(gesture, input.Capability);
+            if (action is null) return;
             if (!connected || snapshot is null) return;
             if (action == CarouselGestureAction.Open)
             {
