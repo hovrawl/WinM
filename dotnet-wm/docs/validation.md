@@ -87,8 +87,8 @@ dotnet test tests\WinManager.Windows.Tests\WinManager.Windows.Tests.csproj --fil
 Remove-Item Env:\WINMANAGER_ISOLATED_INTERACTIVE
 ```
 
-The current environment run passed 241 IPC tests and 86 Windows tests, with 40 opt-in
-Windows tests skipped;
+The initial carousel implementation run passed 241 IPC tests and 86 Windows tests,
+with 40 opt-in Windows tests skipped;
 the DWM harness and all three touchpad/foreground probes were among the skipped
 tests. Therefore actual DWM composition over the Avalonia destination, mixed-DPI
 placement, and rendered clipping have not yet been visually confirmed here.
@@ -103,6 +103,34 @@ reports by device and scan time, and cancels recognition after malformed or drop
 input. Deterministic fixtures cover HID value decoding, exact `HIDP_CAPS` and
 `HIDP_VALUE_CAPS` structure sizes, split contact frames, gesture count transitions,
 diagonal movement, and queue-overflow reset behavior.
+
+The HID capability structs include the SDK reserved arrays (`HIDP_CAPS` is 64 bytes;
+`HIDP_VALUE_CAPS` is 72 bytes). Native-byte fixtures pin the input-value-capability
+count offset, value-range offsets, and value-capability array stride; the earlier
+undersized declarations caused touchpad collections to be rejected during parsing.
+The `HidP_GetValueCaps` element-count pointer also uses the native 16-bit width.
+Unrelated HID collections are classified separately from unsupported touchpad
+descriptors rather than producing misleading touchpad-decoding failures.
+
+Validation for this correction passed 94 Windows tests, with 40 opt-in interactive
+tests skipped, and built the solution with no warnings or errors. The ABI size
+regression was verified failing against the earlier 32/64-byte layouts before the
+fix was applied.
+
+A read-only local descriptor probe found three Touch Pad collections and decoded
+14, 16, and 17 input-value capabilities with the corrected ABI. Two collections
+exposed the contact IDs, coordinates, and contact counts required by this decoder;
+the other collection lacked those required fields. This establishes descriptor
+availability, not physical contact-frame delivery or exclusive gesture ownership.
+
+The [RawInput.Touchpad sample](https://github.com/emoacht/RawInput.Touchpad) confirms
+the reserved-array layouts and 16-bit count parameter. Microsoft's
+[Precision Touchpad APIs](https://learn.microsoft.com/en-us/windows/win32/input-precisiontouchpad/precision-touchpad-portal)
+include `TouchpadGesturesController`, which overrides system handling only for a
+foreground process; background controllers are ignored. These APIs are documented
+with a pre-release notice and may offer a future foreground-carousel input path,
+but do not establish gesture ownership for the background Host or global carousel
+entry while another application is foreground.
 
 Raw contact delivery is separate from shell-gesture suppression. The source reports
 `gestureConflictBlocked` whenever a touchpad is present because observing raw HID

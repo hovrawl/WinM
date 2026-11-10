@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using WinManager.Windows;
 using Xunit;
 
@@ -51,7 +53,79 @@ public sealed class TouchpadHidDecoderTests
     [Fact]
     public void HidCapabilityStructuresMatchTheDocumentedNativeAbiSizes()
     {
-        Assert.Equal((32, 64), RawHidTouchpadDevice.NativeStructureSizes);
+        Assert.Equal((64, 72), RawHidTouchpadDevice.NativeStructureSizes);
+    }
+
+    [Theory]
+    [InlineData(0xff00, 0x05, 0, 0, "unsupported_device")]
+    [InlineData(0x0d, 0x04, 16, 8, "unsupported_device")]
+    [InlineData(0x0d, 0x05, 0, 8, "unsupported_descriptor")]
+    [InlineData(0x0d, 0x05, 16, 0, "unsupported_descriptor")]
+    [InlineData(0x0d, 0x05, 16, 513, "unsupported_descriptor")]
+    [InlineData(0x0d, 0x05, 16, 8, null)]
+    public void CapabilityValidationDistinguishesUnrelatedCollectionsFromUnsupportedDescriptors(
+        int usagePage, int usage, int reportLength, int valueCapsCount, string? expectedFailure)
+    {
+        var caps = new RawHidTouchpadDevice.HidpCaps
+        {
+            UsagePage = (ushort)usagePage,
+            Usage = (ushort)usage,
+            InputReportByteLength = (ushort)reportLength,
+            NumberInputValueCaps = (ushort)valueCapsCount
+        };
+
+        Assert.Equal(expectedFailure, RawHidTouchpadDevice.ValidateCapabilities(caps));
+    }
+
+    [Fact]
+    public void HidpCapsFixtureReadsInputValueCapabilityCountAtSdkOffset()
+    {
+        var fixture = new byte[64];
+        BinaryPrimitives.WriteUInt16LittleEndian(fixture.AsSpan(48), 7);
+
+        var caps = ReadNativeStructure<RawHidTouchpadDevice.HidpCaps>(fixture);
+
+        Assert.Equal((ushort)7, caps.NumberInputValueCaps);
+    }
+
+    [Fact]
+    public void HidpValueCapsFixtureReadsRangesAndUsesSdkArrayStride()
+    {
+        var fixture = new byte[72 * 2];
+        BinaryPrimitives.WriteInt32LittleEndian(fixture.AsSpan(40), -10);
+        BinaryPrimitives.WriteInt32LittleEndian(fixture.AsSpan(44), 4095);
+        BinaryPrimitives.WriteUInt16LittleEndian(fixture.AsSpan(56), 0x30);
+        BinaryPrimitives.WriteUInt16LittleEndian(fixture.AsSpan(58), 0x31);
+        fixture[12] = 1;
+
+        var secondOffset = 72;
+        BinaryPrimitives.WriteInt32LittleEndian(fixture.AsSpan(secondOffset + 40), 1);
+        BinaryPrimitives.WriteInt32LittleEndian(fixture.AsSpan(secondOffset + 44), 10);
+        BinaryPrimitives.WriteUInt16LittleEndian(fixture.AsSpan(secondOffset + 56), 0x51);
+
+        var range = ReadNativeStructure<RawHidTouchpadDevice.HidpValueCaps>(fixture);
+        var single = ReadNativeStructure<RawHidTouchpadDevice.HidpValueCaps>(fixture, secondOffset);
+
+        Assert.Equal(-10, range.LogicalMin);
+        Assert.Equal(4095, range.LogicalMax);
+        Assert.True(range.HasUsage(0x31));
+        Assert.Equal(1, single.LogicalMin);
+        Assert.Equal(10, single.LogicalMax);
+        Assert.True(single.HasUsage(0x51));
+    }
+
+    private static T ReadNativeStructure<T>(byte[] fixture, int offset = 0) where T : struct
+    {
+        var buffer = Marshal.AllocHGlobal(fixture.Length);
+        try
+        {
+            Marshal.Copy(fixture, 0, buffer, fixture.Length);
+            return Marshal.PtrToStructure<T>(IntPtr.Add(buffer, offset));
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
     }
 
     private static TouchpadHidDecoder Decoder(FakeHidReportValueReader reader)

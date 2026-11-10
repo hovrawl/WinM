@@ -139,6 +139,15 @@ internal sealed class RawHidTouchpadDevice : IDisposable
     internal static (int Caps, int ValueCaps) NativeStructureSizes =>
         (Marshal.SizeOf<HidpCaps>(), Marshal.SizeOf<HidpValueCaps>());
 
+    internal static string? ValidateCapabilities(HidpCaps caps)
+    {
+        if (caps.UsagePage != DigitizerUsagePage || caps.Usage != TouchPadUsage)
+            return "unsupported_device";
+        return caps.InputReportByteLength < 2 || caps.NumberInputValueCaps is 0 or > 512
+            ? "unsupported_descriptor"
+            : null;
+    }
+
     public static bool TryCreate(nint handle, out RawHidTouchpadDevice? device, out string failure)
     {
         device = null;
@@ -163,11 +172,15 @@ internal sealed class RawHidTouchpadDevice : IDisposable
                 return false;
             }
 
-            if (HidP_GetCaps(preparsedData, out var caps) != HidPStatusSuccess ||
-                caps.UsagePage != DigitizerUsagePage || caps.Usage != TouchPadUsage ||
-                caps.InputReportByteLength < 2 || caps.NumberInputValueCaps is 0 or > 512)
+            if (HidP_GetCaps(preparsedData, out var caps) != HidPStatusSuccess)
             {
-                failure = "unsupported_descriptor";
+                failure = "descriptor_decode_failed";
+                return false;
+            }
+
+            if (ValidateCapabilities(caps) is { } capabilityFailure)
+            {
+                failure = capabilityFailure;
                 return false;
             }
 
@@ -226,11 +239,11 @@ internal sealed class RawHidTouchpadDevice : IDisposable
         var buffer = Marshal.AllocHGlobal(checked(size * count));
         try
         {
-            var actualCount = (uint)count;
+            var actualCount = count;
             if (HidP_GetValueCaps(HidpReportType.Input, buffer, ref actualCount, preparsedData) !=
                 HidPStatusSuccess || actualCount > count)
                 throw new InvalidOperationException("HID value capabilities could not be decoded.");
-            var result = new HidpValueCaps[checked((int)actualCount)];
+            var result = new HidpValueCaps[actualCount];
             for (var index = 0; index < result.Length; index++)
                 result[index] = Marshal.PtrToStructure<HidpValueCaps>(IntPtr.Add(buffer, index * size));
             return result;
@@ -277,7 +290,7 @@ internal sealed class RawHidTouchpadDevice : IDisposable
     private static extern uint HidP_GetCaps(nint preparsedData, out HidpCaps caps);
 
     [DllImport("hid.dll")]
-    private static extern uint HidP_GetValueCaps(HidpReportType reportType, nint valueCaps, ref uint valueCapsLength,
+    private static extern uint HidP_GetValueCaps(HidpReportType reportType, nint valueCaps, ref ushort valueCapsLength,
         nint preparsedData);
 
     private enum HidpReportType
@@ -288,14 +301,14 @@ internal sealed class RawHidTouchpadDevice : IDisposable
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    private struct HidpCaps
+    internal unsafe struct HidpCaps
     {
         public ushort Usage;
         public ushort UsagePage;
         public ushort InputReportByteLength;
         public ushort OutputReportByteLength;
         public ushort FeatureReportByteLength;
-        public ushort Reserved;
+        public fixed ushort Reserved[17];
         public ushort NumberLinkCollectionNodes;
         public ushort NumberInputButtonCaps;
         public ushort NumberInputValueCaps;
@@ -309,7 +322,7 @@ internal sealed class RawHidTouchpadDevice : IDisposable
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    private struct HidpValueCaps
+    internal unsafe struct HidpValueCaps
     {
         public ushort UsagePage;
         public byte ReportId;
@@ -326,7 +339,7 @@ internal sealed class RawHidTouchpadDevice : IDisposable
         public byte Reserved;
         public ushort BitSize;
         public ushort ReportCount;
-        public ushort Reserved2;
+        public fixed ushort Reserved2[5];
         public uint UnitsExp;
         public uint Units;
         public int LogicalMin;
