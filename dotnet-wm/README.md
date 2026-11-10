@@ -45,8 +45,9 @@ workspace identity. See [the one-desk goal](docs/project-goal.md) and its
 
 `Core` has no generated native dependencies. `Windows` isolates CsWin32 on its
 native message thread. `Host` composes them through dependency injection as a
-normal-privilege `WinExe`; `Client` depends only on public contracts.
-No tray, widget, service, browser bridge, or arbitrary shell execution is included.
+normal-privilege `WinExe` with a native Win32 tray icon and graceful Quit;
+`Client` depends only on public contracts. There is no browser bridge or
+arbitrary shell execution.
 The spatial switcher is implemented; a full draggable/zoomable desk overview,
 columns/rows/Fibonacci workspace rules, and persistent runtime desk positions or
 view assignments remain future work.
@@ -99,13 +100,16 @@ Use `dotnet restore --locked-mode` to enforce the resolved dependency graph.
 '{"kind":"exit"}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
 ```
 
-The script publishes all apps by default. Host and Recovery are published into
-the same folder and must remain together. Framework-dependent output requires the
-.NET 10 x64 runtime; `-SelfContained` includes the runtime. Avalonia NativeAOT
-publishing statically links the rendering dependencies into one executable for
-each companion app; see the [publishing guide](docs/publishing.md) for
-prerequisites, smoke checks, output details, and the Host AOT limitation. Startup
-registration is opt-in; see `src\WinManager.Cli\README.md`.
+The script publishes all apps by default. Release Host and Recovery outputs share
+a folder and must remain together; NativeAOT Host is one executable that starts
+its separate recovery worker from its own image. Framework-dependent output
+requires the .NET 10 x64 runtime; `-SelfContained` includes the runtime. Host and
+both Avalonia apps support win-x64 NativeAOT; Avalonia statically links its
+rendering dependencies. To publish only Host, use
+`.\scripts\Publish.ps1 -Mode NativeAot -App Host`.
+See the [publishing guide](docs/publishing.md) for
+prerequisites, smoke checks and output details. Startup registration is opt-in;
+see `src\WinManager.Cli\README.md`.
 
 Default configuration: `%LOCALAPPDATA%\WinManager\config.json`, created on first
 launch. Logs: `%LOCALAPPDATA%\WinManager\Logs`. Recovery journals:

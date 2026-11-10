@@ -10,7 +10,9 @@ namespace WinManager.Windows;
 [SupportedOSPlatform("windows10.0.15063")]
 public static class WindowsRecovery
 {
-    public static async Task<int> RunAsync(string[] args)
+    public static Task<int> RunAsync(string[] args) => RunAsync(args, null);
+
+    public static async Task<int> RunAsync(string[] args, string? journalDirectory)
     {
         if (args.Length != 3 || args[0].Length != "WinManager.Recovery.".Length + 32 ||
             !args[0].StartsWith("WinManager.Recovery.", StringComparison.Ordinal) ||
@@ -19,18 +21,9 @@ public static class WindowsRecovery
             !ulong.TryParse(args[2], out var time)) return 2;
         var journal = new RecoveryJournal(pid, time, []);
         if (!RecoveryNative.HostAlive(journal)) return 2;
-        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinManager", "Recovery");
-        Directory.CreateDirectory(directory);
-        using (var identity = WindowsIdentity.GetCurrent())
-        {
-            var user = identity.User ?? throw new IOException("Cannot identify recovery journal owner.");
-            var security = new DirectorySecurity();
-            security.SetAccessRuleProtection(true, false);
-            security.SetOwner(user);
-            security.AddAccessRule(new FileSystemAccessRule(user, FileSystemRights.FullControl,
-                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
-            new DirectoryInfo(directory).SetAccessControl(security);
-        }
+        var directory = journalDirectory ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinManager", "Recovery");
+        PrepareJournalDirectory(directory);
         RecoverStale(directory);
         var path = Path.Combine(directory, args[0] + ".json");
         using var lease = new FileStream(path + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
@@ -110,6 +103,34 @@ public static class WindowsRecovery
             File.Delete(path + ".lock");
         }
         return journal.Records.Count == 0 ? 0 : 1;
+    }
+
+    public static void CheckHelperLaunch(string executable, IReadOnlyList<string> argumentPrefix)
+    {
+        using var recovery = new RecoveryConnection();
+        recovery.Start(executable, argumentPrefix);
+        recovery.Complete();
+    }
+
+    internal static void PrepareJournalDirectory(string directory)
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var user = identity.User ?? throw new IOException("Cannot identify recovery journal owner.");
+        var info = new DirectoryInfo(directory);
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(true, false);
+        security.AddAccessRule(new FileSystemAccessRule(user, FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        if (!info.Exists)
+        {
+            var creationSecurity = new DirectorySecurity();
+            creationSecurity.SetSecurityDescriptorBinaryForm(security.GetSecurityDescriptorBinaryForm());
+            creationSecurity.SetOwner(user);
+            info.Create(creationSecurity);
+        }
+        var owner = info.GetAccessControl(AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier));
+        if (!user.Equals(owner)) throw new UnauthorizedAccessException("Recovery journal directory is not owned by the current user.");
+        info.SetAccessControl(security);
     }
 
     private static async Task MonitorHostAsync(RecoveryJournal journal, CancellationTokenSource death)

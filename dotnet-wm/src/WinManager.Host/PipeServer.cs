@@ -263,7 +263,7 @@ public sealed class PipeServer : IAsyncDisposable
                         break;
                     case "configuration.save":
                         CheckObject(payload, "revision", "content");
-                        var save = payload.Deserialize<SaveConfigurationRequest>(Protocol.JsonOptions) ??
+                        var save = payload.Deserialize(Protocol.TypeInfo<SaveConfigurationRequest>()) ??
                                    throw new ArgumentException("Configuration save request is required.");
                         var saved = RequireConfigurationStore().Save(save.Revision, save.Content);
                         Respond(requestId, true, null, null, manager.Current?.StateRevision ?? 0,
@@ -275,7 +275,7 @@ public sealed class PipeServer : IAsyncDisposable
                             "layout", "position", "layeredLayoutOptions", "monitorNumber", "workspaceNumber");
                         if (!payload.TryGetProperty("kind", out _))
                             throw new ArgumentException("Command kind is required.");
-                        var command = payload.Deserialize<ManagerCommand>(Protocol.JsonOptions) ??
+                        var command = payload.Deserialize(Protocol.TypeInfo<ManagerCommand>()) ??
                                       throw new ArgumentException("Command is required.");
                         var result = await manager.ExecuteAsync(command, stop.Token);
                         Respond(requestId, result.Success, result.ErrorCode, result.Message, result.StateRevision,
@@ -283,7 +283,7 @@ public sealed class PipeServer : IAsyncDisposable
                         break;
                     case "subscribe":
                         CheckObject(payload, "eventTypes");
-                        var subscribe = payload.Deserialize<SubscribeRequest>(Protocol.JsonOptions)!;
+                        var subscribe = payload.Deserialize(Protocol.TypeInfo<SubscribeRequest>())!;
                         if (subscribe.EventTypes is { } types && (types.Count > ManagerEngine.EventTypes.Count ||
                                                                   types.Any(type =>
                                                                       type is null ||

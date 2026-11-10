@@ -29,16 +29,6 @@
         "resolved": "3.1.4",
         "contentHash": "5mj99LvCqrq3CNi06xYdyIAXOEh+5b33F2nErCzI5zWiDdLHXiPXEWFSUAF8zlIv0ZWqjZNCwHTQeAPYbF3pCg=="
       },
-      "2ndLAB.ANGLE.Static": {
-        "type": "Transitive",
-        "resolved": "7151.0.0-10.0.26100.0-1.79e529b",
-        "contentHash": "cPdqpUTDLk6HugiXi8NHvtjkNqO5yOa530xcZMmVNnEHqLWnfxZvsGyD3Z0FQBqtl6lJ5tD6foLBpU2wIzwreg=="
-      },
-      "2ndLAB.SkiaSharp.Static": {
-        "type": "Transitive",
-        "resolved": "3.119.0-10.0.26100.0-1.1c7d845",
-        "contentHash": "Pjl5X7qWQf3AHOCWVJkEzqd6T2yXYJF2f0rMOyPGhgiP+dWx3WNzQ/TCbUhbB+w+GidkvVZ6PUOMnlZYODp7lw=="
-      },
       "Avalonia": {
         "type": "Transitive",
         "resolved": "12.1.5",
@@ -595,8 +585,6 @@
       "winmanager.debugui": {
         "type": "Project",
         "dependencies": {
-          "2ndLAB.ANGLE.Static": "[7151.0.0-10.0.26100.0-1.79e529b, )",
-          "2ndLAB.SkiaSharp.Static": "[3.119.0-10.0.26100.0-1.1c7d845, )",
           "Avalonia": "[12.1.5, )",
           "Avalonia.Desktop": "[12.1.5, )",
           "Avalonia.Themes.Fluent": "[12.1.5, )",
@@ -614,8 +602,6 @@
       "winmanager.spatialswitcher": {
         "type": "Project",
         "dependencies": {
-          "2ndLAB.ANGLE.Static": "[7151.0.0-10.0.26100.0-1.79e529b, )",
-          "2ndLAB.SkiaSharp.Static": "[3.119.0-10.0.26100.0-1.1c7d845, )",
           "Avalonia": "[12.1.5, )",
           "Avalonia.Desktop": "[12.1.5, )",
           "Avalonia.Themes.Fluent": "[12.1.5, )",

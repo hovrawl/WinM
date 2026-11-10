@@ -465,6 +465,23 @@ public sealed class HostConfigurationTests
     }
 
     [Fact]
+    public void HostRecoveryLaunchUsesSelfExecutableOnlyForAotDefault()
+    {
+        var aot = HostRecoveryLaunch.Resolve(null, @"C:\Apps\WinManager.Host.exe", useSelfExecutable: true);
+        Assert.Equal(@"C:\Apps\WinManager.Host.exe", aot.Executable);
+        Assert.Equal(["--recovery"], aot.ArgumentPrefix);
+
+        var release = HostRecoveryLaunch.Resolve(null, @"C:\Apps\WinManager.Host.exe", useSelfExecutable: false);
+        Assert.Equal(Path.Combine(AppContext.BaseDirectory, "WinManager.Recovery.exe"), release.Executable);
+        Assert.Empty(release.ArgumentPrefix);
+
+        var configured = HostRecoveryLaunch.Resolve(@"D:\Recovery\WinManager.Recovery.exe",
+            @"C:\Apps\WinManager.Host.exe", useSelfExecutable: true);
+        Assert.Equal(@"D:\Recovery\WinManager.Recovery.exe", configured.Executable);
+        Assert.Empty(configured.ArgumentPrefix);
+    }
+
+    [Fact]
     public void LogsRotateAndBoundLargeMessages()
     {
         using var directory = new TestDirectory();

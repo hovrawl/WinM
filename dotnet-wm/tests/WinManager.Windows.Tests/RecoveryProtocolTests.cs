@@ -34,4 +34,16 @@ public sealed class RecoveryProtocolTests
         stream.Position = 0;
         Assert.Equal("ACK", await RecoveryProtocol.ReadAsync(stream, CancellationToken.None));
     }
+
+    [Fact]
+    public void RecoveryStartArgumentsKeepProtocolArgumentsAfterOptionalPrefix()
+    {
+        var startInfo = RecoveryConnection.CreateStartInfo("WinManager.Host.exe", ["--recovery"],
+            "WinManager.Recovery.00000000000000000000000000000000", 123, 456);
+
+        Assert.False(startInfo.UseShellExecute);
+        Assert.True(startInfo.CreateNoWindow);
+        Assert.Equal(["--recovery", "WinManager.Recovery.00000000000000000000000000000000", "123", "456"],
+            startInfo.ArgumentList);
+    }
 }

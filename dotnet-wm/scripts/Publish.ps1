@@ -20,15 +20,15 @@ $outputRootPath = if ([IO.Path]::IsPathRooted($OutputRoot)) {
 if ($Mode -eq 'NativeAot' -and $SelfContained) {
     throw 'NativeAot is already self-contained; omit -SelfContained.'
 }
-if ($Mode -eq 'NativeAot' -and $App -in @('Host', 'Cli')) {
-    throw "NativeAot publishing is currently supported only for DebugUi and SpatialSwitcher, not $App."
+if ($Mode -eq 'NativeAot' -and $App -eq 'Cli') {
+    throw 'NativeAot publishing is not supported for the CLI.'
 }
 if ($Mode -eq 'NativeAot' -and $RuntimeIdentifier -ne 'win-x64') {
-    throw 'Avalonia static single-file NativeAOT is currently supported only for win-x64.'
+    throw 'NativeAot publishing is currently supported only for win-x64.'
 }
 
 $selectedApps = if ($App -eq 'All' -and $Mode -eq 'NativeAot') {
-    @('DebugUi', 'SpatialSwitcher')
+    @('Host', 'DebugUi', 'SpatialSwitcher')
 } elseif ($App -eq 'All') {
     @('Host', 'Cli', 'DebugUi', 'SpatialSwitcher')
 } else {
@@ -54,10 +54,13 @@ function Invoke-Publish([string]$Project, [string]$Destination, [bool]$Aot) {
         '--output', $Destination,
         '-p:DebugType=none',
         '-p:DebugSymbols=false',
+        "-p:NuGetLockFilePath=obj\publish-$deployment-$RuntimeIdentifier.lock.json",
         "-p:PublishAot=$publishAotValue"
     )
     if ($SelfContained -or $Aot) { $arguments += '-p:RuntimeFrameworkVersion=10.0.14' }
-    if ($Aot) { $arguments += '-p:AvaloniaSingleFileAot=true' }
+    if ($Aot -and $Project -notlike '*WinManager.Host.csproj') {
+        $arguments += '-p:AvaloniaSingleFileAot=true'
+    }
 
     Write-Host "Publishing $Project ($deployment, $RuntimeIdentifier) to $Destination"
     & dotnet @arguments

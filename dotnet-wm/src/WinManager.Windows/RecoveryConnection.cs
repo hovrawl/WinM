@@ -15,7 +15,7 @@ internal sealed class RecoveryConnection : IDisposable
     internal bool Healthy => !failed && helper is { HasExited: false } && pipe is { IsConnected: true };
     internal int? HelperProcessId => helper?.Id;
 
-    internal void Start(string executable)
+    internal void Start(string executable, IReadOnlyList<string>? argumentPrefix = null)
     {
         if (failed) throw new IOException("Recovery protection has failed for this observer session.");
         if (Healthy) return;
@@ -26,10 +26,7 @@ internal sealed class RecoveryConnection : IDisposable
             pipe = new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
                 PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly, 65536, 65536);
             if (!RecoveryNative.TryProcessTime((uint)Environment.ProcessId, out var time)) throw new IOException("Cannot identify recovery host.");
-            var info = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true };
-            info.ArgumentList.Add(name);
-            info.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            info.ArgumentList.Add(time.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var info = CreateStartInfo(executable, argumentPrefix ?? [], name, Environment.ProcessId, time);
             helper = Process.Start(info) ?? throw new IOException("Cannot start recovery helper.");
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             pipe.WaitForConnectionAsync(timeout.Token).GetAwaiter().GetResult();
@@ -85,6 +82,17 @@ internal sealed class RecoveryConnection : IDisposable
     }
 
     public void Dispose() { pipe?.Dispose(); helper?.Dispose(); }
+
+    internal static ProcessStartInfo CreateStartInfo(string executable, IReadOnlyList<string> argumentPrefix,
+        string pipeName, int processId, ulong creationTime)
+    {
+        var info = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true };
+        foreach (var argument in argumentPrefix) info.ArgumentList.Add(argument);
+        info.ArgumentList.Add(pipeName);
+        info.ArgumentList.Add(processId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        info.ArgumentList.Add(creationTime.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        return info;
+    }
 }
 
 internal static class RecoveryProtocol

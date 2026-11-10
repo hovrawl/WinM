@@ -49,6 +49,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     private readonly HashSet<Guid> issuedMinimizations = [];
     private readonly RecoveryConnection recovery = new();
     private readonly string recoveryExecutablePath;
+    private readonly string[] recoveryArguments;
     private readonly TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly WindowIdentityMap identities = new();
@@ -66,7 +67,8 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
 
     public WindowsDesktopObserver(IEnumerable<string>? ignoredProcessNames = null,
         IEnumerable<string>? ignoredClassNames = null,
-        string? recoveryExecutablePath = null)
+        string? recoveryExecutablePath = null,
+        IEnumerable<string>? recoveryArguments = null)
     {
         ignoredProcesses = new HashSet<string>((ignoredProcessNames ?? [])
             .Append("WinManager.DebugUi").Append("WinManager.SpatialSwitcher")
@@ -74,6 +76,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         ignoredClasses = new HashSet<string>(ignoredClassNames ?? [], StringComparer.OrdinalIgnoreCase);
         this.recoveryExecutablePath =
             recoveryExecutablePath ?? Path.Combine(AppContext.BaseDirectory, "WinManager.Recovery.exe");
+        this.recoveryArguments = (recoveryArguments ?? []).ToArray();
         windowProcedure = WindowProcedure;
         eventProcedure = WinEventProcedure;
     }
@@ -260,7 +263,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             // when all managed windows were left hidden by a previous host.
             try
             {
-                recovery.Start(recoveryExecutablePath);
+                recovery.Start(recoveryExecutablePath, recoveryArguments);
             }
             catch (Exception error) when (error is IOException or Win32Exception or OperationCanceledException or
                                               UnauthorizedAccessException or InvalidOperationException
@@ -843,7 +846,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             (uint)command, "WinManager.Recovery." + Guid.NewGuid().ToString("N"), Minimization: true);
         try
         {
-            recovery.Start(recoveryExecutablePath);
+            recovery.Start(recoveryExecutablePath, recoveryArguments);
             if (!ValidateTarget(visibility.WindowId, out window, out _, out failure))
             {
                 failures.Add(failure!);
@@ -978,7 +981,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             (uint)command, "WinManager.Recovery." + Guid.NewGuid().ToString("N"));
         try
         {
-            recovery.Start(recoveryExecutablePath);
+            recovery.Start(recoveryExecutablePath, recoveryArguments);
             if (!ValidateTarget(minimization.WindowId, out window, out _, out failure))
             {
                 failures.Add(failure!);

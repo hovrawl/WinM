@@ -12,25 +12,31 @@ PowerShell:
 
 The first command produces framework-dependent Host, Recovery, CLI, Debug UI,
 and Spatial Switcher outputs. The second publishes the same apps self-contained.
-The third publishes the two Avalonia clients as statically linked, single-file
-NativeAOT executables. Select an individual app with `-App Host`, `-App Cli`,
-`-App DebugUi`, or `-App SpatialSwitcher`; `NativeAot` accepts only `DebugUi`
-and `SpatialSwitcher` (`All` means both). Static Avalonia publishing currently
-supports only `win-x64`; the other modes retain their existing RID option.
+The third publishes Host and both Avalonia clients as single-file NativeAOT
+executables. Host uses a Win32 tray and launches its recovery worker from its
+own executable; the Avalonia clients statically link their rendering libraries.
+Select an individual app with `-App Host`, `-App Cli`, `-App DebugUi`, or
+`-App SpatialSwitcher`; `NativeAot` does not support `Cli` (`All` means Host and
+both clients). NativeAOT publishing currently supports only `win-x64`; the other
+modes retain their existing RID option.
 By default, outputs are written under `artifacts\`. Change the destination root
 with `-OutputRoot`.
+Publish-specific RID/toolchain lock files live under each project's `obj` folder,
+leaving the committed development lock files unchanged.
 
 Outputs are separated by RID and deployment mode, for example:
 
 - `artifacts\win-x64\framework-dependent\host`
 - `artifacts\win-x64\self-contained\host`
+- `artifacts\win-x64\native-aot\host`
 - `artifacts\win-x64\native-aot\debug-ui`
 
-Keep the complete output directory together. Host publishing runs Recovery
-publishing into the same output directory with the same RID and deployment mode;
-Recovery is a separate process and must be available beside Host. Framework-
-dependent output requires the .NET 10 Windows Desktop runtime. Self-contained
-output includes the .NET runtime.
+Keep the complete output directory together. Framework-dependent and
+self-contained Host publishing include the separate Recovery executable beside
+Host. The NativeAOT Host instead launches its own executable in a recovery-only
+mode, before normal manager startup; the recovery process still runs separately
+from the manager. Framework-dependent output requires the .NET 10 x64 runtime.
+Self-contained and NativeAOT outputs include the .NET runtime.
 
 ## Avalonia single-file NativeAOT
 
@@ -67,15 +73,31 @@ UI, avoid the manager and global keyboard hook, then exit automatically:
 Smoke mode displays sample content for two seconds and exits; it does not
 exercise a live manager connection, global hotkeys, or real desktop management.
 
-## Host NativeAOT status
+## Host NativeAOT
 
-Host is not currently an advertised NativeAOT target. Its configuration,
-protocol, Core snapshot signatures, CLI output, and Recovery command/journal
-serialization now use generated `System.Text.Json` metadata rather than relying
-on reflection for those paths. JSON was not the only obstacle: the Host tray
-currently uses Windows Forms. A future Host AOT effort should first replace
-that tray dependency with a native `Shell_NotifyIcon` implementation while
-preserving its STA message loop and graceful shutdown, then attempt a Host plus
-Recovery NativeAOT publish and address any remaining trimming/AOT diagnostics.
-Until that work and runtime behavior are validated, publish Host using the
-framework-dependent or self-contained Release commands above.
+```powershell
+.\scripts\Publish.ps1 -Mode NativeAot -App Host
+```
+
+Host uses a native hidden Win32 window and `Shell_NotifyIcon` tray icon through
+the pinned `Microsoft.Windows.CsWin32` generated bindings, with a
+Quit menu item that requests graceful host shutdown. The tray restores its icon
+after Explorer restarts and removes it when Host stops. A NativeAOT Host is a
+single executable: it starts a separate recovery process by invoking itself
+with the internal `--recovery` mode. That mode enters the recovery protocol
+before normal configuration, singleton, tray, or desktop-observation startup.
+
+Use `--tray-smoke` to briefly create and remove the native tray icon without
+starting the manager or observing desktop windows:
+
+```powershell
+& '.\artifacts\win-x64\native-aot\host\WinManager.Host.exe' '--tray-smoke'
+& '.\artifacts\win-x64\native-aot\host\WinManager.Host.exe' '--recovery-smoke'
+```
+
+The recovery smoke check self-launches the worker, verifies the normal authenticated
+pipe READY/ACK and graceful completion, and removes its empty temporary journal
+directory beside the executable. It never scans the user's normal recovery
+journals or starts desktop observation. Run it from a writable publish directory.
+Neither smoke check exercises window restoration after a real manager crash or
+the tray's interactive Quit menu; those still need target-desktop validation.

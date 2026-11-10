@@ -7,11 +7,45 @@ using WinManager.Core;
 using WinManager.Host;
 using WinManager.Windows;
 
-var dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinManager");
+var dataDirectory = args is ["--tray-smoke"] or ["--recovery-smoke"] or ["--recovery", "--smoke-directory", ..]
+    ? AppContext.BaseDirectory
+    : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinManager");
 try
 {
     if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063))
         throw new PlatformNotSupportedException("WinManager requires Windows 10 build 15063 or newer.");
+    if (args.Length > 0 && args[0] == "--recovery")
+    {
+        if (args.Length > 2 && args[1] == "--smoke-directory")
+            return await WindowsRecovery.RunAsync(args[3..], args[2]);
+        return await WindowsRecovery.RunAsync(args[1..]);
+    }
+    if (args is ["--tray-smoke"])
+    {
+        var smokeBuilder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = [] });
+        smokeBuilder.Logging.ClearProviders();
+        smokeBuilder.Services.AddSingleton<IHostTray, WindowsHostTray>();
+        smokeBuilder.Services.AddHostedService<HostTrayService>();
+        using var smokeHost = smokeBuilder.Build();
+        using var smokeStop = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        await smokeHost.RunAsync(smokeStop.Token);
+        return 0;
+    }
+    if (args is ["--recovery-smoke"])
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "recovery-smoke-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var recoveryLaunch = HostRecoveryLaunch.Resolve(null, Environment.ProcessPath, useSelfExecutable: true);
+            WindowsRecovery.CheckHelperLaunch(recoveryLaunch.Executable,
+                recoveryLaunch.ArgumentPrefix.Concat(["--smoke-directory", directory]).ToArray());
+            return 0;
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
     using var process = System.Diagnostics.Process.GetCurrentProcess();
     if (process.SessionId == 0) throw new PlatformNotSupportedException("Run in the interactive user session, not Session 0.");
     string? configPath = null;
@@ -81,9 +115,34 @@ internal static class HostComposition
 {
     public static void AddNativeServices(IServiceCollection services, ManagerConfiguration configuration, string? recoveryPath)
     {
+        var recoveryLaunch = HostRecoveryLaunch.Resolve(recoveryPath, Environment.ProcessPath,
+            HostBuild.IsNativeAot);
         services.AddSingleton(_ => new WindowsDesktopObserver(configuration.IgnoredProcessNames,
-            configuration.IgnoredClassNames, recoveryPath));
+            configuration.IgnoredClassNames, recoveryLaunch.Executable, recoveryLaunch.ArgumentPrefix));
         services.AddSingleton<IWindowPlatform>(provider => provider.GetRequiredService<WindowsDesktopObserver>());
+    }
+}
+
+internal static class HostBuild
+{
+#if WINMANAGER_HOST_AOT
+    public const bool IsNativeAot = true;
+#else
+    public const bool IsNativeAot = false;
+#endif
+}
+
+internal sealed record RecoveryLaunch(string Executable, IReadOnlyList<string> ArgumentPrefix);
+
+internal static class HostRecoveryLaunch
+{
+    public static RecoveryLaunch Resolve(string? configuredPath, string? processPath, bool useSelfExecutable)
+    {
+        if (configuredPath is not null) return new RecoveryLaunch(configuredPath, []);
+        if (useSelfExecutable)
+            return new RecoveryLaunch(processPath ?? throw new InvalidOperationException("The host executable path is unavailable."),
+                ["--recovery"]);
+        return new RecoveryLaunch(Path.Combine(AppContext.BaseDirectory, "WinManager.Recovery.exe"), []);
     }
 }
 
