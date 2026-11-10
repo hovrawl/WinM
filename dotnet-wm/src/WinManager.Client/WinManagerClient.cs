@@ -17,15 +17,18 @@ public sealed class WinManagerClient : IAsyncDisposable
     private readonly ConcurrentDictionary<Guid, TaskCompletionSource<ResponseEnvelope>> pending = new();
     private readonly object sync = new();
     private readonly int eventQueueCapacity;
+    private readonly Func<NamedPipeClientStream, bool> tryGrantForegroundActivation;
     private readonly Task reader;
     private ManagerSubscription? subscription;
     private Exception? failure;
     private int disposed;
 
-    private WinManagerClient(NamedPipeClientStream pipe, int eventQueueCapacity)
+    internal WinManagerClient(NamedPipeClientStream pipe, int eventQueueCapacity,
+        Func<NamedPipeClientStream, bool>? tryGrantForegroundActivation = null)
     {
         this.pipe = pipe;
         this.eventQueueCapacity = eventQueueCapacity;
+        this.tryGrantForegroundActivation = tryGrantForegroundActivation ?? ForegroundActivation.TryAllowForegroundActivation;
         lifetimeToken = lifetime.Token;
         reader = ReadAsync();
     }
@@ -80,7 +83,9 @@ public sealed class WinManagerClient : IAsyncDisposable
     public async Task<CommandResult> ExecuteAsync(ManagerCommand command, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
-        var response = await RequestAsync("command", Protocol.Payload(command), cancellationToken);
+        var requiresForegroundPermission = command.Kind is CommandKind.Focus or CommandKind.ActivateWorkspace;
+        var response = await RequestAsync("command", Protocol.Payload(command), cancellationToken,
+            requiresForegroundPermission);
         var result = ReadPayload<CommandResult>(response);
         if (result.StateRevision != response.StateRevision)
         {
@@ -177,7 +182,8 @@ public sealed class WinManagerClient : IAsyncDisposable
         finally { subscriptionGate.Release(); }
     }
 
-    private async Task<ResponseEnvelope> RequestAsync(string operation, JsonElement payload, CancellationToken cancellationToken)
+    private async Task<ResponseEnvelope> RequestAsync(string operation, JsonElement payload,
+        CancellationToken cancellationToken, bool grantForegroundPermission = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var request = new RequestEnvelope(Protocol.Version, Guid.NewGuid(), operation, payload);
@@ -191,7 +197,12 @@ public sealed class WinManagerClient : IAsyncDisposable
         try
         {
             await writeGate.WaitAsync(lifetimeToken);
-            try { await PipeFraming.WriteAsync(pipe, request, lifetimeToken); }
+            try
+            {
+                if (grantForegroundPermission && !lifetimeToken.IsCancellationRequested)
+                    _ = tryGrantForegroundActivation(pipe);
+                await PipeFraming.WriteAsync(pipe, request, lifetimeToken);
+            }
             finally { writeGate.Release(); }
         }
         catch (Exception error) { Abort(error); }

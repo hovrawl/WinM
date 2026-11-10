@@ -1,3 +1,4 @@
+using System.IO.Pipes;
 using System.Text.Json;
 using WinManager.Client;
 using WinManager.Contracts;
@@ -186,6 +187,39 @@ public sealed class ClientIntegrationTests
     }
 
     [Fact]
+    public async Task SdkContinuesFocusCommandsWhenForegroundPermissionIsDenied()
+    {
+        await using var host = await PipeHost.StartAsync(workspaceDefinitions: [new("One"), new("Two")]);
+        var foregroundPermissionAttempts = 0;
+        await using var client = await ConnectWithForegroundPermissionAsync(host, _ =>
+        {
+            foregroundPermissionAttempts++;
+            return false;
+        });
+        var initial = await client.QuerySnapshotAsync(host.Token);
+        Assert.Equal(0, foregroundPermissionAttempts);
+
+        var windowId = Assert.Single(initial.Desktop.Windows).Id;
+        Assert.True((await client.ExecuteAsync(new(CommandKind.Focus, windowId), host.Token)).Success);
+        Assert.Equal(1, foregroundPermissionAttempts);
+
+        var workspace = initial.Workspaces!.First(candidate => candidate.Name == "Two");
+        var monitorId = Assert.Single(initial.Desktop.Monitors).Id;
+        Assert.True((await client.ExecuteAsync(new(CommandKind.ActivateWorkspace,
+            WorkspaceId: workspace.Id, MonitorId: monitorId), host.Token)).Success);
+        Assert.Equal(2, foregroundPermissionAttempts);
+
+        Assert.True((await client.ExecuteAsync(new(CommandKind.Pause, Paused: true), host.Token)).Success);
+        Assert.Equal(2, foregroundPermissionAttempts);
+
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            client.ExecuteAsync(new(CommandKind.Focus, windowId), canceled.Token));
+        Assert.Equal(2, foregroundPermissionAttempts);
+    }
+
+    [Fact]
     public async Task SdkFreshConnectionAfterRestartUsesNewInstance()
     {
         var name = "WinManager.test." + Guid.NewGuid().ToString("N");
@@ -202,5 +236,21 @@ public sealed class ClientIntegrationTests
         Assert.True(await events.MoveNextAsync());
         Assert.Equal("snapshot", events.Current.EventType);
         Assert.NotEqual(instance, events.Current.InstanceId);
+    }
+
+    private static async Task<WinManagerClient> ConnectWithForegroundPermissionAsync(PipeHost host,
+        Func<NamedPipeClientStream, bool> tryGrantForegroundActivation)
+    {
+        var pipe = new NamedPipeClientStream(".", host.Name, PipeDirection.InOut, PipeOptions.Asynchronous);
+        try
+        {
+            await pipe.ConnectAsync(host.Token);
+            return new WinManagerClient(pipe, 256, tryGrantForegroundActivation);
+        }
+        catch
+        {
+            pipe.Dispose();
+            throw;
+        }
     }
 }
