@@ -922,6 +922,11 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTa
                 Marshal.SetLastPInvokeError(0);
                 PInvoke.SetForegroundWindow(window);
                 var error = Marshal.GetLastWin32Error();
+                if (PInvoke.GetForegroundWindow() != window)
+                {
+                    ForceForeground(window);
+                    error = Marshal.GetLastWin32Error();
+                }
                 if (!ValidateTarget(focusId, out _, out _, out failure)) failures.Add(failure!);
                 else if (PInvoke.GetForegroundWindow() != window)
                     failures.Add(new(focusId, error == 5 ? "access_denied" : "focus_denied",
@@ -931,6 +936,28 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTa
 
         Notify();
         return new ApplyResult(failures);
+    }
+
+    // A background process (e.g. gesture-triggered focus) is denied SetForegroundWindow; sharing input state with the
+    // current foreground thread lifts that restriction.
+    private static void ForceForeground(HWND window)
+    {
+        var foreground = PInvoke.GetForegroundWindow();
+        var foregroundThread = foreground == default ? 0 : PInvoke.GetWindowThreadProcessId(foreground, out _);
+        var currentThread = PInvoke.GetCurrentThreadId();
+        var attached = foregroundThread != 0 && foregroundThread != currentThread &&
+                       PInvoke.AttachThreadInput(currentThread, foregroundThread, true);
+        try
+        {
+            if (PInvoke.IsIconic(window)) PInvoke.ShowWindowAsync(window, SHOW_WINDOW_CMD.SW_RESTORE);
+            Marshal.SetLastPInvokeError(0);
+            PInvoke.BringWindowToTop(window);
+            PInvoke.SetForegroundWindow(window);
+        }
+        finally
+        {
+            if (attached) PInvoke.AttachThreadInput(currentThread, foregroundThread, false);
+        }
     }
 
     private unsafe bool ValidateTarget(Guid id, out HWND window, out WindowInfo? info, out NativeActionFailure? failure)
