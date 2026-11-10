@@ -156,6 +156,13 @@ are replaced by custom bindings rather than registered twice.
   SpatialSwitcher after changing it. The carousel can also be opened or closed
   from SpatialSwitcher with `Ctrl+Alt+Space`; keyboard shortcuts remain usable
   when native touchpad input is disabled or unsupported.
+  The related `touchpad.completeThreeFingerSwipesOnFirstLift` option defaults to
+  `true`. A settled three-finger swipe is published on the first finger lift, based
+  on movement accumulated before that lift; the remaining reports from that contact
+  sequence are ignored until all fingers are up. Set it to `false` to retain
+  completion after all fingers lift. Raw Input cannot stop the touchpad or Windows
+  from producing further input or inertia, and this option does not suppress
+  Windows' configured shell gestures.
   Contact recognition and exclusive shell-gesture ownership are separate. Once
   contacts are observed, SpatialSwitcher routes its own carousel gestures and the
   switcher reverses the raw two-finger horizontal delta before scrolling the

@@ -7,6 +7,7 @@ using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.HiDpi;
 using Windows.Win32.UI.WindowsAndMessaging;
+using WinManager.Contracts;
 
 namespace WinManager.Windows;
 
@@ -36,6 +37,7 @@ public sealed class TouchpadInputSource : IAsyncDisposable
     private readonly WNDPROC windowProcedure;
     private readonly string windowClass = $"WinManager.Touchpad.{Guid.NewGuid():N}";
     private readonly Dictionary<nint, TouchpadDeviceProcessor> processors = [];
+    private readonly TouchpadOptions options;
     private Thread? thread;
     private Task? processor;
     private HWND notificationWindow;
@@ -43,8 +45,9 @@ public sealed class TouchpadInputSource : IAsyncDisposable
     private bool disposing;
     private int disposed;
 
-    public TouchpadInputSource()
+    public TouchpadInputSource(TouchpadOptions? options = null)
     {
+        this.options = options ?? new TouchpadOptions();
         windowProcedure = WindowProcedure;
     }
 
@@ -312,7 +315,7 @@ public sealed class TouchpadInputSource : IAsyncDisposable
                     lock (devicesGate)
                     {
                         if (devices.TryAdd(device!.Handle, device))
-                            processors.Add(device.Handle, new TouchpadDeviceProcessor(device.Handle));
+                            processors.Add(device.Handle, new TouchpadDeviceProcessor(device.Handle, options));
                         else
                             device.Dispose();
                     }

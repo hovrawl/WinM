@@ -88,6 +88,7 @@ try
     builder.Services.AddSingleton(configuration);
     builder.Services.AddSingleton(configurationStore);
     builder.Services.AddSingleton<HostRuntimeState>();
+    builder.Services.AddSingleton(configuration.Touchpad);
     builder.Services.AddSingleton<TouchpadInputSource>();
     builder.Services.AddSingleton<IHostTray, WindowsHostTray>();
     HostComposition.AddNativeServices(builder.Services, configuration, recoveryPath);

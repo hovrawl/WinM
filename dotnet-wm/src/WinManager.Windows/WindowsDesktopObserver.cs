@@ -904,28 +904,14 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTa
                 failures.Add(ActionError(placement.WindowId, "SetWindowPos"));
         }
 
-        var insertAfter = new HWND(0);
-        foreach (var windowId in plan.StackingOrderWindowIds ?? [])
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (movingWindows.ContainsValue(windowId) || pendingDrops.Contains(windowId)) continue;
-            if (!ValidateTarget(windowId, out var window, out _, out var failure))
+        WindowStacking.Apply(plan.StackingOrderWindowIds ?? [], new NativeWindowStacking(),
+            id => movingWindows.ContainsValue(id) || pendingDrops.Contains(id),
+            id =>
             {
-                failures.Add(failure!);
-                continue;
-            }
-
-            Marshal.SetLastPInvokeError(0);
-            if (!PInvoke.SetWindowPos(window, insertAfter, 0, 0, 0, 0,
-                    SET_WINDOW_POS_FLAGS.SWP_NOMOVE | SET_WINDOW_POS_FLAGS.SWP_NOSIZE |
-                    SET_WINDOW_POS_FLAGS.SWP_NOACTIVATE))
-            {
-                failures.Add(ActionError(windowId, "SetWindowPos(z-order)"));
-                continue;
-            }
-
-            insertAfter = window;
-        }
+                if (!ValidateTarget(id, out var window, out _, out var failure))
+                    return new WindowStackingTarget(default, failure);
+                return new WindowStackingTarget((nint)window.Value, null);
+            }, failures.Add, id => ActionError(id, "SetWindowPos(z-order)"), cancellationToken);
 
         if (plan.FocusWindowId is { } focusId)
         {
@@ -1414,6 +1400,21 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTa
         (long)window.Y + window.Height >= (long)monitor.Y + monitor.Height;
 
     private static Win32Exception NativeError(string operation) => new(Marshal.GetLastWin32Error(), operation);
+
+    private sealed class NativeWindowStacking : IWindowStackingNative
+    {
+        public nint ForegroundWindow => GetForegroundWindow();
+
+        public bool IsTopmost(nint window) =>
+            ((uint)PInvoke.GetWindowLong(new HWND(window), WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE) & 0x00000008) != 0;
+
+        public bool SetWindowPos(nint window, nint insertAfter, uint flags)
+        {
+            Marshal.SetLastPInvokeError(0);
+            return PInvoke.SetWindowPos(new HWND(window), new HWND(insertAfter), 0, 0, 0, 0,
+                (SET_WINDOW_POS_FLAGS)flags);
+        }
+    }
 
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();

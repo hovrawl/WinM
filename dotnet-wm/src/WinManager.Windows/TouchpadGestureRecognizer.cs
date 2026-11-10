@@ -1,3 +1,5 @@
+using WinManager.Contracts;
+
 namespace WinManager.Windows;
 
 public sealed class TouchpadGestureRecognizer
@@ -6,6 +8,7 @@ public sealed class TouchpadGestureRecognizer
     private const long FingerSettleMilliseconds = 35;
     private const double MinimumSwipeTravel = 0.16;
     private const double DominantAxisRatio = 1.35;
+    private readonly bool completeThreeFingerSwipesOnFirstLift;
     private readonly Dictionary<uint, TouchpadContact> trackedContacts = [];
     private nint deviceHandle;
     private long lastTimestamp;
@@ -16,6 +19,12 @@ public sealed class TouchpadGestureRecognizer
     private double travelY;
     private bool active;
     private bool settled;
+    private bool drainingContacts;
+
+    public TouchpadGestureRecognizer(TouchpadOptions? options = null)
+    {
+        completeThreeFingerSwipesOnFirstLift = options?.CompleteThreeFingerSwipesOnFirstLift ?? true;
+    }
 
     public IReadOnlyList<TouchpadGesture> Process(TouchpadContactFrame frame)
     {
@@ -36,12 +45,26 @@ public sealed class TouchpadGestureRecognizer
 
         lastTimestamp = frame.TimestampMilliseconds;
         var activeContacts = frame.Contacts.Where(contact => contact.IsTouching).ToArray();
+        if (CanSettleThreeFingerCandidateAtRelease(frame, activeContacts))
+        {
+            stableFingerCount = candidateFingerCount;
+            settled = true;
+            var completed = Complete(frame.TimestampMilliseconds);
+            if (activeContacts.Length == 0)
+                Reset();
+            else
+                drainingContacts = true;
+            return completed;
+        }
+
         if (activeContacts.Length == 0)
         {
-            var completed = Complete(frame.TimestampMilliseconds);
+            var completed = drainingContacts ? [] : Complete(frame.TimestampMilliseconds);
             Reset();
             return completed;
         }
+
+        if (drainingContacts) return [];
 
         if (!active)
         {
@@ -71,6 +94,13 @@ public sealed class TouchpadGestureRecognizer
         {
             BeginCandidate(frame, activeContacts);
             return [];
+        }
+
+        if (completeThreeFingerSwipesOnFirstLift && stableFingerCount == 3 && fingerCount < 3)
+        {
+            var completed = Complete(frame.TimestampMilliseconds);
+            drainingContacts = true;
+            return completed;
         }
 
         if (!TryUpdateTravel(activeContacts, out var movementX, out _) || fingerCount < stableFingerCount)
@@ -153,6 +183,13 @@ public sealed class TouchpadGestureRecognizer
         return [];
     }
 
+    private bool CanSettleThreeFingerCandidateAtRelease(TouchpadContactFrame frame,
+        IReadOnlyList<TouchpadContact> activeContacts) =>
+        completeThreeFingerSwipesOnFirstLift && active && !settled && candidateFingerCount == 3 &&
+        activeContacts.Count < candidateFingerCount &&
+        frame.TimestampMilliseconds - settlingStarted >= FingerSettleMilliseconds &&
+        frame.Contacts.All(contact => trackedContacts.ContainsKey(contact.Id));
+
     private void ResetTravel() => travelX = travelY = 0;
 
     private void UpdateTrackedContacts(IReadOnlyList<TouchpadContact> contacts)
@@ -171,6 +208,7 @@ public sealed class TouchpadGestureRecognizer
         candidateFingerCount = 0;
         stableFingerCount = 0;
         travelX = travelY = 0;
+        drainingContacts = false;
         trackedContacts.Clear();
     }
 }

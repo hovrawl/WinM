@@ -484,16 +484,23 @@ public sealed class SpatialSwitcherTests
     }
 
     [Fact]
-    public void SwitcherReadsSharedTouchpadSettingAndDefaultsOnForOlderConfiguration()
+    public void SwitcherReadsSharedTouchpadSettingsAndDefaultsOnForOlderConfiguration()
     {
         var legacy = new ConfigurationDocument("config.json", "{}", "revision", true, null);
         var disabled = new ConfigurationDocument("config.json", "{\"touchpad\":{\"enabled\":false}}",
+            "revision", true, null);
+        var custom = new ConfigurationDocument("config.json",
+            "{\"touchpad\":{\"enabled\":true,\"completeThreeFingerSwipesOnFirstLift\":false}}",
             "revision", true, null);
         var invalid = new ConfigurationDocument("config.json", "not json", "revision", false, "invalid");
 
         Assert.True(SwitcherWindow.ReadTouchpadEnabled(legacy));
         Assert.False(SwitcherWindow.ReadTouchpadEnabled(disabled));
         Assert.True(SwitcherWindow.ReadTouchpadEnabled(invalid));
+        Assert.Equal(new TouchpadOptions(), SwitcherWindow.ReadTouchpadOptions(legacy));
+        Assert.True(SwitcherWindow.ReadTouchpadOptions(disabled).CompleteThreeFingerSwipesOnFirstLift);
+        Assert.False(SwitcherWindow.ReadTouchpadOptions(custom).CompleteThreeFingerSwipesOnFirstLift);
+        Assert.Equal(new TouchpadOptions(), SwitcherWindow.ReadTouchpadOptions(invalid));
     }
 
     [Fact]

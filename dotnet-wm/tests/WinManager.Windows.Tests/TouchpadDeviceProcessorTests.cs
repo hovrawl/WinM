@@ -1,4 +1,5 @@
 ﻿using WinManager.Windows;
+using WinManager.Contracts;
 using Xunit;
 
 namespace WinManager.Windows.Tests;
@@ -39,7 +40,7 @@ public sealed class TouchpadDeviceProcessorTests
                 new TouchpadValueRange(0x0d, 0x54, 0, 0, 10),
                 new TouchpadValueRange(0x0d, 0x56, 0, 0, 65535)),
             1, reader);
-        var processor = new TouchpadDeviceProcessor(42);
+        var processor = new TouchpadDeviceProcessor(42, new TouchpadOptions());
 
         Assert.Empty(ProcessHidFrame(reader, decoder, processor, 0, [0.3, 0.5, 0.7], [true, true, true])
             .Gestures);
@@ -49,7 +50,7 @@ public sealed class TouchpadDeviceProcessorTests
             .Gestures);
 
         var completion = ProcessHidFrame(reader, decoder, processor, 72, [0.1, 0.3, 0.5],
-            [false, false, false]);
+            [true, true, false]);
 
         Assert.Equal(TouchpadSwipeDirection.Left, Assert.Single(completion.Gestures).Direction);
     }

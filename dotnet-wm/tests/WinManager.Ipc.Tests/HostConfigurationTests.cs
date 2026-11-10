@@ -25,8 +25,23 @@ public sealed class HostConfigurationTests
         Assert.Equal(1, LayeredLayoutOptions.Default.WindowWidthRatio);
         Assert.Equal(32, LayeredLayoutOptions.Default.HorizontalOffset);
         Assert.True(loaded.Touchpad.Enabled);
+        Assert.True(loaded.Touchpad.CompleteThreeFingerSwipesOnFirstLift);
         using var serialized = JsonDocument.Parse(ManagerConfiguration.Serialize(loaded));
         Assert.True(serialized.RootElement.GetProperty("touchpad").GetProperty("enabled").GetBoolean());
+        Assert.True(serialized.RootElement.GetProperty("touchpad")
+            .GetProperty("completeThreeFingerSwipesOnFirstLift").GetBoolean());
+    }
+
+    [Fact]
+    public void MissingFirstLiftOptionDefaultsOnAndCanBeDisabled()
+    {
+        var legacy = ManagerConfiguration.Parse("{\"touchpad\":{\"enabled\":false}}");
+        var disabled = ManagerConfiguration.Parse(
+            "{\"touchpad\":{\"enabled\":false,\"completeThreeFingerSwipesOnFirstLift\":false}}");
+
+        Assert.False(legacy.Touchpad.Enabled);
+        Assert.True(legacy.Touchpad.CompleteThreeFingerSwipesOnFirstLift);
+        Assert.False(disabled.Touchpad.CompleteThreeFingerSwipesOnFirstLift);
     }
 
     [Fact]

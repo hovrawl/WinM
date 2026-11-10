@@ -55,6 +55,7 @@ internal sealed class SwitcherWindow : Window
     private bool allowClose;
     private bool touchpadConfigurationLoaded;
     private bool touchpadEnabled = true;
+    private TouchpadOptions touchpadOptions = new();
     private TouchpadCapabilityState touchpadCapabilityState = TouchpadCapabilityState.Disabled;
     private string? lastMessage;
 
@@ -778,7 +779,8 @@ internal sealed class SwitcherWindow : Window
         try
         {
             var configuration = await activeSession.ReadConfigurationAsync(cancellationToken);
-            touchpadEnabled = ReadTouchpadEnabled(configuration);
+            touchpadOptions = ReadTouchpadOptions(configuration);
+            touchpadEnabled = touchpadOptions.Enabled;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -787,6 +789,7 @@ internal sealed class SwitcherWindow : Window
         catch (Exception error)
         {
             touchpadEnabled = true;
+            touchpadOptions = new TouchpadOptions();
             status.Text = $"Touchpad configuration unavailable · using default enabled setting · {error.Message}";
         }
 
@@ -804,7 +807,7 @@ internal sealed class SwitcherWindow : Window
             return;
         }
 
-        var source = new TouchpadInputSource();
+        var source = new TouchpadInputSource(touchpadOptions);
         touchpadInput = source;
         source.GestureRecognized += OnTouchpadGesture;
         source.CapabilityChanged += OnTouchpadCapabilityChanged;
@@ -831,22 +834,31 @@ internal sealed class SwitcherWindow : Window
         }
     }
 
-    internal static bool ReadTouchpadEnabled(ConfigurationDocument configuration)
+    internal static bool ReadTouchpadEnabled(ConfigurationDocument configuration) =>
+        ReadTouchpadOptions(configuration).Enabled;
+
+    internal static TouchpadOptions ReadTouchpadOptions(ConfigurationDocument configuration)
     {
-        if (!configuration.IsValid) return true;
+        if (!configuration.IsValid) return new TouchpadOptions();
         try
         {
             using var document = JsonDocument.Parse(configuration.Content);
-            return document.RootElement.TryGetProperty("touchpad", out var options) &&
-                   options.ValueKind == JsonValueKind.Object &&
-                   options.TryGetProperty("enabled", out var enabled) &&
-                   enabled.ValueKind is JsonValueKind.True or JsonValueKind.False
-                ? enabled.GetBoolean()
+            if (!document.RootElement.TryGetProperty("touchpad", out var options) ||
+                options.ValueKind != JsonValueKind.Object) return new TouchpadOptions();
+            var enabled = options.TryGetProperty("enabled", out var enabledValue) &&
+                          enabledValue.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? enabledValue.GetBoolean()
                 : true;
+            var completeOnFirstLift = options.TryGetProperty("completeThreeFingerSwipesOnFirstLift",
+                                          out var completeValue) &&
+                                      completeValue.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? completeValue.GetBoolean()
+                : true;
+            return new TouchpadOptions(enabled, completeOnFirstLift);
         }
         catch (JsonException)
         {
-            return true;
+            return new TouchpadOptions();
         }
     }
 

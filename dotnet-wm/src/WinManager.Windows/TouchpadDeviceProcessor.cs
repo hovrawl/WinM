@@ -1,4 +1,6 @@
-﻿namespace WinManager.Windows;
+﻿using WinManager.Contracts;
+
+namespace WinManager.Windows;
 
 internal readonly record struct TouchpadDeviceProcessingResult(
     TouchpadContactFrame? Frame,
@@ -10,12 +12,13 @@ internal sealed class TouchpadDeviceProcessor
 {
     private readonly nint deviceHandle;
     private readonly TouchpadFrameAssembler assembler = new();
-    private readonly TouchpadGestureRecognizer recognizer = new();
+    private readonly TouchpadGestureRecognizer recognizer;
 
-    public TouchpadDeviceProcessor(nint deviceHandle)
+    public TouchpadDeviceProcessor(nint deviceHandle, TouchpadOptions? options = null)
     {
         if (deviceHandle == 0) throw new ArgumentOutOfRangeException(nameof(deviceHandle));
         this.deviceHandle = deviceHandle;
+        recognizer = new TouchpadGestureRecognizer(options);
     }
 
     public TouchpadDeviceProcessingResult Process(TouchpadContactReport report)

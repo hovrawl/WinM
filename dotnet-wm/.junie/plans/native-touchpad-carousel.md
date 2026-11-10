@@ -216,3 +216,18 @@ Two-finger carousel scrolling follows the intended direction, and recognized thr
 - Allow three-finger horizontal focus dispatch from recognized contact input while retaining managed foreground validation and explicit shell-conflict warning.
 - Keep four-finger movement behind the exclusive-ownership gate and exclude vertical gestures from Host focus.
 - Add policy/capability regressions and update configuration and validation documentation.
+
+### ✓ Step 9: Publish three-finger swipes on first lift
+Three-finger discrete swipes can publish as soon as the first finger is lifted, then drain the remaining contact sequence without additional actions.
+- Add default-on `CompleteThreeFingerSwipesOnFirstLift` touchpad configuration, preserving legacy wait-for-all behavior when false.
+- Finalize a settled three-finger swipe before accumulating movement from the first-lift frame; ignore its remaining contact tail until all tips lift.
+- Pass immutable settings into each device recognizer in Host and SpatialSwitcher.
+- Add first-lift, tail suppression, rearming, threshold, vertical routing, option-off, settings serialization, and switcher-default tests.
+- Document that raw input cannot stop Windows/device inertia or suppress shell gestures.
+
+### ✓ Step 10: Preserve foreground during observer restacking
+Prevent passive multi-monitor restacking from repeatedly raising Content Manager or another remembered window over the active application.
+- Anchor passive restacking behind the current foreground window and skip that window if it appears in the requested stack.
+- Use asynchronous, non-activating positioning flags and prevent owned-window z-order changes; preserve explicit focus behavior and target validation.
+- Add deterministic stacking-policy tests for combined monitor orders, foreground edge cases, stale targets, and native flags.
+- Document the observer behavior and retain the limits on hardware latency diagnosis.
