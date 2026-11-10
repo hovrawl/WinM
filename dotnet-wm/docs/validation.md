@@ -145,8 +145,10 @@ Raw contact delivery is separate from shell-gesture suppression. The source repo
 `gestureConflictBlocked` whenever a touchpad is present because observing raw HID
 reports does not prove that Windows' built-in Precision Touchpad actions are
 suppressed. `CanDispatchActions` remains false until both contact reports and
-exclusive gesture ownership are verified; the current implementation does not
-change Windows settings or dispatch duplicate actions.
+exclusive gesture ownership are verified. The Host's three-finger horizontal focus
+policy separately accepts `CanRecognizeGestures`; it logs that Windows may also run
+its configured action while suppression is unverified. Four-finger movement remains
+gated on `CanDispatchActions`. The implementation does not change Windows settings.
 
 Two isolated desktop probes are available in
 `WindowsDesktopObserverInteractiveTests`: `RawTouchpadProbeReportsCapabilityWithoutClaimingShellGestureOwnership`
@@ -164,19 +166,22 @@ Remove-Item Env:\WINMANAGER_ISOLATED_INTERACTIVE
 That probe can verify contact-report availability on the tested device, but it does
 not verify suppression of Windows' own actions. In the current session, the
 interactive probe was skipped, so neither physical contact delivery nor shell
-coexistence is established; native window-changing gestures remain capability
-blocked.
+coexistence is established. The Host can dispatch three-finger horizontal focus
+when contacts are recognized, with a warning that Windows may also perform its
+configured action; four-finger movement remains blocked until suppression is
+verified.
 
 ## Host gesture policy
 
 `touchpad.enabled` defaults to `true`, is compatible with configuration files that
 omit the section, and can disable Host-native input. Deterministic tests verify the
 three-finger horizontal inversion, four-finger `MoveSpatial` directions, vertical
-gesture exclusion from Host commands, and the capability gate. The Host also
-requires the observer-resolved foreground identity to match its current focused
-window before executing a command. Since this environment cannot verify exclusive
-gesture ownership, the runtime source never reports `Available`; actual window
-changes are consequently blocked while keyboard shortcuts continue to work.
+gesture exclusion from Host commands, and capability routing: three-finger focus
+uses observed contacts, while four-finger `MoveSpatial` requires verified exclusive
+ownership. The Host warns that Windows may also perform its configured gesture when
+suppression is unverified. The Host also requires the observer-resolved foreground
+identity to match its current focused window before executing a command. Keyboard
+shortcuts remain available regardless of native touchpad capability.
 
 ## SpatialSwitcher carousel entry
 
@@ -189,9 +194,11 @@ three-finger swipe down cancel to the captured original window; external
 activation closes without restoring focus. Once contact reports are observed,
 three-finger vertical gestures and two-finger scrolling route locally even though
 exclusive shell ownership is unverified; Windows may also perform its configured
-gesture, and the switcher displays that warning. This local routing does not enable
-Host window-changing gestures, which remain gated on verified shell suppression.
-Deterministic scroll tests
+gesture, and the switcher displays that warning. Switcher policy inverts both signs
+of the raw two-finger horizontal delta so carousel movement follows scroll direction.
+Host three-finger horizontal focus also dispatches from observed contacts with an
+explicit coexistence warning; Host four-finger movement remains gated on verified
+shell suppression. Deterministic scroll tests
 cover coalescing, bounds, viewport anchoring, selection preservation, and preview
 source clipping; snapshot reconciliation closes on a changed workspace view or
 monitor and rebinds when candidate identities change. These presentation paths

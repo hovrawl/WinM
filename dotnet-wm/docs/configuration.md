@@ -156,12 +156,14 @@ are replaced by custom bindings rather than registered twice.
   SpatialSwitcher after changing it. The carousel can also be opened or closed
   from SpatialSwitcher with `Ctrl+Alt+Space`; keyboard shortcuts remain usable
   when native touchpad input is disabled or unsupported.
-  Contact recognition and exclusive shell-gesture ownership are separate: once
-  contacts are observed, SpatialSwitcher can route its own carousel gestures, but
-  Windows may also perform its configured action. The switcher warns about this
-  conflict; it does not change Windows settings or the registry. Host window-changing
-  gestures remain blocked until contact input and suppression of conflicting shell
-  actions are verified.
+  Contact recognition and exclusive shell-gesture ownership are separate. Once
+  contacts are observed, SpatialSwitcher routes its own carousel gestures and the
+  switcher reverses the raw two-finger horizontal delta before scrolling the
+  carousel. The Host can dispatch three-finger horizontal focus; Windows may also
+  perform its configured action, so the Host logs a warning while suppression is
+  unverified.
+  Four-finger `MoveSpatial` remains blocked until exclusive suppression is verified.
+  Neither process changes Windows settings or the registry.
 - Shortcut modifier bits: Alt `1`, Control `2`, Shift `4`, Win `8`, NoRepeat
   `16384`. The example uses Control+Shift+NoRepeat. `virtualKey` uses Windows
   virtual-key codes; reserved F12 is rejected. Duplicate keys and invalid command

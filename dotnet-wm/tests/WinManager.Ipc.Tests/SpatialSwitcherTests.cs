@@ -446,9 +446,23 @@ public sealed class SpatialSwitcherTests
         Assert.True(SwitcherTouchpadPolicy.TryGetScrollDelta(
             new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 2, null, -0.07, 100), capability,
             out var delta));
-        Assert.Equal(-0.07, delta, 6);
+        Assert.Equal(0.07, delta, 6);
         Assert.False(SwitcherTouchpadPolicy.TryGetScrollDelta(
             new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 3, null, 0.1, 100), capability, out _));
+    }
+
+    [Theory]
+    [InlineData(0.07, -0.07)]
+    [InlineData(-0.07, 0.07)]
+    public void SwitcherInvertsBothHorizontalScrollDirections(double inputDelta, double expectedDelta)
+    {
+        var capability = new TouchpadCapabilityResult(TouchpadCapabilityState.GestureConflictBlocked, 1, true,
+            false, "shell suppression unverified");
+
+        Assert.True(SwitcherTouchpadPolicy.TryGetScrollDelta(
+            new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 2, null, inputDelta, 100), capability,
+            out var delta));
+        Assert.Equal(expectedDelta, delta, 6);
     }
 
     [Theory]

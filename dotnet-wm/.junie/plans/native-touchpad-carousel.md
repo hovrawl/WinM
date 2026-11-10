@@ -41,6 +41,8 @@ Three-finger vertical gestures never become directional focus commands. Four-fin
 
 Native contact capture and suppression of Windows’ built-in gestures are separate problems. The implementation must prove both on supported configurations; it must not claim exclusive ownership merely because `WM_INPUT` arrives. If supported user-mode mechanisms cannot prevent conflicting shell actions, record that as a blocker/unsupported capability rather than silently requiring manual mappings or running duplicate actions.
 
+For three-finger horizontal focus, valid contact recognition may dispatch the Host command while shell suppression remains unverified, provided the capability/status clearly warns that Windows may also run its configured action. Four-finger `MoveSpatial` remains gated on verified exclusive ownership. SpatialSwitcher translates raw two-finger horizontal deltas with an explicit sign inversion so the carousel follows scroll direction.
+
 # Technical Design
 
 ### Existing implementation
@@ -196,7 +198,7 @@ The open carousel scrolls smoothly through non-overlapping previews and cleans u
 - Add geometry/scroll/cleanup tests, run existing switcher and spatial-navigation regressions, and document measured DWM/native-input limits and deferred composition enhancements.
 
 ### ✓ Step 6: Restore three-finger gesture propagation to SpatialSwitcher
-Recognized touchpad frames reach the carousel policy across timestamp-coalesced reports and all detected touchpads, while preserving the Host's suppression safety gate.
+Recognized touchpad frames reach the carousel policy across timestamp-coalesced reports and all detected touchpads, while preserving the Host's four-finger suppression safety gate.
 - Accept equal frame timestamps and maintain independent frame assembly and recognition per device.
 - Separate local contact recognition from verified exclusive gesture ownership, and route carousel actions on the UI thread.
 - Add timestamp, multi-device, policy-routing, capability, and explicit shell-conflict-warning regressions; document the remaining hardware limitation.
@@ -207,3 +209,10 @@ Three-/four-finger swipes finalize from native Tip Switch release records withou
 - Recognize inactive tip records as released fingers after validating reported contacts and retaining coordinates for swipe completion.
 - Cover staggered releases, one-time publication, malformed releases, and the complete decoder-to-processor path.
 - Document the release-record behavior and keep physical delivery/shell ownership limitations explicit.
+
+### ✓ Step 8: Correct carousel scrolling and Host focus dispatch
+Two-finger carousel scrolling follows the intended direction, and recognized three-finger horizontal swipes reach the Host focus policy.
+- Invert horizontal deltas only in `SwitcherTouchpadPolicy`.
+- Allow three-finger horizontal focus dispatch from recognized contact input while retaining managed foreground validation and explicit shell-conflict warning.
+- Keep four-finger movement behind the exclusive-ownership gate and exclude vertical gestures from Host focus.
+- Add policy/capability regressions and update configuration and validation documentation.

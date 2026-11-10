@@ -16,7 +16,7 @@ internal static class SwitcherTouchpadPolicy
         horizontalDelta = 0;
         if (!capability.CanRecognizeGestures || gesture.Kind != TouchpadGestureKind.HorizontalDelta ||
             gesture.FingerCount != 2 || !double.IsFinite(gesture.HorizontalDelta)) return false;
-        horizontalDelta = gesture.HorizontalDelta;
+        horizontalDelta = -gesture.HorizontalDelta;
         return true;
     }
 

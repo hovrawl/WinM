@@ -78,13 +78,41 @@ public sealed class HostConfigurationTests
     }
 
     [Fact]
-    public void HostGesturePolicyBlocksActionsUntilExclusiveOwnershipIsVerified()
+    public void ThreeFingerFocusCanDispatchWhenContactsAreObservedWithoutVerifiedSuppression()
+    {
+        var blocked = new TouchpadCapabilityResult(TouchpadCapabilityState.GestureConflictBlocked, 1, true, false,
+            "unverified");
+
+        Assert.Equal(new ManagerCommand(CommandKind.Focus, Direction: Direction.Right),
+            TouchpadGesturePolicy.CreateCommand(
+                new TouchpadGesture(TouchpadGestureKind.Swipe, 3, TouchpadSwipeDirection.Left, 0, 100), blocked));
+    }
+
+    [Theory]
+    [InlineData(TouchpadCapabilityState.Disabled, 1, false)]
+    [InlineData(TouchpadCapabilityState.UnsupportedDevice, 0, true)]
+    [InlineData(TouchpadCapabilityState.GestureConflictBlocked, 1, false)]
+    public void ThreeFingerFocusRequiresRecognizableContactInput(TouchpadCapabilityState state, int deviceCount,
+        bool contactsObserved)
+    {
+        var capability = new TouchpadCapabilityResult(state, deviceCount, contactsObserved, false, "unavailable");
+
+        Assert.Null(TouchpadGesturePolicy.CreateCommand(
+            new TouchpadGesture(TouchpadGestureKind.Swipe, 3, TouchpadSwipeDirection.Left, 0, 100), capability));
+    }
+
+    [Fact]
+    public void FourFingerMovementStillRequiresVerifiedExclusiveOwnership()
     {
         var blocked = new TouchpadCapabilityResult(TouchpadCapabilityState.GestureConflictBlocked, 1, true, false,
             "unverified");
 
         Assert.Null(TouchpadGesturePolicy.CreateCommand(
-            new TouchpadGesture(TouchpadGestureKind.Swipe, 3, TouchpadSwipeDirection.Left, 0, 100), blocked));
+            new TouchpadGesture(TouchpadGestureKind.Swipe, 4, TouchpadSwipeDirection.Left, 0, 100), blocked));
+        Assert.Equal(new ManagerCommand(CommandKind.MoveSpatial, Direction: Direction.Left),
+            TouchpadGesturePolicy.CreateCommand(
+                new TouchpadGesture(TouchpadGestureKind.Swipe, 4, TouchpadSwipeDirection.Left, 0, 100),
+                AvailableTouchpad()));
     }
 
     private static TouchpadCapabilityResult AvailableTouchpad() =>

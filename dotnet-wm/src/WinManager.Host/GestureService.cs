@@ -12,15 +12,17 @@ internal static class TouchpadGesturePolicy
 {
     public static ManagerCommand? CreateCommand(TouchpadGesture gesture, TouchpadCapabilityResult capability)
     {
-        if (!capability.CanDispatchActions || gesture.Kind != TouchpadGestureKind.Swipe ||
-            gesture.Direction is not { } direction) return null;
+        if (gesture.Kind != TouchpadGestureKind.Swipe || gesture.Direction is not { } direction) return null;
 
         if (gesture.FingerCount == 3 && direction is TouchpadSwipeDirection.Left or TouchpadSwipeDirection.Right)
+        {
+            if (!capability.CanRecognizeGestures) return null;
             return new ManagerCommand(CommandKind.Focus, Direction: direction == TouchpadSwipeDirection.Left
                 ? Direction.Right
                 : Direction.Left);
+        }
 
-        if (gesture.FingerCount != 4) return null;
+        if (!capability.CanDispatchActions || gesture.FingerCount != 4) return null;
         var physicalDirection = direction switch
         {
             TouchpadSwipeDirection.Left => Direction.Left,
@@ -103,8 +105,18 @@ internal sealed class GestureService(
 
     private void OnCapabilityChanged(TouchpadCapabilityResult capability) => LogCapability(capability);
 
-    private void LogCapability(TouchpadCapabilityResult capability) =>
+    private void LogCapability(TouchpadCapabilityResult capability)
+    {
+        if (capability.CanRecognizeGestures && !capability.GestureConflictSuppressionVerified)
+        {
+            logger.LogWarning(
+                "Native touchpad capability: {State}; devices {DeviceCount}; contacts observed {Contacts}; {Detail}. Three-finger horizontal focus may also trigger Windows' configured touchpad action because suppression is unverified; four-finger movement remains disabled.",
+                capability.State, capability.DeviceCount, capability.ContactReportsObserved, capability.Detail);
+            return;
+        }
+
         logger.LogInformation(
             "Native touchpad capability: {State}; devices {DeviceCount}; contacts observed {Contacts}; {Detail}",
             capability.State, capability.DeviceCount, capability.ContactReportsObserved, capability.Detail);
+    }
 }
