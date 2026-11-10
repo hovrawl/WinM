@@ -208,7 +208,9 @@ internal sealed class SwitcherWindow : Window
 
     private void ShowPopup()
     {
+        Topmost = false;
         Show();
+        Topmost = true;
         Activate();
         search.Focus();
     }

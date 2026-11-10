@@ -78,7 +78,9 @@ internal sealed class CurrentWorkspaceWindow : Window
     {
         PopupPlacement.Place(this, placement);
         UpdateSnapshot(nextSnapshot, context.WorkspaceId, context.MonitorId, managerConnected);
+        Topmost = false;
         Show();
+        Topmost = true;
         Activate();
         if (cycleWindow) CycleWindow(previous);
     }

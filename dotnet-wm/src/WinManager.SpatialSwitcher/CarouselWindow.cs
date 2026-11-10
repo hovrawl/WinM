@@ -86,7 +86,9 @@ internal sealed class CarouselWindow : Window
         state.SetInitialOffset(Math.Max(0, selectedIndex) * CarouselPresentation.CardStride(workAreaWidth),
             CarouselPresentation.MaximumScrollOffset(candidates.Count, workAreaWidth, viewportWidth));
         RenderCards();
+        Topmost = false;
         if (!IsVisible) Show();
+        Topmost = true;
         Activate();
         if (!state.MarkOpen()) return;
 
