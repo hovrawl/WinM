@@ -460,10 +460,15 @@ public sealed class ManagerEngine
                     {
                         var stackOrder = OrderLayeredStack(plan.Placements, layeredFocus,
                             appliedLayeredStackOrders.GetValueOrDefault(workspace.Id));
+                        var layeredPlacementsChanged = plan.Placements.Any(placement =>
+                            windowsById[placement.WindowId].Bounds != placement.Bounds);
+                        var moveCompleted = droppedWindowId is { } completedMoveId &&
+                                            workspace.WindowIds.Contains(completedMoveId);
                         if (stackOrder.Length == 0)
                             appliedLayeredStackOrders.Remove(workspace.Id);
-                        else if (!appliedLayeredStackOrders.TryGetValue(workspace.Id, out var applied) ||
-                            !applied.SequenceEqual(stackOrder))
+                        else if (layeredPlacementsChanged || moveCompleted ||
+                                 !appliedLayeredStackOrders.TryGetValue(workspace.Id, out var applied) ||
+                                 !applied.SequenceEqual(stackOrder))
                         {
                             stackingOrderWindowIds.AddRange(stackOrder);
                             changedLayeredStackOrders[workspace.Id] = stackOrder;
@@ -548,7 +553,7 @@ public sealed class ManagerEngine
             failures.AddRange(applyResult.Failures);
             foreach (var (workspaceId, stackOrder) in changedLayeredStackOrders)
                 if (!applyResult.Failures.Any(failure => failure.WindowId is null ||
-                        stackOrder.Contains(failure.WindowId.Value)))
+                        stackOrder.Contains(failure.WindowId.Value)) && !stackOrder.Any(movingWindows.ContainsKey))
                     appliedLayeredStackOrders[workspaceId] = stackOrder;
             desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
             var observed = desktop.Windows.ToDictionary(window => window.Id);

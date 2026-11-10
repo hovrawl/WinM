@@ -1068,6 +1068,120 @@ public sealed class WorkspaceManagerTests
     }
 
     [Fact]
+    public async Task LayeredGeometryChangesRestackEvenWhenOrderIsUnchanged()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var monitor = fake.Desktop.Monitors.Single();
+        var windows = Enumerable.Range(0, 3).Select(index => new WindowInfo(Guid.NewGuid(), monitor.Id,
+            $"Page {index}", "test", "test", new(-900 + index * 240, 50, 200, 200), true, false, false,
+            WindowMode.Tiling, 100, 100)).ToArray();
+        fake.Desktop = new([monitor], windows, windows[0].Id);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One", Layout: WorkspaceLayout.Layered)]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var workspace = Assert.Single(engine.Current!.Workspaces!);
+            var stackOrder = workspace.WindowIds.ToArray();
+            fake.Desktop = fake.Desktop with { FocusedWindowId = stackOrder[0] };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            Assert.Equal(stackOrder, fake.Plans[^1].StackingOrderWindowIds);
+            var originalBounds = fake.Desktop.Windows.ToDictionary(window => window.Id, window => window.Bounds);
+            var planCount = fake.Plans.Count;
+            fake.Desktop = fake.Desktop with
+            {
+                Monitors = [monitor with { WorkArea = monitor.WorkArea with { Width = monitor.WorkArea.Width - 100 } }]
+            };
+
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+
+            Assert.Equal(planCount + 1, fake.Plans.Count);
+            Assert.Equal(stackOrder, fake.Plans[^1].StackingOrderWindowIds);
+            Assert.Contains(fake.Plans[^1].Placements,
+                placement => originalBounds[placement.WindowId] != placement.Bounds);
+
+            planCount = fake.Plans.Count;
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            Assert.Equal(planCount, fake.Plans.Count);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LayeredMoveCompletionRestacksAfterFocusChangeDuringDrag(bool changeFocusDuringDrag)
+    {
+        await using var fake = new FakeWindowPlatform();
+        var monitor = fake.Desktop.Monitors.Single();
+        var windows = Enumerable.Range(0, 3).Select(index => new WindowInfo(Guid.NewGuid(), monitor.Id,
+            $"Page {index}", "test", "test", new(-900 + index * 240, 50, 200, 200), true, false, false,
+            WindowMode.Tiling, 100, 100)).ToArray();
+        fake.Desktop = new([monitor], windows, windows[0].Id);
+        var engine = new ManagerEngine(fake, workspaceDefinitions:
+            [new("One", Layout: WorkspaceLayout.Layered, LayeredLayoutOptions: new(0.2, 256))]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var workspace = Assert.Single(engine.Current!.Workspaces!);
+            var treeOrder = workspace.WindowIds.ToArray();
+            var source = treeOrder[1];
+            var target = treeOrder[0];
+            var remaining = treeOrder[2];
+            static Guid[] TreeWindowOrder(SplitNodeInfo? node) => node is null
+                ? []
+                : node.WindowId is { } windowId
+                    ? [windowId]
+                    : TreeWindowOrder(node.First).Concat(TreeWindowOrder(node.Second)).ToArray();
+
+            fake.Desktop = fake.Desktop with { FocusedWindowId = source };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            Assert.Equal(new[] { source, target, remaining }, fake.Plans[^1].StackingOrderWindowIds);
+            var expectedStackOrder = changeFocusDuringDrag
+                ? new[] { target, source, remaining }
+                : new[] { source, target, remaining };
+
+            fake.NotifyMove(source, true);
+            await fake.MoveNotificationRead.Task.WaitAsync(timeout.Token);
+            await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token);
+
+            if (changeFocusDuringDrag)
+            {
+                fake.Desktop = fake.Desktop with { FocusedWindowId = target };
+                Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+                Assert.Equal(expectedStackOrder, fake.Plans[^1].StackingOrderWindowIds);
+            }
+
+            var targetBounds = fake.Desktop.Windows.Single(window => window.Id == target).Bounds;
+            fake.Desktop = fake.Desktop with
+            {
+                Windows = fake.Desktop.Windows.Select(window => window.Id == source
+                    ? window with { Bounds = targetBounds }
+                    : window).ToArray()
+            };
+            fake.NotifyMove(source, false);
+            await fake.MoveNotificationRead.Task.WaitAsync(timeout.Token);
+            await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token);
+
+            Assert.Contains(source, fake.Plans[^1].CompletedMoves!);
+            Assert.Equal(new[] { source, target, remaining }, TreeWindowOrder(engine.Current!.Trees[workspace.Id]));
+            Assert.Equal(expectedStackOrder, fake.Plans[^1].StackingOrderWindowIds);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
     public async Task SplitLayoutDoesNotRequestFocusRelativeStackingOrder()
     {
         await using var fake = new FakeWindowPlatform();
