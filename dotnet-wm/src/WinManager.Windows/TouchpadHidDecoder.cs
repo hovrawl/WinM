@@ -69,12 +69,17 @@ internal sealed class TouchpadHidDecoder(
                     ScanTimeUsage, out scanTime)) return false;
         }
 
+        var contactCollections = layout.ContactCollections.OrderBy(collection => collection.LinkCollection).ToArray();
+        if (layout.ContactCount is not null && expectedCount > contactCollections.Length) return false;
         var contacts = new List<TouchpadContact>(Math.Max(1, expectedCount));
-        foreach (var collection in layout.ContactCollections)
+        var collectionCount = layout.ContactCount is null ? contactCollections.Length : expectedCount;
+        for (var index = 0; index < collectionCount; index++)
         {
+            var collection = contactCollections[index];
             if (!valueReader.TryGetUsages(preparsedData, report, DigitizerUsagePage, collection.LinkCollection,
                     out var activeUsages)) return false;
-            if (!activeUsages.Contains(TipSwitchUsage)) continue;
+            var isTouching = activeUsages.Contains(TipSwitchUsage);
+            if (layout.ContactCount is null && !isTouching) continue;
             if (!valueReader.TryGetValue(preparsedData, report, collection.ContactId.UsagePage,
                     collection.ContactId.LinkCollection,
                     collection.ContactId.Usage, out var id) ||
@@ -88,7 +93,7 @@ internal sealed class TouchpadHidDecoder(
                 return false;
 
             if (contacts.Any(contact => contact.Id == id)) return false;
-            contacts.Add(new TouchpadContact(id, true, normalizedX, normalizedY));
+            contacts.Add(new TouchpadContact(id, true, normalizedX, normalizedY, isTouching));
         }
 
         if (layout.ContactCount is null) expectedCount = contacts.Count;

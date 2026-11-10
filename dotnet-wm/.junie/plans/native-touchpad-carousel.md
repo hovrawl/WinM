@@ -200,3 +200,10 @@ Recognized touchpad frames reach the carousel policy across timestamp-coalesced 
 - Accept equal frame timestamps and maintain independent frame assembly and recognition per device.
 - Separate local contact recognition from verified exclusive gesture ownership, and route carousel actions on the UI thread.
 - Add timestamp, multi-device, policy-routing, capability, and explicit shell-conflict-warning regressions; document the remaining hardware limitation.
+
+### ✓ Step 7: Publish gestures from HID lift-off records
+Three-/four-finger swipes finalize from native Tip Switch release records without requiring an extra zero-contact packet.
+- Preserve lift-off records covered by HID Contact Count while excluding unused trailing slots.
+- Recognize inactive tip records as released fingers after validating reported contacts and retaining coordinates for swipe completion.
+- Cover staggered releases, one-time publication, malformed releases, and the complete decoder-to-processor path.
+- Document the release-record behavior and keep physical delivery/shell ownership limitations explicit.

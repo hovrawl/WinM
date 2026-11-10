@@ -24,6 +24,81 @@ public sealed class TouchpadGestureRecognizerTests
     }
 
     [Fact]
+    public void ThreeFingerSwipeCompletesOnTipLiftOffWithoutAnEmptyContactFrame()
+    {
+        var recognizer = new TouchpadGestureRecognizer();
+        recognizer.Process(Frame(0, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(40, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(56, 3, 0.1, 0.3, 0.5));
+
+        var completed = recognizer.Process(FrameFromContacts(72, 3,
+            new TouchpadContact(1, true, 0.1, 0.5, false),
+            new TouchpadContact(2, true, 0.3, 0.5, false),
+            new TouchpadContact(3, true, 0.5, 0.5, false)));
+
+        var gesture = Assert.Single(completed);
+        Assert.Equal(3, gesture.FingerCount);
+        Assert.Equal(TouchpadSwipeDirection.Left, gesture.Direction);
+        Assert.Empty(recognizer.Process(Frame(88, 0)));
+    }
+
+    [Fact]
+    public void MovementDuringFingerSettlingContributesToTheCompletedSwipe()
+    {
+        var recognizer = new TouchpadGestureRecognizer();
+        recognizer.Process(Frame(0, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(16, 3, 0.12, 0.32, 0.52));
+        recognizer.Process(Frame(40, 3, 0.12, 0.32, 0.52));
+
+        var completed = recognizer.Process(Frame(56, 0));
+
+        Assert.Equal(TouchpadSwipeDirection.Left, Assert.Single(completed).Direction);
+    }
+
+    [Fact]
+    public void StaggeredTipLiftsRetainMovementAndPublishOnlyWhenAllFingersLift()
+    {
+        var recognizer = new TouchpadGestureRecognizer();
+        recognizer.Process(Frame(0, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(40, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(56, 3, 0.25, 0.45, 0.65));
+        recognizer.Process(Frame(72, 3, 0.1, 0.3, 0.5));
+        Assert.Empty(recognizer.Process(FrameFromContacts(88, 3,
+            new TouchpadContact(1, true, 0.08, 0.5),
+            new TouchpadContact(2, true, 0.28, 0.5),
+            new TouchpadContact(3, true, 0.5, 0.5, false))));
+        Assert.Empty(recognizer.Process(FrameFromContacts(104, 3,
+            new TouchpadContact(1, true, 0.05, 0.5),
+            new TouchpadContact(2, true, 0.28, 0.5, false),
+            new TouchpadContact(3, true, 0.5, 0.5, false))));
+
+        var completed = recognizer.Process(FrameFromContacts(120, 3,
+            new TouchpadContact(1, true, 0.05, 0.5, false),
+            new TouchpadContact(2, true, 0.28, 0.5, false),
+            new TouchpadContact(3, true, 0.5, 0.5, false)));
+
+        Assert.Equal(TouchpadSwipeDirection.Left, Assert.Single(completed).Direction);
+        Assert.Empty(recognizer.Process(FrameFromContacts(136, 3,
+            new TouchpadContact(1, true, 0.05, 0.5, false),
+            new TouchpadContact(2, true, 0.28, 0.5, false),
+            new TouchpadContact(3, true, 0.5, 0.5, false))));
+    }
+
+    [Fact]
+    public void MalformedTipReleaseCancelsInsteadOfFinalizingTheSwipe()
+    {
+        var recognizer = new TouchpadGestureRecognizer();
+        recognizer.Process(Frame(0, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(40, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(56, 3, 0.1, 0.3, 0.5));
+        Assert.Empty(recognizer.Process(FrameFromContacts(72, 3,
+            new TouchpadContact(1, true, 0.1, 0.5),
+            new TouchpadContact(2, true, 0.3, 0.5, false))));
+
+        Assert.Empty(recognizer.Process(Frame(88, 0)));
+    }
+
+    [Fact]
     public void ThreeFingerSwipeSurvivesConsecutiveFramesWithTheSameMillisecondTimestamp()
     {
         var recognizer = new TouchpadGestureRecognizer();
@@ -148,4 +223,8 @@ public sealed class TouchpadGestureRecognizerTests
             new TouchpadContact((uint)(index + 1), true, point.X, point.Y)).ToArray();
         return new TouchpadContactFrame(42, timestamp, (uint)timestamp, points.Length, contacts);
     }
+
+    private static TouchpadContactFrame FrameFromContacts(long timestamp, int expectedCount,
+        params TouchpadContact[] contacts) =>
+        new(42, timestamp, (uint)timestamp, expectedCount, contacts);
 }

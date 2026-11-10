@@ -104,6 +104,15 @@ input. Deterministic fixtures cover HID value decoding, exact `HIDP_CAPS` and
 `HIDP_VALUE_CAPS` structure sizes, split contact frames, gesture count transitions,
 diagonal movement, and queue-overflow reset behavior.
 
+HID Contact Count determines how many contact slots are present in a report; it is
+not the number of tips still touching the surface. The decoder preserves Tip Switch
+off lift records in those counted slots and ignores unused trailing slots. Recognition
+validates the reported slot count, counts only touching tips, retains swipe travel
+through settling and staggered lifts, and publishes once when the last tip lifts; an
+additional empty-contact packet is not required. Synthetic decoder-to-processor tests
+cover this path and malformed releases, but do not establish the behavior of every
+physical device.
+
 The HID capability structs include the SDK reserved arrays (`HIDP_CAPS` is 64 bytes;
 `HIDP_VALUE_CAPS` is 72 bytes). Native-byte fixtures pin the input-value-capability
 count offset, value-range offsets, and value-capability array stride; the earlier

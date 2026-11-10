@@ -12,10 +12,6 @@ public sealed class TouchpadGestureRecognizer
     private long settlingStarted;
     private int candidateFingerCount;
     private int stableFingerCount;
-    private double startX;
-    private double startY;
-    private double lastX;
-    private double lastY;
     private double travelX;
     private double travelY;
     private bool active;
@@ -39,7 +35,8 @@ public sealed class TouchpadGestureRecognizer
             Reset();
 
         lastTimestamp = frame.TimestampMilliseconds;
-        if (frame.Contacts.Count == 0)
+        var activeContacts = frame.Contacts.Where(contact => contact.IsTouching).ToArray();
+        if (activeContacts.Length == 0)
         {
             var completed = Complete(frame.TimestampMilliseconds);
             Reset();
@@ -48,101 +45,91 @@ public sealed class TouchpadGestureRecognizer
 
         if (!active)
         {
-            Begin(frame);
+            Begin(frame, activeContacts);
             return [];
         }
 
-        var fingerCount = frame.Contacts.Count;
-        if (fingerCount > Math.Max(candidateFingerCount, stableFingerCount))
-        {
-            candidateFingerCount = fingerCount;
-            settlingStarted = frame.TimestampMilliseconds;
-            settled = false;
-            ResetTravel(frame);
-            trackedContacts.Clear();
-            foreach (var contact in frame.Contacts) trackedContacts.Add(contact.Id, contact);
-            return [];
-        }
-
+        var fingerCount = activeContacts.Length;
+        var hasUntrackedContact = activeContacts.Any(contact => !trackedContacts.ContainsKey(contact.Id));
         if (!settled)
         {
-            if (fingerCount != candidateFingerCount)
+            if (fingerCount != candidateFingerCount || hasUntrackedContact)
             {
-                candidateFingerCount = fingerCount;
-                settlingStarted = frame.TimestampMilliseconds;
-                ResetTravel(frame);
-                trackedContacts.Clear();
-                foreach (var contact in frame.Contacts) trackedContacts.Add(contact.Id, contact);
+                BeginCandidate(frame, activeContacts);
                 return [];
             }
 
-            if (frame.TimestampMilliseconds - settlingStarted < FingerSettleMilliseconds)
-            {
-                UpdateTrackedContacts(frame.Contacts);
-                return [];
-            }
+            if (!TryUpdateTravel(activeContacts, out var deltaX, out _)) return [];
+            if (frame.TimestampMilliseconds - settlingStarted < FingerSettleMilliseconds) return [];
 
             stableFingerCount = candidateFingerCount;
             settled = true;
-            ResetTravel(frame);
-            trackedContacts.Clear();
-            foreach (var contact in frame.Contacts) trackedContacts.Add(contact.Id, contact);
-            return [];
+            return HorizontalDelta(deltaX, fingerCount, frame.TimestampMilliseconds);
         }
 
-        if (fingerCount < stableFingerCount)
+        if (fingerCount > stableFingerCount || hasUntrackedContact)
         {
-            UpdateTrackedContacts(frame.Contacts);
+            BeginCandidate(frame, activeContacts);
             return [];
         }
 
-        if (fingerCount != stableFingerCount)
-        {
-            Reset();
-            Begin(frame);
+        if (!TryUpdateTravel(activeContacts, out var movementX, out _) || fingerCount < stableFingerCount)
             return [];
-        }
 
-        if (frame.Contacts.Any(contact => !trackedContacts.ContainsKey(contact.Id)))
-        {
-            candidateFingerCount = fingerCount;
-            settlingStarted = frame.TimestampMilliseconds;
-            stableFingerCount = 0;
-            settled = false;
-            ResetTravel(frame);
-            trackedContacts.Clear();
-            foreach (var contact in frame.Contacts) trackedContacts.Add(contact.Id, contact);
-            return [];
-        }
-
-        if (!TryCentroid(frame.Contacts, trackedContacts.Keys, out var x, out var y)) return [];
-        var deltaX = x - lastX;
-        lastX = x;
-        lastY = y;
-        travelX = x - startX;
-        travelY = y - startY;
-        UpdateTrackedContacts(frame.Contacts);
-        return stableFingerCount == 2 && Math.Abs(deltaX) > 0.0001
-            ?
-            [
-                new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 2, null, deltaX,
-                    frame.TimestampMilliseconds)
-            ]
-            : [];
+        return HorizontalDelta(movementX, fingerCount, frame.TimestampMilliseconds);
     }
 
     public void Cancel() => Reset();
 
-    private void Begin(TouchpadContactFrame frame)
+    private void Begin(TouchpadContactFrame frame, IReadOnlyList<TouchpadContact> contacts)
     {
         active = true;
         deviceHandle = frame.DeviceHandle;
-        candidateFingerCount = frame.Contacts.Count;
+        candidateFingerCount = contacts.Count;
         stableFingerCount = 0;
         settlingStarted = frame.TimestampMilliseconds;
-        ResetTravel(frame);
+        ResetTravel();
         trackedContacts.Clear();
-        foreach (var contact in frame.Contacts) trackedContacts.Add(contact.Id, contact);
+        foreach (var contact in contacts) trackedContacts.Add(contact.Id, contact);
+    }
+
+    private void BeginCandidate(TouchpadContactFrame frame, IReadOnlyList<TouchpadContact> contacts)
+    {
+        candidateFingerCount = contacts.Count;
+        stableFingerCount = 0;
+        settlingStarted = frame.TimestampMilliseconds;
+        settled = false;
+        ResetTravel();
+        trackedContacts.Clear();
+        foreach (var contact in contacts) trackedContacts.Add(contact.Id, contact);
+    }
+
+    private IReadOnlyList<TouchpadGesture> HorizontalDelta(double deltaX, int fingerCount, long timestamp)
+    {
+        return stableFingerCount == 2 && fingerCount == 2 && Math.Abs(deltaX) > 0.0001
+            ? [new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 2, null, deltaX, timestamp)]
+            : [];
+    }
+
+    private bool TryUpdateTravel(IReadOnlyList<TouchpadContact> contacts, out double deltaX, out double deltaY)
+    {
+        deltaX = deltaY = 0;
+        var count = 0;
+        foreach (var contact in contacts)
+        {
+            if (!trackedContacts.TryGetValue(contact.Id, out var previous)) continue;
+            deltaX += contact.X - previous.X;
+            deltaY += contact.Y - previous.Y;
+            count++;
+        }
+
+        if (count == 0) return false;
+        deltaX /= count;
+        deltaY /= count;
+        travelX += deltaX;
+        travelY += deltaY;
+        UpdateTrackedContacts(contacts);
+        return true;
     }
 
     private IReadOnlyList<TouchpadGesture> Complete(long timestamp)
@@ -166,43 +153,13 @@ public sealed class TouchpadGestureRecognizer
         return [];
     }
 
-    private void ResetTravel(TouchpadContactFrame frame)
-    {
-        if (!TryCentroid(frame.Contacts, frame.Contacts.Select(contact => contact.Id), out startX, out startY))
-            startX = startY = 0;
-        lastX = startX;
-        lastY = startY;
-        travelX = travelY = 0;
-    }
+    private void ResetTravel() => travelX = travelY = 0;
 
     private void UpdateTrackedContacts(IReadOnlyList<TouchpadContact> contacts)
     {
         foreach (var contact in contacts)
             if (trackedContacts.ContainsKey(contact.Id))
                 trackedContacts[contact.Id] = contact;
-    }
-
-    private static bool TryCentroid(IReadOnlyList<TouchpadContact> contacts, IEnumerable<uint> contactIds,
-        out double x, out double y)
-    {
-        x = y = 0;
-        var count = 0;
-        foreach (var id in contactIds)
-        {
-            foreach (var contact in contacts)
-            {
-                if (contact.Id != id) continue;
-                x += contact.X;
-                y += contact.Y;
-                count++;
-                break;
-            }
-        }
-
-        if (count == 0) return false;
-        x /= count;
-        y /= count;
-        return true;
     }
 
     private void Reset()
@@ -213,7 +170,7 @@ public sealed class TouchpadGestureRecognizer
         lastTimestamp = 0;
         candidateFingerCount = 0;
         stableFingerCount = 0;
-        startX = startY = lastX = lastY = travelX = travelY = 0;
+        travelX = travelY = 0;
         trackedContacts.Clear();
     }
 }

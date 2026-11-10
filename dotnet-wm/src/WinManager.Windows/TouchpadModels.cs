@@ -25,7 +25,7 @@ public sealed record TouchpadCapabilityResult(
                                       ContactReportsObserved && GestureConflictSuppressionVerified;
 }
 
-public readonly record struct TouchpadContact(uint Id, bool IsConfident, double X, double Y);
+public readonly record struct TouchpadContact(uint Id, bool IsConfident, double X, double Y, bool IsTouching = true);
 
 public sealed record TouchpadContactFrame(
     nint DeviceHandle,
