@@ -119,7 +119,8 @@ public sealed record ManagerConfiguration
                                                command.WorkspaceName is { } name &&
                                                Workspaces.Any(workspace => string.Equals(workspace.Name, name,
                                                    StringComparison.OrdinalIgnoreCase))),
-            CommandKind.MoveToMonitor => command.MonitorId is { } id && id != Guid.Empty,
+            CommandKind.MoveToMonitor => command.MonitorId is { } id && id != Guid.Empty ||
+                                         command.MonitorNumber is >= 1 and <= 10,
             CommandKind.SelectContainer => command.NodeId is null ||
                                            command.NodeId != Guid.Empty && command.Navigation is null &&
                                            command.WindowId is null,
@@ -135,7 +136,11 @@ public sealed record ManagerConfiguration
             command.WorkspaceNumber is not null &&
             (command.Kind != CommandKind.MoveToWorkspace || command.WorkspaceId is not null ||
              command.WorkspaceName is not null || command.WorkspaceNumber is < 1 or > 10) ||
-            command.Kind != CommandKind.FocusMonitor && command.MonitorNumber is not null ||
+            command.Kind is not (CommandKind.FocusMonitor or CommandKind.MoveToMonitor) &&
+            command.MonitorNumber is not null ||
+            command.Kind == CommandKind.MoveToMonitor &&
+            (command.MonitorId is null && command.MonitorNumber is null ||
+             command.MonitorId is not null && command.MonitorNumber is not null) ||
             command.Kind == CommandKind.FocusMonitor && (command.WorkspaceId is not null ||
                                                          command.WorkspaceName is not null ||
                                                          command.WorkspaceNumber is not null ||
@@ -210,9 +215,8 @@ public sealed record ManagerConfiguration
             var virtualKey = number == 10 ? 0x30u : (uint)(0x30 + number);
             bindings.Add(new(alt | noRepeat, virtualKey,
                 new ManagerCommand(CommandKind.FocusMonitor, MonitorNumber: number)));
-            if (number <= Workspaces.Count)
-                bindings.Add(new(alt | shift | noRepeat, virtualKey,
-                    new ManagerCommand(CommandKind.MoveToWorkspace, WorkspaceNumber: number)));
+            bindings.Add(new(alt | shift | noRepeat, virtualKey,
+                new ManagerCommand(CommandKind.MoveToMonitor, MonitorNumber: number)));
         }
 
         for (var index = 0; index < 4; index++)

@@ -39,8 +39,12 @@ host, independent of configured ignore lists.
   warm workspace palette, while Dark preserves the switcher's existing dark colors.
 - **Settings** is available only from the HomeDeskManager tray menu. It edits
   HomeDeskSpace inner/outer gaps, default shortcuts, and touchpad enablement using
-  the host's validated configuration API. Saving writes the existing configuration
-  file but does not apply changes until HomeDeskSpace is restarted.
+  the host's validated configuration API. It also lets you reorder monitor key
+  assignments; each entry shows the device name, geometry, and monitor ID, and
+  **Identify monitors** briefly labels each screen. `Alt+1` through `Alt+0`
+  focus the numbered monitor's workspace; `Shift+Alt+1` through `Shift+Alt+0`
+  move the focused window to that monitor's workspace. Saving writes the existing
+  configuration file but does not apply changes until HomeDeskSpace is restarted.
 - If HomeDeskSpace is unavailable or the connection drops, the app retries
   connecting every five seconds after each attempt completes. The tray reconnect
   action remains available for an immediate attempt.
@@ -50,13 +54,13 @@ host, independent of configured ignore lists.
 
 ## Select and activate
 
-- Both switcher popups include the same workspace details control. In the spatial
-  switcher it follows the selected workspace card; in the window switcher it stays
-  bound to the workspace shown on the monitor captured when the popup opened. Use
-  **Use Split** or **Use Layered** to change the workspace layout, or edit the
-  layered preferred width cap and horizontal spacing in DIPs and choose
-  **Apply settings**. The settings apply to that explicit workspace ID; they are
-  disabled in demo mode, while disconnected, or while another command is running.
+- Both switchers provide a **Workflow settings** button that opens an independent
+  window for workspace layout settings. It stays bound to the selected workspace
+  when the switcher hides or the spatial selection changes. Use **Use Split** or
+  **Use Layered** to change the layout, or edit the layered preferred width cap and
+  horizontal spacing in DIPs and choose **Apply settings**. Changes apply to that
+  explicit workspace ID; editing is disabled in demo mode, while disconnected, or
+  while another command is running.
 - Layered width is a preferred maximum percentage from greater than 0 through 100
   of the usable work width. At the 100% default, one page fills the padded work
   area and each added page reduces every page by one horizontal offset while the

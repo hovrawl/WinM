@@ -268,12 +268,26 @@ public sealed class HostConfigurationTests
     public void DefaultShortcutSetContainsMonitorWorkspaceAndGestureBindingsAndCustomCanOverride()
     {
         var defaults = new ManagerConfiguration().BuildShortcutBindings();
-        Assert.Equal(29, defaults.Count);
+        Assert.Equal(36, defaults.Count);
         Assert.Contains(defaults, binding => binding.Command.Kind == CommandKind.FocusMonitor &&
                                              binding.Command.MonitorNumber == 1 && binding.VirtualKey == 0x31);
-        Assert.Contains(defaults, binding => binding.Command.Kind == CommandKind.MoveToWorkspace &&
-                                             binding.Command.WorkspaceNumber == 1 && binding.VirtualKey == 0x31 &&
+        Assert.Contains(defaults, binding => binding.Command.Kind == CommandKind.MoveToMonitor &&
+                                             binding.Command.MonitorNumber == 1 && binding.VirtualKey == 0x31 &&
                                              (binding.Modifiers & 0xF) == 5);
+        Assert.Contains(defaults, binding => binding.Command.Kind == CommandKind.MoveToMonitor &&
+                                             binding.Command.MonitorNumber == 10 && binding.VirtualKey == 0x30 &&
+                                             (binding.Modifiers & 0xF) == 5);
+        Assert.DoesNotContain(defaults, binding => binding.Command.Kind == CommandKind.MoveToWorkspace &&
+                                                   binding.Command.WorkspaceNumber is not null &&
+                                                   (binding.Modifiers & 0xF) == 5);
+        new ManagerConfiguration
+        {
+            Shortcuts = [new(5, 0x31, new(CommandKind.MoveToMonitor, MonitorNumber: 1))]
+        }.Validate();
+        Assert.Throws<InvalidDataException>(() => new ManagerConfiguration
+        {
+            Shortcuts = [new(5, 0x31, new(CommandKind.MoveToMonitor, MonitorNumber: 11))]
+        }.Validate());
         Assert.Contains(defaults, binding => binding.Command.Kind == CommandKind.Focus &&
                                              binding.Command.Direction == Direction.Left && binding.VirtualKey == 0x25);
         Assert.Contains(defaults, binding => binding.Command.Kind == CommandKind.MoveSpatial &&

@@ -20,7 +20,7 @@ internal sealed class CurrentWorkspaceWindow : Window
     private static readonly IReadOnlyList<SolidColorBrush> ShapeBrushes = SwitcherTheme.WindowShapePalette;
 
     private readonly Func<Guid, Task<CommandResult>> focusWindow;
-    private readonly WorkspaceDetailsControl workspaceDetails;
+    private readonly Action<Guid?> openWorkspaceSettings;
     private readonly StackPanel activeCards = new() { Orientation = Orientation.Horizontal, Spacing = 12 };
     private readonly StackPanel inactiveCards = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
     private readonly TextBlock workspaceTitle = new();
@@ -28,6 +28,7 @@ internal sealed class CurrentWorkspaceWindow : Window
     private readonly TextBlock inactiveHeading = new();
     private readonly TextBlock status = new();
     private Button focusButton = null!;
+    private Button workspaceSettingsButton = null!;
     private ManagerSnapshot? snapshot;
     private WorkspaceInfo? workspace;
     private WorkspaceWindowGroups groups = new([], []);
@@ -37,11 +38,10 @@ internal sealed class CurrentWorkspaceWindow : Window
     private bool commandBusy;
     private bool allowClose;
 
-    public CurrentWorkspaceWindow(Func<Guid, Task<CommandResult>> focusWindow,
-        Func<ManagerCommand, Task<CommandResult>> executeWorkspaceLayout)
+    public CurrentWorkspaceWindow(Func<Guid, Task<CommandResult>> focusWindow, Action<Guid?> openWorkspaceSettings)
     {
         this.focusWindow = focusWindow;
-        workspaceDetails = new WorkspaceDetailsControl(executeWorkspaceLayout);
+        this.openWorkspaceSettings = openWorkspaceSettings;
         Title = "Current workspace · One desk";
         Width = 790;
         Height = 620;
@@ -103,9 +103,6 @@ internal sealed class CurrentWorkspaceWindow : Window
         RenderWindows();
     }
 
-    public void SetWorkspaceCommandsAvailable(bool available) =>
-        workspaceDetails.SetAvailable(available && !commandBusy);
-
     public void CycleWindow(bool previous)
     {
         var candidates = Candidates();
@@ -164,8 +161,10 @@ internal sealed class CurrentWorkspaceWindow : Window
         Grid.SetRow(workspaceTitle, 1);
         layout.Children.Add(workspaceTitle);
 
-        Grid.SetRow(workspaceDetails, 2);
-        layout.Children.Add(workspaceDetails);
+        workspaceSettingsButton = SwitcherTheme.Action("Workflow settings");
+        workspaceSettingsButton.Click += (_, _) => openWorkspaceSettings(workspace?.Id);
+        Grid.SetRow(workspaceSettingsButton, 2);
+        layout.Children.Add(workspaceSettingsButton);
 
         var activeArea = new Grid
         {
@@ -244,7 +243,6 @@ internal sealed class CurrentWorkspaceWindow : Window
 
         if (workspace is null)
         {
-            workspaceDetails.UpdateWorkspace(null, false);
             workspaceTitle.Text = "Waiting for workspace state";
             activeHeading.Text = "ACTIVE WINDOWS";
             inactiveHeading.Text = "INACTIVE WINDOWS";
@@ -252,10 +250,11 @@ internal sealed class CurrentWorkspaceWindow : Window
                 ? "Waiting for a manager snapshot…"
                 : "No workspace is assigned to this monitor.";
             focusButton.IsEnabled = false;
+            workspaceSettingsButton.IsEnabled = false;
             return;
         }
 
-        workspaceDetails.UpdateWorkspace(workspace, connected && !commandBusy);
+        workspaceSettingsButton.IsEnabled = true;
 
         var targetMonitor = snapshot?.Desktop.Monitors.FirstOrDefault(candidate => candidate.Id == monitorId);
         workspaceTitle.Text =
@@ -381,7 +380,8 @@ internal sealed class CurrentWorkspaceWindow : Window
 
     private void OnKeyDown(object? sender, KeyEventArgs args)
     {
-        if (!WorkspaceDetailsControl.ShouldHandlePopupKey(workspaceDetails.HasKeyboardFocus, args.Key)) return;
+        if (workspaceSettingsButton.IsFocused && args.Key != Key.Escape) return;
+        if (focusButton.IsFocused && args.Key != Key.Escape) return;
 
         if (args.Key == Key.Escape)
         {
@@ -413,7 +413,6 @@ internal sealed class CurrentWorkspaceWindow : Window
         commandBusy = true;
         status.Text = $"Focusing {target.Title}…";
         focusButton.IsEnabled = false;
-        workspaceDetails.SetAvailable(false);
         try
         {
             var result = await focusWindow(targetId);
@@ -434,7 +433,6 @@ internal sealed class CurrentWorkspaceWindow : Window
         finally
         {
             commandBusy = false;
-            workspaceDetails.SetAvailable(connected);
             RenderWindows();
         }
     }

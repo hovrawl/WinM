@@ -20,11 +20,15 @@ public sealed class SpatialSwitcherTests
     public void GeneralSettingsPreserveOtherConfigurationFieldsAndEnforceGapLimits()
     {
         const string original =
-            """{"workspaces":[{"name":"Code","layout":"layered"}],"innerGap":8,"outerGap":8,"ignoredProcessNames":["sample.exe"],"maximumClients":16,"enableDefaultShortcuts":true,"touchpad":{"enabled":true,"completeThreeFingerSwipesOnFirstLift":false}}""";
+            """{"workspaces":[{"name":"Code","layout":"layered"}],"innerGap":8,"outerGap":8,"ignoredProcessNames":["sample.exe"],"maximumClients":16,"enableDefaultShortcuts":true,"monitorOrder":["DISPLAY2"],"touchpad":{"enabled":true,"completeThreeFingerSwipesOnFirstLift":false}}""";
 
         var settings = GeneralSettingsPresentation.Read(original);
-        Assert.Equal(new GeneralSettings(8, 8, true, true), settings);
-        var updated = GeneralSettingsPresentation.Update(original, 24, 12, false, false);
+        Assert.Equal(8, settings.InnerGap);
+        Assert.Equal(8, settings.OuterGap);
+        Assert.True(settings.EnableDefaultShortcuts);
+        Assert.True(settings.TouchpadEnabled);
+        Assert.Equal(["DISPLAY2"], settings.MonitorOrder);
+        var updated = GeneralSettingsPresentation.Update(original, 24, 12, false, false, ["DISPLAY3", "DISPLAY1"]);
         using var document = JsonDocument.Parse(updated);
         var root = document.RootElement;
         Assert.Equal(24, root.GetProperty("innerGap").GetInt32());
@@ -32,13 +36,15 @@ public sealed class SpatialSwitcherTests
         Assert.False(root.GetProperty("enableDefaultShortcuts").GetBoolean());
         Assert.False(root.GetProperty("touchpad").GetProperty("enabled").GetBoolean());
         Assert.False(root.GetProperty("touchpad").GetProperty("completeThreeFingerSwipesOnFirstLift").GetBoolean());
+        Assert.Equal(new[] { "DISPLAY3", "DISPLAY1" }, root.GetProperty("monitorOrder").EnumerateArray()
+            .Select(monitor => monitor.GetString()).ToArray());
         Assert.Equal("Code", root.GetProperty("workspaces")[0].GetProperty("name").GetString());
         Assert.Equal("sample.exe", root.GetProperty("ignoredProcessNames")[0].GetString());
         Assert.Equal(16, root.GetProperty("maximumClients").GetInt32());
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            GeneralSettingsPresentation.Update(original, 257, 12, false, false));
+            GeneralSettingsPresentation.Update(original, 257, 12, false, false, ["DISPLAY2"]));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            GeneralSettingsPresentation.Update(original, 24, -1, false, false));
+            GeneralSettingsPresentation.Update(original, 24, -1, false, false, ["DISPLAY2"]));
     }
 
     [Fact]

@@ -835,12 +835,25 @@ public sealed class ManagerEngine
             command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToMonitor))
             return Error("invalid_argument", "Monitor ID is only supported by activateWorkspace and moveToMonitor.");
         if (command.MonitorNumber is { } monitorNumber &&
-            (command.Kind != CommandKind.FocusMonitor || monitorNumber is < 1 or > 10))
-            return Error("invalid_argument", "Monitor number is only valid from 1 through 10 on focusMonitor.");
+            (command.Kind is not (CommandKind.FocusMonitor or CommandKind.MoveToMonitor) ||
+             monitorNumber is < 1 or > 10))
+            return Error("invalid_argument", "Monitor number is only valid from 1 through 10 on monitor commands.");
         if (command.Kind == CommandKind.FocusMonitor && command.MonitorNumber is null)
             return Error("invalid_argument", "focusMonitor requires a monitor number.");
-        if (command.Kind != CommandKind.FocusMonitor && command.MonitorNumber is not null)
-            return Error("invalid_argument", "Monitor number is only supported by focusMonitor.");
+        if (command.Kind is not (CommandKind.FocusMonitor or CommandKind.MoveToMonitor) &&
+            command.MonitorNumber is not null)
+            return Error("invalid_argument", "Monitor number is only supported by monitor commands.");
+        if (command.Kind == CommandKind.MoveToMonitor &&
+            (command.MonitorId is null && command.MonitorNumber is null ||
+             command.MonitorId is not null && command.MonitorNumber is not null))
+            return Error("invalid_argument", "moveToMonitor requires exactly one monitor ID or number.");
+        if (command.Kind == CommandKind.MoveToMonitor && command.MonitorNumber is { } targetMonitorNumber)
+        {
+            var targetMonitor = ResolveMonitorNumber(Current!.Desktop, targetMonitorNumber);
+            if (targetMonitor is null) return Error("not_found", "Numbered monitor is not connected.");
+            command = command with { MonitorId = targetMonitor.Id, MonitorNumber = null };
+        }
+
         if (command.Kind == CommandKind.FocusMonitor &&
             (command.WindowId is not null || command.Direction is not null || command.Amount is not null ||
              command.Orientation is not null || command.Mode is not null || command.Paused is not null ||

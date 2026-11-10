@@ -32,14 +32,15 @@ internal sealed class SwitcherWindow : Window
     private readonly TextBlock status = new();
     private readonly TextBlock shortcutStatus = new();
     private readonly ComboBox monitorTarget = new();
-    private readonly WorkspaceDetailsControl workspaceDetails;
     private readonly CurrentWorkspaceWindow currentWorkspaceWindow;
     private readonly CarouselWindow carouselWindow;
     private readonly CarouselScrollAccumulator scrollAccumulator;
     private GeneralSettingsWindow? settingsWindow;
+    private WorkspaceSettingsWindow? workspaceSettingsWindow;
     private TouchpadInputSource? touchpadInput;
     private Task? connectionRetry;
     private Button activateButton = null!;
+    private Button workspaceSettingsButton = null!;
     private Button reconnectButton = null!;
     private readonly Dictionary<Guid, Button> workspaceTiles = [];
     private SwitcherKeyboardHook? keyboardHook;
@@ -65,8 +66,7 @@ internal sealed class SwitcherWindow : Window
         this.demoMode = demoMode;
         this.pipeName = pipeName;
         this.trayStatusChanged = trayStatusChanged;
-        workspaceDetails = new WorkspaceDetailsControl(ExecuteWorkspaceLayoutAsync);
-        currentWorkspaceWindow = new CurrentWorkspaceWindow(FocusWindowAsync, ExecuteWorkspaceLayoutAsync);
+        currentWorkspaceWindow = new CurrentWorkspaceWindow(FocusWindowAsync, ShowWorkspaceSettingsWindow);
         carouselWindow = new CarouselWindow(QueryPreviewTargetsAsync, FocusWindowAsync);
         scrollAccumulator = new CarouselScrollAccumulator(action => Dispatcher.UIThread.Post(action), delta =>
         {
@@ -150,14 +150,28 @@ internal sealed class SwitcherWindow : Window
         if (settingsWindow is null)
         {
             settingsWindow = new GeneralSettingsWindow(application, session, demoMode, themeChanged);
+            settingsWindow.UpdateSnapshot(snapshot);
             settingsWindow.Closed += (_, _) => settingsWindow = null;
             settingsWindow.Show();
             return;
         }
 
         settingsWindow.UpdateSession(session);
+        settingsWindow.UpdateSnapshot(snapshot);
         if (!settingsWindow.IsVisible) settingsWindow.Show();
         settingsWindow.Activate();
+    }
+
+    private void ShowWorkspaceSettingsWindow(Guid? workspaceId)
+    {
+        if (workspaceSettingsWindow is null)
+        {
+            workspaceSettingsWindow = new WorkspaceSettingsWindow(ExecuteWorkspaceLayoutAsync);
+            workspaceSettingsWindow.Closed += (_, _) => workspaceSettingsWindow = null;
+        }
+
+        var workspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == workspaceId);
+        workspaceSettingsWindow.ShowForWorkspace(workspace, connected && !demoMode && !commandBusy);
     }
 
     public async Task ShowCarouselExperimentAsync()
@@ -179,6 +193,8 @@ internal sealed class SwitcherWindow : Window
         allowClose = true;
         settingsWindow?.Close();
         settingsWindow = null;
+        workspaceSettingsWindow?.Close();
+        workspaceSettingsWindow = null;
         keyboardHook?.Dispose();
         keyboardHook = null;
         currentWorkspaceWindow.PrepareForShutdown();
@@ -311,7 +327,9 @@ internal sealed class SwitcherWindow : Window
         selectedDetails.TextWrapping = TextWrapping.Wrap;
         var selection = new StackPanel { Spacing = 7 };
         selection.Children.Add(selectedDetails);
-        selection.Children.Add(workspaceDetails);
+        workspaceSettingsButton = SwitcherTheme.Action("Workflow settings");
+        workspaceSettingsButton.Click += (_, _) => ShowWorkspaceSettingsWindow(selectedWorkspaceId);
+        selection.Children.Add(workspaceSettingsButton);
         preview.Children.Add(selection);
         var destination = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
         destination.Children.Add(SwitcherTheme.Caption("Activate on monitor"));
@@ -509,6 +527,8 @@ internal sealed class SwitcherWindow : Window
             .FirstOrDefault(choice => choice.Id == selectedMonitor?.Id);
         popupContext.SelectMonitor(selectedMonitor?.Id ?? context.MonitorId);
         currentWorkspaceWindow.UpdateSnapshot(next, popupContext.WorkspaceId, popupContext.MonitorId, connected);
+        settingsWindow?.UpdateSnapshot(next);
+        workspaceSettingsWindow?.UpdateSnapshot(next, connected && !demoMode && !commandBusy);
         if (carouselWindow.IsVisible) _ = carouselWindow.UpdateSnapshotAsync(next, connected);
         RenderMap();
         UpdateSelectedDetails();
@@ -655,7 +675,6 @@ internal sealed class SwitcherWindow : Window
     private void UpdateSelectedDetails()
     {
         var workspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == selectedWorkspaceId);
-        workspaceDetails.UpdateWorkspace(workspace, connected && !demoMode && !commandBusy);
         if (workspace is null)
         {
             selectedDetails.Text = "Select a workspace";
@@ -689,8 +708,7 @@ internal sealed class SwitcherWindow : Window
 
     private void UpdateActions()
     {
-        workspaceDetails.SetAvailable(connected && !demoMode && !commandBusy);
-        currentWorkspaceWindow.SetWorkspaceCommandsAvailable(connected && !demoMode && !commandBusy);
+        workspaceSettingsWindow?.SetAvailable(connected && !demoMode && !commandBusy);
         var workspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == selectedWorkspaceId);
         var capturedWorkspace =
             snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == popupContext.WorkspaceId);
@@ -704,6 +722,7 @@ internal sealed class SwitcherWindow : Window
                        CurrentWindowCandidates().Any(window => window.Id == selectedWindow.Id);
         activateButton.Content = windowSelectionMode ? "Focus selected window" : "Activate workspace";
         activateButton.IsEnabled = windowSelectionMode ? canFocus : canActivate;
+        workspaceSettingsButton.IsEnabled = workspace is not null;
         monitorTarget.IsEnabled = !windowSelectionMode && !commandBusy && snapshot?.Desktop.Monitors.Count > 0;
         reconnectButton.IsEnabled = !demoMode && !connecting && !connected && !commandBusy;
         if (demoMode) status.Text = lastMessage ?? "DEMO · sample state only · activation disabled";
@@ -722,7 +741,7 @@ internal sealed class SwitcherWindow : Window
 
     private void OnKeyDown(object? sender, KeyEventArgs args)
     {
-        if (!WorkspaceDetailsControl.ShouldHandlePopupKey(workspaceDetails.HasKeyboardFocus, args.Key)) return;
+        if (!WorkspaceDetailsControl.ShouldHandlePopupKey(false, args.Key)) return;
 
         if (args.Key == Key.Escape)
         {

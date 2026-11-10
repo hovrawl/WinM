@@ -12,8 +12,11 @@ public sealed class SpatialCommandTests
         await using var fake = new FakeWindowPlatform();
         var firstMonitor = fake.Desktop.Monitors.Single();
         var secondMonitor = Monitor("other", new(0, 0, 1000, 900));
-        var firstWindow = Window("first", firstMonitor.Id, new(-900, 20, 200, 200));
-        var secondWindow = Window("second", secondMonitor.Id, new(300, 250, 200, 200));
+        var firstWindow = Window("first", firstMonitor.Id, new(-900, 20, 200, 200)) with { Mode = WindowMode.Tiling };
+        var secondWindow = Window("second", secondMonitor.Id, new(300, 250, 200, 200)) with
+        {
+            Mode = WindowMode.Tiling
+        };
         fake.Desktop = new([firstMonitor, secondMonitor], [firstWindow, secondWindow], firstWindow.Id);
         var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One"), new("Two")],
             monitorDeviceOrder: ["offline-display", "other", "display"]);
@@ -31,6 +34,48 @@ public sealed class SpatialCommandTests
             Assert.Equal(secondWindow.Id, engine.Current!.Desktop.FocusedWindowId);
             Assert.Equal("not_found", (await engine.ExecuteAsync(
                 new(CommandKind.FocusMonitor, MonitorNumber: 10), timeout.Token)).ErrorCode);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
+    public async Task MoveToMonitorNumberUsesConfiguredDeviceOrderAndActiveWorkspace()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var firstMonitor = fake.Desktop.Monitors.Single();
+        var secondMonitor = Monitor("other", new(0, 0, 1000, 900));
+        var source = Window("source", firstMonitor.Id, new(-900, 20, 200, 200));
+        var target = Window("target", secondMonitor.Id, new(300, 250, 200, 200));
+        fake.Desktop = new([firstMonitor, secondMonitor], [source, target], source.Id);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("One"), new("Two")],
+            monitorDeviceOrder: ["offline-display", "other", "display"]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var targetWorkspace =
+                engine.Current!.Workspaces!.Single(workspace => workspace.WindowIds.Contains(target.Id));
+
+            Assert.Equal("invalid_argument", (await engine.ExecuteAsync(
+                new(CommandKind.MoveToMonitor, WindowId: source.Id, MonitorNumber: 11), timeout.Token)).ErrorCode);
+            Assert.Equal("invalid_argument", (await engine.ExecuteAsync(
+                new(CommandKind.MoveToMonitor, WindowId: source.Id, MonitorId: secondMonitor.Id, MonitorNumber: 2),
+                timeout.Token)).ErrorCode);
+            Assert.Equal("not_found", (await engine.ExecuteAsync(
+                new(CommandKind.MoveToMonitor, WindowId: source.Id, MonitorNumber: 1), timeout.Token)).ErrorCode);
+            var result = await engine.ExecuteAsync(
+                new(CommandKind.MoveToMonitor, WindowId: source.Id, MonitorNumber: 2), timeout.Token);
+
+            Assert.True(result.Success);
+            Assert.Contains(source.Id, engine.Current!.Workspaces!.Single(workspace =>
+                workspace.Id == targetWorkspace.Id).WindowIds);
+            Assert.Equal(new PixelRect(400, 350, 200, 200),
+                engine.Current.Desktop.Windows.Single(window => window.Id == source.Id).Bounds);
         }
         finally
         {
@@ -112,7 +157,8 @@ public sealed class SpatialCommandTests
             await engine.Ready.WaitAsync(timeout.Token);
             var workspace = engine.Current!.Workspaces!.Single();
 
-            var result = await engine.ExecuteAsync(new(CommandKind.MoveSpatial, Direction: Direction.Right), timeout.Token);
+            var result =
+                await engine.ExecuteAsync(new(CommandKind.MoveSpatial, Direction: Direction.Right), timeout.Token);
 
             Assert.True(result.Success);
             var moved = engine.Current!.Desktop.Windows.Single(window => window.Id == origin.Id);
@@ -146,17 +192,21 @@ public sealed class SpatialCommandTests
         try
         {
             await engine.Ready.WaitAsync(timeout.Token);
-            var originalWorkspace = engine.Current!.Workspaces!.Single(workspace => workspace.WindowIds.Contains(source.Id));
-            var targetWorkspace = engine.Current!.Workspaces!.Single(workspace => workspace.WindowIds.Contains(destination.Id));
+            var originalWorkspace =
+                engine.Current!.Workspaces!.Single(workspace => workspace.WindowIds.Contains(source.Id));
+            var targetWorkspace =
+                engine.Current!.Workspaces!.Single(workspace => workspace.WindowIds.Contains(destination.Id));
 
-            var result = await engine.ExecuteAsync(new(CommandKind.MoveSpatial, Direction: Direction.Right), timeout.Token);
+            var result =
+                await engine.ExecuteAsync(new(CommandKind.MoveSpatial, Direction: Direction.Right), timeout.Token);
 
             Assert.True(result.Success);
             Assert.DoesNotContain(source.Id, engine.Current!.Workspaces!.Single(workspace =>
                 workspace.Id == originalWorkspace.Id).WindowIds);
             Assert.Contains(source.Id, engine.Current!.Workspaces!.Single(workspace =>
                 workspace.Id == targetWorkspace.Id).WindowIds);
-            Assert.Equal(WindowMode.Floating, engine.Current.Desktop.Windows.Single(window => window.Id == source.Id).Mode);
+            Assert.Equal(WindowMode.Floating,
+                engine.Current.Desktop.Windows.Single(window => window.Id == source.Id).Mode);
             Assert.Equal(new PixelRect(400, 350, 200, 200),
                 engine.Current.Desktop.Windows.Single(window => window.Id == source.Id).Bounds);
         }
@@ -196,7 +246,8 @@ public sealed class SpatialCommandTests
 
             Assert.False(failed.Success);
             Assert.Equal("access_denied", failed.ErrorCode);
-            Assert.Equal(WindowMode.Tiling, engine.Current!.Desktop.Windows.Single(window => window.Id == source.Id).Mode);
+            Assert.Equal(WindowMode.Tiling,
+                engine.Current!.Desktop.Windows.Single(window => window.Id == source.Id).Mode);
             Assert.Contains(source.Id, Assert.Single(engine.Current.Workspaces!).WindowIds);
             Assert.Equal(monitor.Id, source.MonitorId);
         }
@@ -223,16 +274,19 @@ public sealed class SpatialCommandTests
         try
         {
             await engine.Ready.WaitAsync(timeout.Token);
-            var originalWorkspace = engine.Current!.Workspaces!.Single(workspace => workspace.WindowIds.Contains(source.Id));
+            var originalWorkspace =
+                engine.Current!.Workspaces!.Single(workspace => workspace.WindowIds.Contains(source.Id));
             fake.FailActions = true;
 
-            var result = await engine.ExecuteAsync(new(CommandKind.MoveSpatial, Direction: Direction.Right), timeout.Token);
+            var result =
+                await engine.ExecuteAsync(new(CommandKind.MoveSpatial, Direction: Direction.Right), timeout.Token);
 
             Assert.False(result.Success);
             Assert.Equal("access_denied", result.ErrorCode);
             Assert.Contains(source.Id, engine.Current!.Workspaces!.Single(workspace =>
                 workspace.Id == originalWorkspace.Id).WindowIds);
-            Assert.Equal(WindowMode.Tiling, engine.Current.Desktop.Windows.Single(window => window.Id == source.Id).Mode);
+            Assert.Equal(WindowMode.Tiling,
+                engine.Current.Desktop.Windows.Single(window => window.Id == source.Id).Mode);
         }
         finally
         {
