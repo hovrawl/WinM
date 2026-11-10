@@ -36,6 +36,7 @@ internal sealed class SwitcherWindow : Window
     private readonly CurrentWorkspaceWindow currentWorkspaceWindow;
     private readonly CarouselWindow carouselWindow;
     private readonly CarouselScrollAccumulator scrollAccumulator;
+    private GeneralSettingsWindow? settingsWindow;
     private TouchpadInputSource? touchpadInput;
     private Task? connectionRetry;
     private Button activateButton = null!;
@@ -71,7 +72,7 @@ internal sealed class SwitcherWindow : Window
         {
             if (carouselWindow.IsVisible) carouselWindow.ScrollBy(delta);
         });
-        Title = "Spatial switcher — One desk";
+        Title = "HomeDeskManager — Desk switcher";
         Width = 716;
         Height = 592;
         MinWidth = 560;
@@ -118,7 +119,7 @@ internal sealed class SwitcherWindow : Window
         }
         else
         {
-            shortcutStatus.Text = "Waiting for a manager snapshot before enabling shortcuts";
+            shortcutStatus.Text = "Waiting for a HomeDeskSpace snapshot before enabling shortcuts";
             connectionRetry = RunConnectionRetryAsync();
         }
 
@@ -144,6 +145,21 @@ internal sealed class SwitcherWindow : Window
         ShowCurrentWorkspaceSwitcher(false);
     }
 
+    public void ShowSettingsWindow(Application application, Action<SwitcherThemeMode> themeChanged)
+    {
+        if (settingsWindow is null)
+        {
+            settingsWindow = new GeneralSettingsWindow(application, session, demoMode, themeChanged);
+            settingsWindow.Closed += (_, _) => settingsWindow = null;
+            settingsWindow.Show();
+            return;
+        }
+
+        settingsWindow.UpdateSession(session);
+        if (!settingsWindow.IsVisible) settingsWindow.Show();
+        settingsWindow.Activate();
+    }
+
     public async Task ShowCarouselExperimentAsync()
     {
         if (demoMode || !connected || snapshot is null)
@@ -161,6 +177,8 @@ internal sealed class SwitcherWindow : Window
     public async Task PrepareForShutdownAsync()
     {
         allowClose = true;
+        settingsWindow?.Close();
+        settingsWindow = null;
         keyboardHook?.Dispose();
         keyboardHook = null;
         currentWorkspaceWindow.PrepareForShutdown();
@@ -233,7 +251,7 @@ internal sealed class SwitcherWindow : Window
             ColumnDefinitions = new ColumnDefinitions
                 { new(new GridLength(1, GridUnitType.Star)), new(GridLength.Auto) }
         };
-        header.Children.Add(SwitcherTheme.Heading("Spatial switcher", 19));
+        header.Children.Add(SwitcherTheme.Heading("HomeDeskManager", 19));
         var keys = new StackPanel
             { Orientation = Orientation.Horizontal, Spacing = 5, VerticalAlignment = VerticalAlignment.Center };
         keys.Children.Add(KeyChip("Alt+Tab"));
@@ -399,16 +417,18 @@ internal sealed class SwitcherWindow : Window
     {
         if (connected || connecting || demoMode) return;
         connecting = true;
-        status.Text = "Connecting to the local manager…";
+        status.Text = "Connecting to HomeDeskSpace…";
         UpdateActions();
         ManagerSession? next = null;
         try
         {
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
             deadline.CancelAfter(TimeSpan.FromSeconds(10));
-            next = await ManagerSession.ConnectAsync(pipeName, deadline.Token, eventQueueCapacity: 32);
+            next = await ManagerSession.ConnectAsync(pipeName, deadline.Token, eventQueueCapacity: 32,
+                registerManagerPresence: true);
             var connectedSession = next;
             session = connectedSession;
+            settingsWindow?.UpdateSession(connectedSession);
             next = null;
             connected = true;
             connectedSession.Start((nextSnapshot, eventType) => Dispatcher.UIThread.Post(() =>
@@ -441,6 +461,7 @@ internal sealed class SwitcherWindow : Window
     {
         if (!ReferenceEquals(session, source)) return;
         session = null;
+        settingsWindow?.UpdateSession(null);
         connected = false;
         carouselWindow.Dismiss();
         currentWorkspaceWindow.Hide();
@@ -687,8 +708,8 @@ internal sealed class SwitcherWindow : Window
         reconnectButton.IsEnabled = !demoMode && !connecting && !connected && !commandBusy;
         if (demoMode) status.Text = lastMessage ?? "DEMO · sample state only · activation disabled";
         var connection = demoMode ? "Demo mode" :
-            connected ? "Manager connected" :
-            connecting ? "Connecting to manager" : "Manager disconnected";
+            connected ? "HomeDeskSpace connected" :
+            connecting ? "Connecting to HomeDeskSpace" : "HomeDeskSpace disconnected";
         var shortcuts = demoMode
             ? "Alt+Tab / Win+Tab / Win+Space disabled in demo"
             : keyboardHook is not null

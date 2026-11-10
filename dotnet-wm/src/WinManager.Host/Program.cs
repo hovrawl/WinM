@@ -13,7 +13,7 @@ var dataDirectory = args is ["--tray-smoke"] or ["--recovery-smoke"] or ["--reco
 try
 {
     if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063))
-        throw new PlatformNotSupportedException("WinManager requires Windows 10 build 15063 or newer.");
+        throw new PlatformNotSupportedException("HomeDeskSpace requires Windows 10 build 15063 or newer.");
     if (args.Length > 0 && args[0] == "--recovery")
     {
         if (args.Length > 2 && args[1] == "--smoke-directory")
@@ -25,6 +25,7 @@ try
     {
         var smokeBuilder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = [] });
         smokeBuilder.Logging.ClearProviders();
+        smokeBuilder.Services.AddSingleton<HostTrayVisibility>();
         smokeBuilder.Services.AddSingleton<IHostTray, WindowsHostTray>();
         smokeBuilder.Services.AddHostedService<HostTrayService>();
         using var smokeHost = smokeBuilder.Build();
@@ -60,7 +61,7 @@ try
         if (args[index] == "--help")
         {
             Console.WriteLine(
-                "WinManager.Host [--config PATH] [--data-dir PATH] [--pipe NAME] [--recovery-executable PATH]");
+                "HomeDeskSpace [--config PATH] [--data-dir PATH] [--pipe NAME] [--recovery-executable PATH]");
             return 0;
         }
 
@@ -88,6 +89,7 @@ try
     builder.Services.AddSingleton(configuration);
     builder.Services.AddSingleton(configurationStore);
     builder.Services.AddSingleton<HostRuntimeState>();
+    builder.Services.AddSingleton<HostTrayVisibility>();
     builder.Services.AddSingleton(configuration.Touchpad);
     builder.Services.AddSingleton<TouchpadInputSource>();
     builder.Services.AddSingleton<IHostTray, WindowsHostTray>();
@@ -97,7 +99,8 @@ try
         configuration.MonitorOrder));
     builder.Services.AddSingleton(services => new PipeServer(services.GetRequiredService<ManagerEngine>(), pipeName,
         configuration.MaximumClients, configuration.OutputCapacity, configurationStore,
-        services.GetRequiredService<IWindowPlatform>() as IPreviewTargetResolver));
+        services.GetRequiredService<IWindowPlatform>() as IPreviewTargetResolver,
+        services.GetRequiredService<HostTrayVisibility>()));
     builder.Services.AddHostedService<HostTrayService>();
     builder.Services.AddHostedService<ObservationService>();
     builder.Services.AddHostedService<PipeService>();

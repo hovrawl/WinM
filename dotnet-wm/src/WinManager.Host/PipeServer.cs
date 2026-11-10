@@ -16,6 +16,7 @@ public sealed class PipeServer : IAsyncDisposable
     private readonly int outputCapacity;
     private readonly ConfigurationStore? configurationStore;
     private readonly IPreviewTargetResolver? previewResolver;
+    private readonly HostTrayVisibility? trayVisibility;
     private readonly CancellationTokenSource shutdown = new();
     private readonly ConcurrentDictionary<long, Task> clients = new();
     private Task? run;
@@ -24,6 +25,13 @@ public sealed class PipeServer : IAsyncDisposable
 
     public PipeServer(ManagerEngine manager, string? pipeName = null, int maximumClients = 16, int outputCapacity = 128,
         ConfigurationStore? configurationStore = null, IPreviewTargetResolver? previewResolver = null)
+        : this(manager, pipeName, maximumClients, outputCapacity, configurationStore, previewResolver, null)
+    {
+    }
+
+    internal PipeServer(ManagerEngine manager, string? pipeName, int maximumClients, int outputCapacity,
+        ConfigurationStore? configurationStore, IPreviewTargetResolver? previewResolver,
+        HostTrayVisibility? trayVisibility)
     {
         ArgumentNullException.ThrowIfNull(manager);
         ArgumentOutOfRangeException.ThrowIfLessThan(maximumClients, 1);
@@ -36,6 +44,7 @@ public sealed class PipeServer : IAsyncDisposable
         this.outputCapacity = outputCapacity;
         this.configurationStore = configurationStore;
         this.previewResolver = previewResolver;
+        this.trayVisibility = trayVisibility;
     }
 
     public Task RunAsync(CancellationToken cancellationToken)
@@ -62,8 +71,8 @@ public sealed class PipeServer : IAsyncDisposable
                     pipe = LocalPipeServer.Create(pipeName, maximumClients, 4096);
                     await pipe.WaitForConnectionAsync(stop.Token);
                     var id = ++nextClient;
-                    var connection = new Connection(manager, configurationStore, previewResolver, pipe, outputCapacity,
-                        stop.Token);
+                    var connection = new Connection(manager, configurationStore, previewResolver, trayVisibility, pipe,
+                        outputCapacity, stop.Token);
                     pipe = null;
                     clients[id] = ServeAsync(connection, slots);
                     foreach (var finished in clients.Where(entry => entry.Value.IsCompletedSuccessfully))
@@ -112,19 +121,23 @@ public sealed class PipeServer : IAsyncDisposable
         private readonly ManagerEngine manager;
         private readonly ConfigurationStore? configurationStore;
         private readonly IPreviewTargetResolver? previewResolver;
+        private readonly HostTrayVisibility? trayVisibility;
         private readonly NamedPipeServerStream pipe;
         private readonly Channel<object> output;
         private readonly CancellationTokenSource stop;
         private readonly CancellationTokenSource writerAbort = new();
         private Guid? subscriptionId;
+        private IDisposable? managerPresence;
 
         internal Connection(ManagerEngine manager, ConfigurationStore? configurationStore,
-            IPreviewTargetResolver? previewResolver, NamedPipeServerStream pipe, int capacity,
+            IPreviewTargetResolver? previewResolver, HostTrayVisibility? trayVisibility, NamedPipeServerStream pipe,
+            int capacity,
             CancellationToken cancellationToken)
         {
             this.manager = manager;
             this.configurationStore = configurationStore;
             this.previewResolver = previewResolver;
+            this.trayVisibility = trayVisibility;
             this.pipe = pipe;
             stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             output = Channel.CreateBounded<object>(new BoundedChannelOptions(capacity)
@@ -195,18 +208,24 @@ public sealed class PipeServer : IAsyncDisposable
                 finally
                 {
                     pipe.Dispose();
-                    if (subscriptionId is { } id)
+                    try
                     {
-                        CommandResult result;
-                        do
+                        if (subscriptionId is { } id)
                         {
-                            result = await manager.UnsubscribeAsync(id, CancellationToken.None);
-                            if (result.ErrorCode == "busy") await Task.Delay(10);
-                        } while (result.ErrorCode == "busy");
+                            CommandResult result;
+                            do
+                            {
+                                result = await manager.UnsubscribeAsync(id, CancellationToken.None);
+                                if (result.ErrorCode == "busy") await Task.Delay(10);
+                            } while (result.ErrorCode == "busy");
+                        }
                     }
-
-                    writerAbort.Dispose();
-                    stop.Dispose();
+                    finally
+                    {
+                        managerPresence?.Dispose();
+                        writerAbort.Dispose();
+                        stop.Dispose();
+                    }
                 }
             }
         }
@@ -254,6 +273,17 @@ public sealed class PipeServer : IAsyncDisposable
                     throw new ArgumentException("A request requires kind, requestId, operation and payload.");
                 switch (operation.GetString())
                 {
+                    case "manager.presence":
+                        CheckObject(payload);
+                        if (trayVisibility is null)
+                        {
+                            Error(requestId, "unavailable", "Manager tray presence is unavailable.");
+                            break;
+                        }
+
+                        managerPresence ??= trayVisibility.RegisterManager();
+                        Respond(requestId, true, null, null, manager.Current?.StateRevision ?? 0);
+                        break;
                     case "query.snapshot":
                         if (payload.ValueKind != JsonValueKind.Null) CheckObject(payload);
                         var snapshot = manager.Current;

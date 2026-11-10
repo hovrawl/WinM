@@ -567,7 +567,7 @@ public sealed class HostConfigurationTests
     {
         var lifetime = new TestHostApplicationLifetime();
         var tray = new FakeHostTray();
-        using var service = new HostTrayService(lifetime, tray);
+        using var service = new HostTrayService(lifetime, tray, new HostTrayVisibility());
 
         await service.StartAsync(CancellationToken.None);
         await tray.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -581,16 +581,16 @@ public sealed class HostConfigurationTests
     [Fact]
     public void HostRecoveryLaunchUsesSelfExecutableOnlyForAotDefault()
     {
-        var aot = HostRecoveryLaunch.Resolve(null, @"C:\Apps\WinManager.Host.exe", useSelfExecutable: true);
-        Assert.Equal(@"C:\Apps\WinManager.Host.exe", aot.Executable);
+        var aot = HostRecoveryLaunch.Resolve(null, @"C:\Apps\HomeDeskSpace.exe", useSelfExecutable: true);
+        Assert.Equal(@"C:\Apps\HomeDeskSpace.exe", aot.Executable);
         Assert.Equal(["--recovery"], aot.ArgumentPrefix);
 
-        var release = HostRecoveryLaunch.Resolve(null, @"C:\Apps\WinManager.Host.exe", useSelfExecutable: false);
+        var release = HostRecoveryLaunch.Resolve(null, @"C:\Apps\HomeDeskSpace.exe", useSelfExecutable: false);
         Assert.Equal(Path.Combine(AppContext.BaseDirectory, "WinManager.Recovery.exe"), release.Executable);
         Assert.Empty(release.ArgumentPrefix);
 
         var configured = HostRecoveryLaunch.Resolve(@"D:\Recovery\WinManager.Recovery.exe",
-            @"C:\Apps\WinManager.Host.exe", useSelfExecutable: true);
+            @"C:\Apps\HomeDeskSpace.exe", useSelfExecutable: true);
         Assert.Equal(@"D:\Recovery\WinManager.Recovery.exe", configured.Executable);
         Assert.Empty(configured.ArgumentPrefix);
     }
@@ -627,7 +627,8 @@ public sealed class HostConfigurationTests
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool StopObserved { get; private set; }
 
-        public async Task RunAsync(Action stopApplication, CancellationToken stoppingToken)
+        public async Task RunAsync(Action stopApplication, HostTrayVisibility visibility,
+            CancellationToken stoppingToken)
         {
             requestShutdown = stopApplication;
             Started.TrySetResult();

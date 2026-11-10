@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -15,6 +16,31 @@ namespace WinManager.Ipc.Tests;
 
 public sealed class SpatialSwitcherTests
 {
+    [Fact]
+    public void GeneralSettingsPreserveOtherConfigurationFieldsAndEnforceGapLimits()
+    {
+        const string original =
+            """{"workspaces":[{"name":"Code","layout":"layered"}],"innerGap":8,"outerGap":8,"ignoredProcessNames":["sample.exe"],"maximumClients":16,"enableDefaultShortcuts":true,"touchpad":{"enabled":true,"completeThreeFingerSwipesOnFirstLift":false}}""";
+
+        var settings = GeneralSettingsPresentation.Read(original);
+        Assert.Equal(new GeneralSettings(8, 8, true, true), settings);
+        var updated = GeneralSettingsPresentation.Update(original, 24, 12, false, false);
+        using var document = JsonDocument.Parse(updated);
+        var root = document.RootElement;
+        Assert.Equal(24, root.GetProperty("innerGap").GetInt32());
+        Assert.Equal(12, root.GetProperty("outerGap").GetInt32());
+        Assert.False(root.GetProperty("enableDefaultShortcuts").GetBoolean());
+        Assert.False(root.GetProperty("touchpad").GetProperty("enabled").GetBoolean());
+        Assert.False(root.GetProperty("touchpad").GetProperty("completeThreeFingerSwipesOnFirstLift").GetBoolean());
+        Assert.Equal("Code", root.GetProperty("workspaces")[0].GetProperty("name").GetString());
+        Assert.Equal("sample.exe", root.GetProperty("ignoredProcessNames")[0].GetString());
+        Assert.Equal(16, root.GetProperty("maximumClients").GetInt32());
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            GeneralSettingsPresentation.Update(original, 257, 12, false, false));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            GeneralSettingsPresentation.Update(original, 24, -1, false, false));
+    }
+
     [Fact]
     public void WorkspaceLayoutCommandTargetsTheSelectedWorkspaceAndCarriesLayeredOptions()
     {

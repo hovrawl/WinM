@@ -7,6 +7,27 @@ namespace WinManager.Ipc.Tests;
 public sealed class ManagerSessionTests
 {
     [Fact]
+    public async Task ManagerPresenceIsOptInAndOwnedByTheSessionConnection()
+    {
+        await using var host = await PipeHost.StartAsync();
+        await using var ordinary = await ManagerSession.ConnectAsync(host.Name, host.Token);
+        Assert.True(host.TrayVisibility.IsVisible);
+
+        await using var firstManager =
+            await ManagerSession.ConnectAsync(host.Name, host.Token, registerManagerPresence: true);
+        await using var secondManager =
+            await ManagerSession.ConnectAsync(host.Name, host.Token, registerManagerPresence: true);
+        Assert.False(host.TrayVisibility.IsVisible);
+
+        await firstManager.DisposeAsync();
+        Assert.False(host.TrayVisibility.IsVisible);
+        await secondManager.DisposeAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!host.TrayVisibility.IsVisible) await Task.Delay(10, timeout.Token);
+        Assert.True(host.TrayVisibility.IsVisible);
+    }
+
+    [Fact]
     public async Task SharedSessionReceivesSnapshotAndPublishesPositionUpdates()
     {
         await using var host = await PipeHost.StartAsync(workspaceDefinitions: [new("One")]);
@@ -19,7 +40,8 @@ public sealed class ManagerSessionTests
         session.Start((snapshot, eventType) =>
         {
             if (eventType == ManagerEventTypes.Snapshot) initial.TrySetResult(snapshot);
-            if (snapshot.Workspaces?.Any(candidate => candidate.Id == workspace.Id && candidate.Position == position) == true)
+            if (snapshot.Workspaces?.Any(candidate => candidate.Id == workspace.Id && candidate.Position == position) ==
+                true)
                 changed.TrySetResult(snapshot);
         }, _ => { }, host.Token);
 

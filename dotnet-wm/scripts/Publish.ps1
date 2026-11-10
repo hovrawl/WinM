@@ -81,7 +81,11 @@ foreach ($selectedApp in $selectedApps) {
     Invoke-Publish $project $destination ($Mode -eq 'NativeAot')
 
     if ($Mode -eq 'NativeAot') {
-        $executableName = [IO.Path]::GetFileNameWithoutExtension($project) + '.exe'
+        $executableName = switch ($selectedApp) {
+            'Host' { 'HomeDeskSpace.exe' }
+            'SpatialSwitcher' { 'HomeDeskManager.exe' }
+            default { [IO.Path]::GetFileNameWithoutExtension($project) + '.exe' }
+        }
         $executablePath = Join-Path $destination $executableName
         if (-not (Test-Path -LiteralPath $executablePath -PathType Leaf)) {
             throw "Single-file publish did not produce the expected executable: $executablePath"

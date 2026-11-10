@@ -11,28 +11,59 @@ namespace WinManager.Host;
 
 internal interface IHostTray
 {
-    Task RunAsync(Action requestShutdown, CancellationToken stoppingToken);
+    Task RunAsync(Action requestShutdown, HostTrayVisibility visibility, CancellationToken stoppingToken);
 }
 
-internal sealed class HostTrayService(IHostApplicationLifetime lifetime, IHostTray tray) : BackgroundService
+internal sealed class HostTrayVisibility
+{
+    private int managerCount;
+
+    public bool IsVisible => Volatile.Read(ref managerCount) == 0;
+
+    public event Action? VisibilityChanged;
+
+    public IDisposable RegisterManager()
+    {
+        if (Interlocked.Increment(ref managerCount) == 1) VisibilityChanged?.Invoke();
+        return new ManagerLease(this);
+    }
+
+    private void ReleaseManager()
+    {
+        if (Interlocked.Decrement(ref managerCount) == 0) VisibilityChanged?.Invoke();
+    }
+
+    private sealed class ManagerLease(HostTrayVisibility visibility) : IDisposable
+    {
+        private HostTrayVisibility? owner = visibility;
+
+        public void Dispose() => Interlocked.Exchange(ref owner, null)?.ReleaseManager();
+    }
+}
+
+internal sealed class HostTrayService(
+    IHostApplicationLifetime lifetime,
+    IHostTray tray,
+    HostTrayVisibility visibility) : BackgroundService
 {
     protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
-        tray.RunAsync(lifetime.StopApplication, stoppingToken);
+        tray.RunAsync(lifetime.StopApplication, visibility, stoppingToken);
 }
 
 [SupportedOSPlatform("windows10.0.15063")]
 internal sealed class WindowsHostTray : IHostTray
 {
-    public Task RunAsync(Action requestShutdown, CancellationToken stoppingToken)
+    public Task RunAsync(Action requestShutdown, HostTrayVisibility visibility, CancellationToken stoppingToken)
     {
         ArgumentNullException.ThrowIfNull(requestShutdown);
+        ArgumentNullException.ThrowIfNull(visibility);
         if (stoppingToken.IsCancellationRequested) return Task.CompletedTask;
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
             try
             {
-                using (var loop = new TrayLoop(requestShutdown)) loop.Run(stoppingToken);
+                using (var loop = new TrayLoop(requestShutdown, visibility)) loop.Run(stoppingToken);
                 completion.TrySetResult();
             }
             catch (Exception error)
@@ -42,7 +73,7 @@ internal sealed class WindowsHostTray : IHostTray
         })
         {
             IsBackground = true,
-            Name = "WinManager host tray"
+            Name = "HomeDeskSpace host tray"
         };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
@@ -53,9 +84,11 @@ internal sealed class WindowsHostTray : IHostTray
     {
         private const uint CallbackMessage = 0x8001;
         private const uint StopMessage = 0x8002;
+        private const uint VisibilityMessage = 0x8003;
         private const uint IconId = 1;
         private const int QuitCommand = 1;
         private readonly Action requestShutdown;
+        private readonly HostTrayVisibility visibility;
         private readonly WNDPROC windowProcedure;
         private readonly string className = "WinManager.Tray." + Guid.NewGuid().ToString("N");
         private readonly uint nativeThreadId = PInvoke.GetCurrentThreadId();
@@ -66,9 +99,10 @@ internal sealed class WindowsHostTray : IHostTray
         private bool iconAdded;
         private Exception? callbackFailure;
 
-        public TrayLoop(Action requestShutdown)
+        public TrayLoop(Action requestShutdown, HostTrayVisibility visibility)
         {
             this.requestShutdown = requestShutdown;
+            this.visibility = visibility;
             windowProcedure = WindowProcedure;
         }
 
@@ -92,11 +126,13 @@ internal sealed class WindowsHostTray : IHostTray
                 if (atom == 0) throw NativeError("RegisterClassEx");
                 // A message-only window would miss Explorer's TaskbarCreated broadcast.
                 window = PInvoke.CreateWindowEx(WINDOW_EX_STYLE.WS_EX_TOOLWINDOW, className,
-                    "WinManager host tray", WINDOW_STYLE.WS_POPUP, 0, 0, 0, 0,
+                    "HomeDeskSpace host tray", WINDOW_STYLE.WS_POPUP, 0, 0, 0, 0,
                     default, default, instance, null);
             }
+
             if (window == default) throw NativeError("CreateWindowEx");
-            AddIcon();
+            visibility.VisibilityChanged += RequestVisibilityRefresh;
+            UpdateIconVisibility();
             using var registration = stoppingToken.Register(() =>
             {
                 if (!PInvoke.PostMessage(window, StopMessage, default, default))
@@ -111,11 +147,13 @@ internal sealed class WindowsHostTray : IHostTray
                 PInvoke.DispatchMessage(message);
                 if (callbackFailure is { } error) throw error;
             }
+
             if (callbackFailure is { } failure) throw failure;
         }
 
         private void AddIcon()
         {
+            if (iconAdded) return;
             var data = new NOTIFYICONDATAW
             {
                 cbSize = (uint)Marshal.SizeOf<NOTIFYICONDATAW>(),
@@ -126,11 +164,35 @@ internal sealed class WindowsHostTray : IHostTray
                 uCallbackMessage = CallbackMessage,
                 hIcon = PInvoke.LoadIcon(default(HINSTANCE), PInvoke.IDI_APPLICATION)
             };
-            const string tooltip = "WinManager";
+            const string tooltip = "HomeDeskSpace";
             for (var index = 0; index < tooltip.Length; index++) data.szTip[index] = tooltip[index];
             if (data.hIcon == default || !PInvoke.Shell_NotifyIcon(NOTIFY_ICON_MESSAGE.NIM_ADD, in data))
-                throw new InvalidOperationException("Could not add the WinManager notification-area icon.");
+                throw new InvalidOperationException("Could not add the HomeDeskSpace notification-area icon.");
             iconAdded = true;
+        }
+
+        private void RemoveIcon()
+        {
+            if (!iconAdded || window == default) return;
+            var data = new NOTIFYICONDATAW
+            {
+                cbSize = (uint)Marshal.SizeOf<NOTIFYICONDATAW>(),
+                hWnd = window,
+                uID = IconId
+            };
+            PInvoke.Shell_NotifyIcon(NOTIFY_ICON_MESSAGE.NIM_DELETE, in data);
+            iconAdded = false;
+        }
+
+        private void RequestVisibilityRefresh()
+        {
+            if (window != default) PInvoke.PostMessage(window, VisibilityMessage, default, default);
+        }
+
+        private void UpdateIconVisibility()
+        {
+            if (visibility.IsVisible) AddIcon();
+            else RemoveIcon();
         }
 
         private LRESULT WindowProcedure(HWND handle, uint message, WPARAM wParam, LPARAM lParam)
@@ -143,11 +205,20 @@ internal sealed class WindowsHostTray : IHostTray
                     PInvoke.PostQuitMessage(0);
                     return default;
                 }
-                if (taskbarCreatedMessage != 0 && message == taskbarCreatedMessage)
+
+                if (message == VisibilityMessage)
                 {
-                    AddIcon();
+                    UpdateIconVisibility();
                     return default;
                 }
+
+                if (taskbarCreatedMessage != 0 && message == taskbarCreatedMessage)
+                {
+                    iconAdded = false;
+                    UpdateIconVisibility();
+                    return default;
+                }
+
                 if (message == CallbackMessage)
                 {
                     var notification = unchecked((uint)lParam.Value);
@@ -155,6 +226,7 @@ internal sealed class WindowsHostTray : IHostTray
                         ShowMenu();
                     return default;
                 }
+
                 return PInvoke.DefWindowProc(handle, message, wParam, lParam);
             }
             catch (Exception error)
@@ -169,7 +241,7 @@ internal sealed class WindowsHostTray : IHostTray
         {
             using var menu = PInvoke.CreatePopupMenu_SafeHandle();
             if (menu.IsInvalid) throw NativeError("CreatePopupMenu");
-            if (!PInvoke.AppendMenu(menu, MENU_ITEM_FLAGS.MF_STRING, QuitCommand, "Quit WinManager"))
+            if (!PInvoke.AppendMenu(menu, MENU_ITEM_FLAGS.MF_STRING, QuitCommand, "Quit HomeDeskSpace"))
                 throw NativeError("AppendMenu");
             if (!PInvoke.GetCursorPos(out var point)) throw NativeError("GetCursorPos");
             PInvoke.SetForegroundWindow(window);
@@ -181,25 +253,19 @@ internal sealed class WindowsHostTray : IHostTray
                 requestShutdown();
                 PInvoke.PostQuitMessage(0);
             }
+
             PInvoke.PostMessage(window, PInvoke.WM_NULL, default, default);
         }
 
         public void Dispose()
         {
+            visibility.VisibilityChanged -= RequestVisibilityRefresh;
             if (window != default)
             {
-                if (iconAdded)
-                {
-                    var data = new NOTIFYICONDATAW
-                    {
-                        cbSize = (uint)Marshal.SizeOf<NOTIFYICONDATAW>(),
-                        hWnd = window,
-                        uID = IconId
-                    };
-                    PInvoke.Shell_NotifyIcon(NOTIFY_ICON_MESSAGE.NIM_DELETE, in data);
-                }
+                RemoveIcon();
                 PInvoke.DestroyWindow(window);
             }
+
             if (atom != 0) PInvoke.UnregisterClass(className, instance!);
             instance?.Dispose();
             GC.KeepAlive(windowProcedure);

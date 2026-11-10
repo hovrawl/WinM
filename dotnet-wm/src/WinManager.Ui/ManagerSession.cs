@@ -23,12 +23,15 @@ public sealed class ManagerSession : IAsyncDisposable
     public bool IsConnected => client.IsConnected;
 
     public static async Task<ManagerSession> ConnectAsync(string? pipeName = null,
-        CancellationToken cancellationToken = default, int eventQueueCapacity = 64)
+        CancellationToken cancellationToken = default, int eventQueueCapacity = 64,
+        bool registerManagerPresence = false)
     {
         var client = await WinManagerClient.ConnectAsync(pipeName, timeout: TimeSpan.FromSeconds(5),
             cancellationToken: cancellationToken, eventQueueCapacity: eventQueueCapacity);
         try
         {
+            if (registerManagerPresence)
+                await client.RegisterManagerPresenceAsync(cancellationToken);
             var subscription = await client.SubscribeAsync(cancellationToken: cancellationToken);
             return new ManagerSession(client, subscription);
         }

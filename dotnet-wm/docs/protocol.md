@@ -42,6 +42,7 @@ ID receives `Guid.Empty` as its response ID. Errors do not mutate manager state.
 | `query.previewTargets` | `{"windowIds":["<GUID>", ...]}` | `PreviewTargetsResult` with short-lived native target identities or per-window failures |
 | `configuration.read` | `{}` | `ConfigurationDocument` with the host-selected file path, raw UTF-8 content, SHA-256 revision, and validation status |
 | `configuration.save` | `{"revision":"<sha256>","content":"<configuration-json>"}` | Updated `ConfigurationDocument`; invalid or stale writes return `invalid_argument` or `configuration_conflict` |
+| `manager.presence` | `{}` | No payload; registers this connection as a HomeDeskManager instance |
 | `command` | Typed `ManagerCommand` object; `kind` is required | `CommandResult`; also reflected in response fields |
 | `subscribe` | `{"eventTypes": null}` or `{}` for all events; otherwise an array of known event names | `SubscriptionResult`, including `subscriptionId` |
 | `unsubscribe` | `{"subscriptionId": "<GUID>"}` | None |
@@ -65,6 +66,12 @@ External edits can race the final replace because ordinary editors do not share
 the host's lock. IPC configuration content is limited to 128 KiB so its escaped
 JSON remains within the frame limit. Saving does not update running host services;
 restart the manager to apply the file.
+
+`manager.presence` is an idempotent, connection-scoped registration used by
+HomeDeskManager. HomeDeskSpace hides its own tray icon while one or more registered
+manager connections remain active and restores it when the last connection closes.
+No explicit quit message is required; normal shutdown, crashes, and pipe loss all
+release the registration. Other clients do not affect host tray visibility.
 
 Commands support `focus`, `focusMonitor`, `moveSpatial`, `move`, `resize`, `setSplit`, `setMode`, `setWorkspaceLayout`, `setWorkspacePosition`, `pause`,
 `redraw`, `exit`, `activateWorkspace`, `moveToWorkspace`, `moveToMonitor`, `toggleMode`,

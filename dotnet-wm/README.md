@@ -1,8 +1,9 @@
-# WinManager
+# HomeDesk
 
-Windows-only, headless .NET 10 tiling window manager with separate optional
-Avalonia management and spatial-switcher apps for its **one shared desk**. The adjacent
-GlazeWM checkout is a behavioral reference and is not modified or linked.
+Windows-only, headless .NET 10 tiling window manager, `HomeDeskSpace`, with the
+separate Avalonia management and switching app `HomeDeskManager` for its **one
+shared desk**. The adjacent GlazeWM checkout is a behavioral reference and is
+not modified or linked.
 
 ## Current implementation
 
@@ -39,12 +40,12 @@ workspace identity. See [the one-desk goal](docs/project-goal.md) and its
   rotating logs, single-instance protection, and explicit logon registration.
 - A code-only Avalonia debug console shows workspaces, monitor views, windows,
   overflow, exclusions and recent events, with explicit controls through the SDK.
-  A separate spatial switcher maps workspace groups to manager-owned desk
+  `HomeDeskManager` maps workspace groups to HomeDeskSpace-owned desk
   coordinates. See the [debug console guide](src/WinManager.DebugUi/README.md)
   and [spatial switcher guide](src/WinManager.SpatialSwitcher/README.md).
 
 `Core` has no generated native dependencies. `Windows` isolates CsWin32 on its
-native message thread. `Host` composes them through dependency injection as a
+native message thread. `HomeDeskSpace` composes them through dependency injection as a
 normal-privilege `WinExe` with a native Win32 tray icon and graceful Quit;
 `Client` depends only on public contracts. There is no browser bridge or
 arbitrary shell execution.
@@ -91,7 +92,7 @@ Use `dotnet restore --locked-mode` to enforce the resolved dependency graph.
 .\scripts\Publish.ps1 -Mode Release
 .\scripts\Publish.ps1 -Mode Release -SelfContained
 .\scripts\Publish.ps1 -Mode NativeAot
-& '.\artifacts\win-x64\framework-dependent\host\WinManager.Host.exe'
+& '.\artifacts\win-x64\framework-dependent\host\HomeDeskSpace.exe'
 & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'snapshot'
 & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'watch' '--reconnect'
 & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'status'
@@ -100,19 +101,19 @@ Use `dotnet restore --locked-mode` to enforce the resolved dependency graph.
 '{"kind":"exit"}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
 ```
 
-The script publishes all apps by default. Release Host and Recovery outputs share
-a folder and must remain together; NativeAOT Host is one executable that starts
-its separate recovery worker from its own image. Framework-dependent output
-requires the .NET 10 x64 runtime; `-SelfContained` includes the runtime. Host and
-both Avalonia apps support win-x64 NativeAOT; Avalonia statically links its
-rendering dependencies. To publish only Host, use
-`.\scripts\Publish.ps1 -Mode NativeAot -App Host`.
+The script publishes all apps by default. Release HomeDeskSpace and Recovery
+outputs share a folder and must remain together; NativeAOT HomeDeskSpace is one
+executable that starts its separate recovery worker from its own image.
+Framework-dependent output requires the .NET 10 x64 runtime; `-SelfContained`
+includes the runtime. HomeDeskSpace and both Avalonia apps support win-x64
+NativeAOT; Avalonia statically links its rendering dependencies. To publish only
+HomeDeskSpace, use `.\scripts\Publish.ps1 -Mode NativeAot -App Host`.
 See the [publishing guide](docs/publishing.md) for
 prerequisites, smoke checks and output details. Startup registration is opt-in;
 see `src\WinManager.Cli\README.md`.
 
 Default configuration: `%LOCALAPPDATA%\WinManager\config.json`, created on first
-launch. Logs: `%LOCALAPPDATA%\WinManager\Logs`. Recovery journals:
+launch. This legacy data location is retained for existing installations. Logs: `%LOCALAPPDATA%\WinManager\Logs`. Recovery journals:
 `%LOCALAPPDATA%\WinManager\Recovery`. Host supports explicit `--config`,
 `--data-dir`, `--pipe`, and `--recovery-executable` overrides. Only one host can
 run for the same user/session, even with pipe overrides. Exit code `5` means

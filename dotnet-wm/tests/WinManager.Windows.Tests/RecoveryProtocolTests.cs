@@ -38,7 +38,7 @@ public sealed class RecoveryProtocolTests
     [Fact]
     public void RecoveryStartArgumentsKeepProtocolArgumentsAfterOptionalPrefix()
     {
-        var startInfo = RecoveryConnection.CreateStartInfo("WinManager.Host.exe", ["--recovery"],
+        var startInfo = RecoveryConnection.CreateStartInfo("HomeDeskSpace.exe", ["--recovery"],
             "WinManager.Recovery.00000000000000000000000000000000", 123, 456);
 
         Assert.False(startInfo.UseShellExecute);

@@ -15,6 +15,43 @@ namespace WinManager.Ipc.Tests;
 public sealed class PipeServerTests
 {
     [Fact]
+    public async Task ManagerPresenceRegistrationIsAcceptedAndReleasedOnDisconnect()
+    {
+        await using var host = await PipeHost.StartAsync();
+        await using var ordinary = await host.ConnectAsync();
+        var client = await host.ConnectAsync();
+        await Send(client, Request("manager.presence", Protocol.EmptyPayload), host.Token);
+
+        var response = await Response(client, host.Token);
+        Assert.True(response.Success);
+        Assert.False(host.TrayVisibility.IsVisible);
+        await Send(client, Request("manager.presence", Protocol.EmptyPayload), host.Token);
+        Assert.True((await Response(client, host.Token)).Success);
+
+        await using var secondManager = await host.ConnectAsync();
+        await Send(secondManager, Request("manager.presence", Protocol.EmptyPayload), host.Token);
+        Assert.True((await Response(secondManager, host.Token)).Success);
+        await client.DisposeAsync();
+        Assert.False(host.TrayVisibility.IsVisible);
+        await secondManager.DisposeAsync();
+        await WaitForAsync(() => host.TrayVisibility.IsVisible, host.Token);
+        Assert.True(host.TrayVisibility.IsVisible);
+    }
+
+    [Fact]
+    public async Task ManagerPresenceRejectsUnknownPayloadProperties()
+    {
+        await using var host = await PipeHost.StartAsync();
+        await using var client = await host.ConnectAsync();
+        await Send(client, Request("manager.presence", new { unexpected = true }), host.Token);
+
+        var response = await Response(client, host.Token);
+        Assert.False(response.Success);
+        Assert.Equal("invalid_argument", response.ErrorCode);
+        Assert.True(host.TrayVisibility.IsVisible);
+    }
+
+    [Fact]
     public async Task SdkReadsAndSavesTheValidatedHostConfigurationOverIpc()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "ConfigurationIpcTests", Guid.NewGuid().ToString("N"));
@@ -527,6 +564,11 @@ public sealed class PipeServerTests
     private static RequestEnvelope Request<T>(string operation, T payload) =>
         new(Protocol.Version, Guid.NewGuid(), operation, Protocol.Payload(payload));
 
+    private static async Task WaitForAsync(Func<bool> condition, CancellationToken cancellationToken)
+    {
+        while (!condition()) await Task.Delay(10, cancellationToken);
+    }
+
     private static Task Send(NamedPipeClientStream client, RequestEnvelope request, CancellationToken token) =>
         PipeFraming.WriteAsync(client, request, token);
 
@@ -589,6 +631,7 @@ internal sealed class PipeHost : IAsyncDisposable
     public string Name { get; }
     public ManagerEngine Engine { get; }
     public PipeServer Server { get; }
+    public HostTrayVisibility TrayVisibility { get; }
     public Task EngineRun { get; }
     public Task ServerRun { get; }
     public CancellationToken Token => timeout.Token;
@@ -599,8 +642,9 @@ internal sealed class PipeHost : IAsyncDisposable
         Name = name ?? "WinManager.test." + Guid.NewGuid().ToString("N");
         platform = new TestWindowPlatform(titleLength, popup);
         Engine = new(platform, workspaceDefinitions: workspaceDefinitions);
+        TrayVisibility = new HostTrayVisibility();
         EngineRun = Engine.RunAsync(Token);
-        Server = new(Engine, Name, maximumClients, outputCapacity, configurationStore);
+        Server = new(Engine, Name, maximumClients, outputCapacity, configurationStore, null, TrayVisibility);
         ServerRun = Server.RunAsync(Token);
     }
 

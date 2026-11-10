@@ -23,7 +23,7 @@ internal sealed class SpatialApplication : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            var connectionStatus = new NativeMenuItem("Manager disconnected") { IsEnabled = false };
+            var connectionStatus = new NativeMenuItem("HomeDeskSpace disconnected") { IsEnabled = false };
             var shortcutStatus = new NativeMenuItem("Shortcuts unavailable") { IsEnabled = false };
             var switcher = new SwitcherWindow(Program.DemoMode, Program.PipeName,
                 (connection, shortcuts) =>
@@ -39,6 +39,14 @@ internal sealed class SpatialApplication : Application
 
             var appearanceMenu = new NativeMenu();
             var appearanceItems = new Dictionary<SwitcherThemeMode, NativeMenuItem>();
+
+            void ApplyTheme(SwitcherThemeMode mode)
+            {
+                SwitcherTheme.SetPreference(this, mode);
+                foreach (var (itemMode, themeItem) in appearanceItems)
+                    themeItem.IsChecked = itemMode == mode;
+            }
+
             foreach (var mode in Enum.GetValues<SwitcherThemeMode>())
             {
                 var item = new NativeMenuItem(mode.ToString())
@@ -46,17 +54,15 @@ internal sealed class SpatialApplication : Application
                     ToggleType = MenuItemToggleType.Radio,
                     IsChecked = mode == SwitcherTheme.Preference
                 };
-                item.Click += (_, _) =>
-                {
-                    SwitcherTheme.SetPreference(this, mode);
-                    foreach (var (itemMode, themeItem) in appearanceItems)
-                        themeItem.IsChecked = itemMode == mode;
-                };
+                item.Click += (_, _) => { ApplyTheme(mode); };
                 appearanceItems.Add(mode, item);
                 appearanceMenu.Items.Add(item);
             }
 
             menu.Items.Add(new NativeMenuItem("Appearance") { Menu = appearanceMenu });
+            var settings = new NativeMenuItem("Settings…");
+            settings.Click += (_, _) => switcher.ShowSettingsWindow(this, ApplyTheme);
+            menu.Items.Add(settings);
             menu.Items.Add(new NativeMenuItemSeparator());
 
             var showWindows = new NativeMenuItem("Show window switcher");
@@ -69,7 +75,7 @@ internal sealed class SpatialApplication : Application
             showWorkspaces.Click += (_, _) => switcher.ShowWorkspaceSwitcher();
             menu.Items.Add(showWorkspaces);
 
-            var reconnect = new NativeMenuItem("Reconnect to manager");
+            var reconnect = new NativeMenuItem("Reconnect to HomeDeskSpace");
             reconnect.Click += (_, _) => _ = switcher.ConnectAsync();
             menu.Items.Add(reconnect);
             menu.Items.Add(new NativeMenuItemSeparator());
@@ -81,7 +87,7 @@ internal sealed class SpatialApplication : Application
             var trayIcon = new TrayIcon
             {
                 Icon = CreateTrayIcon(),
-                ToolTipText = "One desk switcher",
+                ToolTipText = "HomeDeskManager",
                 Menu = menu
             };
             var trayIcons = new TrayIcons();

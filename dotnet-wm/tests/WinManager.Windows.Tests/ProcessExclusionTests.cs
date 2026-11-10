@@ -13,6 +13,9 @@ public sealed class ProcessExclusionTests
     [InlineData("WinManager.SpatialSwitcher")]
     [InlineData("WINMANAGER.SPATIALSWITCHER.EXE")]
     [InlineData(@"C:\Apps\WinManager.SpatialSwitcher.exe")]
+    [InlineData("HomeDeskManager")]
+    [InlineData("HOMEDESKMANAGER.EXE")]
+    [InlineData(@"C:\Apps\HomeDeskManager.exe")]
     public async Task DebugCompanionIsExcludedEvenWithAnEmptyConfiguration(string processName)
     {
         await using var observer = new WindowsDesktopObserver(ignoredProcessNames: []);

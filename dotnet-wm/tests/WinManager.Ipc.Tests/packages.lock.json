@@ -561,6 +561,24 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "HomeDeskManager": {
+        "type": "Project",
+        "dependencies": {
+          "Avalonia": "[12.1.5, )",
+          "Avalonia.Desktop": "[12.1.5, )",
+          "Avalonia.Themes.Fluent": "[12.1.5, )",
+          "WinManager.Contracts": "[1.0.0, )",
+          "WinManager.Ui": "[1.0.0, )",
+          "WinManager.Windows": "[1.0.0, )"
+        }
+      },
+      "HomeDeskSpace": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.Extensions.Hosting": "[10.0.0, )",
+          "WinManager.Windows": "[1.0.0, )"
+        }
+      },
       "winmanager.cli": {
         "type": "Project",
         "dependencies": {
@@ -590,24 +608,6 @@
           "Avalonia.Themes.Fluent": "[12.1.5, )",
           "WinManager.Client": "[1.0.0, )",
           "WinManager.Ui": "[1.0.0, )"
-        }
-      },
-      "winmanager.host": {
-        "type": "Project",
-        "dependencies": {
-          "Microsoft.Extensions.Hosting": "[10.0.0, )",
-          "WinManager.Windows": "[1.0.0, )"
-        }
-      },
-      "winmanager.spatialswitcher": {
-        "type": "Project",
-        "dependencies": {
-          "Avalonia": "[12.1.5, )",
-          "Avalonia.Desktop": "[12.1.5, )",
-          "Avalonia.Themes.Fluent": "[12.1.5, )",
-          "WinManager.Contracts": "[1.0.0, )",
-          "WinManager.Ui": "[1.0.0, )",
-          "WinManager.Windows": "[1.0.0, )"
         }
       },
       "winmanager.ui": {

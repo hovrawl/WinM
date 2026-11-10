@@ -168,6 +168,11 @@ public sealed class WinManagerClient : IAsyncDisposable
         return ReadPayload<ConfigurationDocument>(response);
     }
 
+    public async Task RegisterManagerPresenceAsync(CancellationToken cancellationToken = default)
+    {
+        _ = await RequestAsync("manager.presence", Protocol.EmptyPayload, cancellationToken);
+    }
+
     public async Task<ManagerSubscription> SubscribeAsync(IReadOnlyList<string>? eventTypes = null,
         CancellationToken cancellationToken = default)
     {

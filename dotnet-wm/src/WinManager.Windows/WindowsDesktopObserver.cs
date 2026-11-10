@@ -83,7 +83,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTa
         IEnumerable<string>? recoveryArguments = null)
     {
         ignoredProcesses = new HashSet<string>((ignoredProcessNames ?? [])
-            .Append("WinManager.DebugUi").Append("WinManager.SpatialSwitcher")
+            .Append("WinManager.DebugUi").Append("WinManager.SpatialSwitcher").Append("HomeDeskManager")
             .Select(NormalizeProcessName), StringComparer.OrdinalIgnoreCase);
         ignoredClasses = new HashSet<string>(ignoredClassNames ?? [], StringComparer.OrdinalIgnoreCase);
         this.recoveryExecutablePath =

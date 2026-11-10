@@ -152,9 +152,9 @@ are replaced by custom bindings rather than registered twice.
   inversely to `Focus` (swipe left focuses right); four-finger swipes map directly
   to the existing `MoveSpatial` command. Three-finger vertical gestures are not
   Host focus commands. Keyboard shortcuts remain available, and setting this to
-  `false` disables Host-native gesture input. Restart both the Host and
-  SpatialSwitcher after changing it. The carousel can also be opened or closed
-  from SpatialSwitcher with `Ctrl+Alt+Space`; keyboard shortcuts remain usable
+  `false` disables HomeDeskSpace-native gesture input. Restart HomeDeskSpace and
+  HomeDeskManager after changing it. The carousel can also be opened or closed
+  from HomeDeskManager with `Ctrl+Alt+Space`; keyboard shortcuts remain usable
   when native touchpad input is disabled or unsupported.
   The related `touchpad.completeThreeFingerSwipesOnFirstLift` option defaults to
   `true`. A settled three-finger swipe is published on the first finger lift, based
@@ -261,7 +261,13 @@ using only the current user's Run entry. No service, elevation, scheduled task,
 or visualization process is required for the current manager. Real logon and mixed-DPI/hotplug hardware
 validation should accompany deployment to a new machine.
 
-The host runs without a visible main window and places a WinManager icon in the
-Windows notification area. Choose **Quit WinManager** from its context menu to
-request graceful shutdown; the host then completes the normal recovery-protected
-restore and cleanup path.
+HomeDeskSpace runs without a visible main window and places a HomeDeskSpace icon
+in the Windows notification area. HomeDeskManager has its own tray menu, which
+opens the switcher and its general settings window. While a connected
+HomeDeskManager instance is running, HomeDeskSpace hides its tray icon; it restores
+the icon when the last manager connection closes, including after a crash. Choose
+**Quit HomeDeskSpace** from the host icon's context menu to request graceful
+shutdown; the host then completes the normal recovery-protected restore and
+cleanup path. The manager settings window is available only through the
+HomeDeskManager tray menu. Appearance changes apply immediately; host settings are
+saved to the existing configuration file and require restarting HomeDeskSpace.

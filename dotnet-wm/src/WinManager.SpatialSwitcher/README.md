@@ -1,13 +1,14 @@
-# Spatial switcher
+# HomeDeskManager
 
-`WinManager.SpatialSwitcher` is a separate, code-only Avalonia tray app for
-switching windows and workspace views on **one shared desk**. It consumes
-snapshots and commands through the public SDK; it does not create desks or own
-positions, workspace membership, monitor views, or layouts.
+`HomeDeskManager` is a code-only Avalonia tray app for switching windows and
+workspace views on **one shared desk**, with a general settings window for
+HomeDeskSpace. It consumes snapshots, commands, and validated configuration
+through the public SDK; it does not create desks or own positions, workspace
+membership, monitor views, or layouts.
 
 ## Run
 
-With the manager already running in the same Windows user/session:
+With HomeDeskSpace already running in the same Windows user/session:
 
 ```powershell
 dotnet run --project .\src\WinManager.SpatialSwitcher\WinManager.SpatialSwitcher.csproj
@@ -22,18 +23,25 @@ dotnet run --project .\src\WinManager.SpatialSwitcher\WinManager.SpatialSwitcher
 
 An optional `--pipe PIPE_NAME` selects a local same-user test host. The app starts
 with no switcher window; use the tray icon menu to show the window or workspace
-switcher, reconnect to the manager, or quit. Closing the switcher or pressing
-Escape hides it; losing focus also hides either popup without ending the tray
-process. Only Quit ends the tray app. The app never starts the manager.
-`WinManager.SpatialSwitcher` is automatically excluded from
-window-management actions by the host, independent of configured ignore lists.
+switcher, open settings, reconnect to HomeDeskSpace, or quit. Closing the switcher
+or pressing Escape hides it; losing focus also hides either popup without ending
+the tray process. Only Quit ends the tray app. The app never starts HomeDeskSpace.
+While HomeDeskManager is connected, HomeDeskSpace hides its own tray icon; the
+connection lease is released automatically if HomeDeskManager exits unexpectedly.
+The executable is automatically excluded from window-management actions by the
+host, independent of configured ignore lists.
 
 ## Appearance and connection
 
-- The tray menu's **Appearance** options choose **System**, **Light**, or **Dark**.
+- The tray menu's **Appearance** options choose **System**, **Light**, or **Dark**;
+  the **Settings** window also lets you choose the theme.
   System is the default and follows the current Windows theme; Light uses the
   warm workspace palette, while Dark preserves the switcher's existing dark colors.
-- If the manager is unavailable or the connection drops, the app retries
+- **Settings** is available only from the HomeDeskManager tray menu. It edits
+  HomeDeskSpace inner/outer gaps, default shortcuts, and touchpad enablement using
+  the host's validated configuration API. Saving writes the existing configuration
+  file but does not apply changes until HomeDeskSpace is restarted.
+- If HomeDeskSpace is unavailable or the connection drops, the app retries
   connecting every five seconds after each attempt completes. The tray reconnect
   action remains available for an immediate attempt.
 - Reconnection only restores the snapshot/subscription. Workspace activation and
