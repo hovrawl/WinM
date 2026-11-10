@@ -919,6 +919,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTa
             if (!ValidateTarget(focusId, out var window, out _, out var failure)) failures.Add(failure!);
             else
             {
+                var previousForeground = PInvoke.GetForegroundWindow();
                 Marshal.SetLastPInvokeError(0);
                 PInvoke.SetForegroundWindow(window);
                 var error = Marshal.GetLastWin32Error();
@@ -927,6 +928,12 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTa
                     ForceForeground(window);
                     error = Marshal.GetLastWin32Error();
                 }
+
+                // Rapid focus changes can leave a window flashing in the taskbar after we've moved on.
+                StopFlashing(window);
+                StopFlashing(previousForeground);
+                StopFlashing(lastFocusedByManager);
+                lastFocusedByManager = window;
                 if (!ValidateTarget(focusId, out _, out _, out failure)) failures.Add(failure!);
                 else if (PInvoke.GetForegroundWindow() != window)
                     failures.Add(new(focusId, error == 5 ? "access_denied" : "focus_denied",
@@ -936,6 +943,20 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTa
 
         Notify();
         return new ApplyResult(failures);
+    }
+
+    private HWND lastFocusedByManager;
+
+    private static unsafe void StopFlashing(HWND window)
+    {
+        if (window == default || !PInvoke.IsWindow(window)) return;
+        var info = new FLASHWINFO
+        {
+            cbSize = (uint)sizeof(FLASHWINFO),
+            hwnd = window,
+            dwFlags = FLASHWINFO_FLAGS.FLASHW_STOP
+        };
+        PInvoke.FlashWindowEx(in info);
     }
 
     // A background process (e.g. gesture-triggered focus) is denied SetForegroundWindow; sharing input state with the
