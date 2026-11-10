@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>WinManager.Client</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HomeDesk.Contracts\HomeDesk.Contracts.csproj" />
+    <Compile Remove="Validation\**\*.cs" />
+    <Compile Remove="AotValidation\**\*.cs" />
+  </ItemGroup>
+</Project>

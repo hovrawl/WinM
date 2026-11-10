@@ -28,8 +28,8 @@ or null means diagnostics are unavailable on that host; empty means no matching
 candidates were observed. This is not a full native-window inventory. Changes
 produce `window.updated` with the complete snapshot.
 
-The separate [one-desk Avalonia debug console](../src/WinManager.DebugUi/README.md)
-and [spatial switcher](../src/WinManager.SpatialSwitcher/README.md) use this
+The separate [HomeDesk debug console](../src/HomeDesk.DebugUi/README.md)
+and [HomeDeskManager](../src/HomeDeskManager/README.md) use this
 SDK/IPC contract for their display and explicit controls. Neither creates desks
 or owns manager state.
 
@@ -64,7 +64,7 @@ the Host on a desktop managed by another window manager. See the root
 ## Discover targets first
 
 ```powershell
-& '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'snapshot'
+& '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'snapshot'
 ```
 
 The response is a complete `ManagerSnapshot`:
@@ -218,7 +218,7 @@ Alt+Shift+H/J/K/L for the matching spatial move (H=left, J=down, K=up, L=right).
 They can be disabled or overridden through manager shortcut configuration.
 
 ```powershell
-'{"kind":"focusCycle","cycleDirection":"previous","mode":"floating"}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
+'{"kind":"focusCycle","cycleDirection":"previous","mode":"floating"}' | & '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'command' '-'
 ```
 
 ```csharp
@@ -248,8 +248,8 @@ behavior. Other window commands do not target the selection.
 CLI example: select the focused tile's parent, then orient that container:
 
 ```powershell
-'{"kind":"selectContainer","navigation":"parent"}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
-'{"kind":"setSplit","orientation":"vertical"}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
+'{"kind":"selectContainer","navigation":"parent"}' | & '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'command' '-'
+'{"kind":"setSplit","orientation":"vertical"}' | & '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'command' '-'
 ```
 
 The .NET SDK supports the same typed contracts through `ExecuteAsync`:
@@ -298,12 +298,12 @@ await client.ExecuteAsync(new ManagerCommand(CommandKind.SetMode, WindowId: wind
 From the repository root after publishing the CLI:
 
 ```powershell
-'{"kind":"focus","direction":"right"}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
-'{"kind":"resize","direction":"left","amount":0.05}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
-'{"kind":"setMode","mode":"tiling"}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
-'{"kind":"toggleMode","windowId":"<window-guid>"}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
-'{"kind":"pause","paused":false}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
-'{"kind":"activateWorkspace","workspaceName":"2"}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
+'{"kind":"focus","direction":"right"}' | & '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'command' '-'
+'{"kind":"resize","direction":"left","amount":0.05}' | & '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'command' '-'
+'{"kind":"setMode","mode":"tiling"}' | & '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'command' '-'
+'{"kind":"toggleMode","windowId":"<window-guid>"}' | & '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'command' '-'
+'{"kind":"pause","paused":false}' | & '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'command' '-'
+'{"kind":"activateWorkspace","workspaceName":"2"}' | & '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'command' '-'
 ```
 
 Prefer stdin over inline JSON arguments in PowerShell: Windows PowerShell can
@@ -324,13 +324,13 @@ connection. Add `--pipe NAME` if the Host was started with a custom pipe name.
 
 Startup verbs are local CLI operations, **not pipe commands**. They modify only
 the per-user `WinManager` logon registry value and do not start the Host. Details
-and path restrictions are in the [CLI README](../src/WinManager.Cli/README.md).
+and path restrictions are in the [CLI README](../src/HomeDesk.Cli/README.md).
 
-For an interactive overview, use `WinManager.Cli.exe status`. It subscribes to all
+For an interactive overview, use `HomeDesk.Cli.exe status`. It subscribes to all
 events and displays the focused window's workspace, focused managed window, and latest
 event. Without managed focus it lists all active workspaces. Configuration direction
 is marked unavailable because the host does not expose it. Use `watch`, not `status`,
-for JSON integrations. See the [live status guide](../src/WinManager.Cli/README.md#live-status).
+for JSON integrations. See the [live status guide](../src/HomeDesk.Cli/README.md#live-status).
 
 Example Python integration (standard library only):
 
@@ -338,7 +338,7 @@ Example Python integration (standard library only):
 import json
 import subprocess
 
-CLI = r"C:\Apps\WinManager\cli\WinManager.Cli.exe"
+CLI = r"C:\Apps\HomeDesk\cli\HomeDesk.Cli.exe"
 
 def call_cli(*args, payload=None):
     completed = subprocess.run(
@@ -374,13 +374,14 @@ seconds by default. A subprocess timeout does not prove a command never ran.
 
 ## Integrating through the .NET SDK
 
-Reference `src\WinManager.Client\WinManager.Client.csproj` from your application
+Reference `src\HomeDesk.Client\HomeDesk.Client.csproj` from your application
 (or distribute its built assembly and dependencies). The SDK targets `net10.0`
-and references `WinManager.Contracts`; pipe connection requires Windows. No
+and references the `HomeDesk.Contracts` project while retaining the `WinManager.Contracts`
+namespace; pipe connection requires Windows. No
 published NuGet package is assumed here.
 
 ```powershell
-dotnet 'add' 'C:\Path\To\YourApp\YourApp.csproj' 'reference' '.\src\WinManager.Client\WinManager.Client.csproj'
+dotnet 'add' 'C:\Path\To\YourApp\YourApp.csproj' 'reference' '.\src\HomeDesk.Client\HomeDesk.Client.csproj'
 ```
 
 The following can be used in a .NET 10 console application's `Program.cs`:
@@ -427,7 +428,7 @@ connection; requests can run concurrently.
 For a reconnecting read-only feed use `WinManagerClient.WatchAsync(eventTypes:
 [ManagerEventTypes.LayoutChanged], reconnect: true, cancellationToken: stop.Token)`. It reconnects
 on transport errors/connect timeouts, not protocol, permission, remote, or
-consumer-lag errors. See the [SDK README](../src/WinManager.Client/README.md) for
+consumer-lag errors. See the [SDK README](../src/HomeDesk.Client/README.md) for
 timeouts, cancellation, queue capacity, and reconnection details.
 
 Use `ManagerEventTypes` from `WinManager.Contracts` instead of handwritten event

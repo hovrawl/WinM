@@ -8,11 +8,11 @@ The target rules live in [Project goal: one shared desk](project-goal.md). Trans
 
 ## Current implementation
 
-- `src/WinManager.Core/WorkspaceSet.cs` stores workspace identity, window membership, and split trees separately from a monitor-to-workspace view map. A workspace can remain on the desk without a view. `WorkspaceInfo.MonitorId` and `Active` are compatibility projections; unviewed workspaces use `Guid.Empty` and `false`.
+- `src/HomeDesk.Core/WorkspaceSet.cs` stores workspace identity, window membership, and split trees separately from a monitor-to-workspace view map. A workspace can remain on the desk without a view. `WorkspaceInfo.MonitorId` and `Active` are compatibility projections; unviewed workspaces use `Guid.Empty` and `false`.
 - `WorkspaceSet.Reconcile` retains workspaces and memberships when a monitor disconnects. `WorkspaceDefinition.MonitorDeviceName` acts only as an initial placement hint. New windows join the workspace shown by their observed monitor, or the primary view when no matching view exists.
 - `WorkspaceSet.Activate` supports a target monitor. `ManagerEngine` accepts optional `monitorId` for `ActivateWorkspace`; otherwise it uses the focused window's observed connected monitor, then a stable primary monitor. Native-action failures restore the prior view map and remove any fallback workspace created by the failed transfer.
-- `src/WinManager.Contracts/Commands.cs` exposes `WorkspaceViewInfo` through `ManagerSnapshot.WorkspaceViews`. The optional field is additive to the version 1 snapshot. `MoveToMonitor` still moves a window to the workspace currently shown by a monitor; it is distinct from view transfer.
-- `src/WinManager.Host/ManagerConfiguration.cs` validates the optional activation monitor target. The CLI and SDK serialize the existing `ManagerCommand` contract. Configuration, API, and protocol references describe the current view-transfer behavior.
+- `src/HomeDesk.Contracts/Commands.cs` exposes `WorkspaceViewInfo` through `ManagerSnapshot.WorkspaceViews`. The optional field is additive to the version 1 snapshot. `MoveToMonitor` still moves a window to the workspace currently shown by a monitor; it is distinct from view transfer.
+- `src/HomeDeskSpace/ManagerConfiguration.cs` validates the optional activation monitor target. The CLI and SDK serialize the existing `ManagerCommand` contract. Configuration, API, and protocol references describe the current view-transfer behavior.
 - `SplitTree.Layout` stages only windows whose reported minimum width and height fit. It retains the full tree and reports overflow IDs; `ManagerEngine` exposes `WindowInfo.LayoutOverflow`, minimizes overflow, and supports promoting one through the existing `focus` command. The Windows recovery helper restores manager-minimized overflow on graceful exit or host failure. CLI status and the separate Avalonia inspector expose affected windows.
 - `WorkspaceLayout` is per-workspace state. `layered` is the default for new or unspecified workspaces; `split` remains available as an explicit choice. Layered places every individually fitting tiled window in a large horizontal page stack and reports only individually oversized pages as overflow. The saved split tree and workspace membership are unchanged, and tiling `focusCycle` brings the selected page forward.
 - `WorkspaceDefinition.Layout` configures the restart default. `setWorkspaceLayout` changes runtime state and immediately reflows; a native action failure reports its error and restores the previous layout selection. The inspector exposes layout selection and previous/next page controls.
@@ -67,7 +67,7 @@ Keep the core layout input independent of a visual client's zoom and desk coordi
 
 ### 4. Evolve contracts, configuration, and persistence
 
-Implemented: `src/WinManager.Contracts/Commands.cs` exposes `WorkspaceViews`, per-workspace `WorkspaceLayout`, `DeskPosition`, `SetWorkspaceLayout`, `SetWorkspacePosition`, and an optional monitor target on `ActivateWorkspace`; `MoveToMonitor` remains a separate window-membership operation. Workspace bounds and persistent runtime desk-state fields remain future contract work.
+Implemented: `src/HomeDesk.Contracts/Commands.cs` exposes `WorkspaceViews`, per-workspace `WorkspaceLayout`, `DeskPosition`, `SetWorkspaceLayout`, `SetWorkspacePosition`, and an optional monitor target on `ActivateWorkspace`; `MoveToMonitor` remains a separate window-membership operation. Workspace bounds and persistent runtime desk-state fields remain future contract work.
 
 Implemented: host validation accepts workspace layout and optional position defaults and shortcut commands. Current `monitorDeviceName` values act as initial placement hints. Layout and position defaults are configured per workspace; runtime layout/position changes and transferred view assignments are not persisted across restarts.
 
@@ -93,7 +93,7 @@ Run the targeted core, IPC, and Windows tests in a safe interactive environment 
 
 ### 6. Add visual clients without changing single-desk ownership
 
-Implemented visual slices: `WinManager.DebugUi` is a code-only Avalonia debug console using the shared manager session and SDK; it shows monitor views, workspaces, positions, window state and read-only configured-exclusion diagnostics with explicit controls. `WinManager.SpatialSwitcher` is a separate code-only Avalonia popup that uses desk positions for its map, directional navigation, search dimming, and explicit monitor-targeted activation. Both offer safe demo mode. See the [debug console guide](../src/WinManager.DebugUi/README.md) and [switcher guide](../src/WinManager.SpatialSwitcher/README.md).
+Implemented visual slices: `HomeDesk.DebugUi` is a code-only Avalonia debug console using the shared manager session and SDK; it shows monitor views, workspaces, positions, window state and read-only configured-exclusion diagnostics with explicit controls. `HomeDeskManager` is a separate code-only Avalonia popup that uses desk positions for its map, directional navigation, search dimming, and explicit monitor-targeted activation. Both offer safe demo mode. See the [debug console guide](../src/HomeDesk.DebugUi/README.md) and [HomeDeskManager guide](../src/HomeDeskManager/README.md).
 
 There is exactly one desk, not a collection of desks. UI groups represent workspaces and monitor views on that shared desk. Keep the manager headless and authoritative. The full draggable/zoomable desk overview remains later work; it must consume manager coordinates and must not invent a separate desk model in the client.
 

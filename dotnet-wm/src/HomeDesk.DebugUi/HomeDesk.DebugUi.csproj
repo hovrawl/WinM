@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>WinManager.DebugUi</RootNamespace>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+  <Import Project="..\..\scripts\AvaloniaSingleFile.props" />
+  <ItemGroup>
+    <ProjectReference Include="..\HomeDesk.Client\HomeDesk.Client.csproj" />
+    <ProjectReference Include="..\HomeDesk.Ui\HomeDesk.Ui.csproj" />
+    <PackageReference Include="Avalonia" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.5" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.5" />
+    <PackageReference Include="AvaloniaMcp.Diagnostics" Version="0.4.0" PrivateAssets="all" />
+  </ItemGroup>
+  <Import Project="..\..\scripts\AvaloniaSingleFile.targets" />
+</Project>

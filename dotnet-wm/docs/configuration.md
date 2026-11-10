@@ -131,7 +131,7 @@ are replaced by custom bindings rather than registered twice.
   `setMode`/`toggleMode` can explicitly tile an individual observed window; hard
   process/class exclusions cannot be overridden this way.
   Safely identifiable configured-excluded candidates appear in the optional
-  snapshot `desktop.configuredExclusions` and the [debug companion](../src/WinManager.DebugUi/README.md),
+  snapshot `desktop.configuredExclusions` and the [debug companion](../src/HomeDesk.DebugUi/README.md),
   separately from actionable windows. This diagnostic is not an exhaustive native
   window list; shell, hidden/cloaked and inaccessible candidates are still filtered.
   Change these configuration lists and restart the host to include a configured-excluded

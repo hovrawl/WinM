@@ -41,8 +41,8 @@ workspace identity. See [the one-desk goal](docs/project-goal.md) and its
 - A code-only Avalonia debug console shows workspaces, monitor views, windows,
   overflow, exclusions and recent events, with explicit controls through the SDK.
   `HomeDeskManager` maps workspace groups to HomeDeskSpace-owned desk
-  coordinates. See the [debug console guide](src/WinManager.DebugUi/README.md)
-  and [spatial switcher guide](src/WinManager.SpatialSwitcher/README.md).
+  coordinates. See the [debug console guide](src/HomeDesk.DebugUi/README.md)
+  and [HomeDeskManager guide](src/HomeDeskManager/README.md).
 
 `Core` has no generated native dependencies. `Windows` isolates CsWin32 on its
 native message thread. `HomeDeskSpace` composes them through dependency injection as a
@@ -67,20 +67,20 @@ not a functional-parity roadmap.
 Requires Windows 10 build 15063 or newer and the pinned .NET SDK in `global.json`.
 
 ```powershell
-dotnet build WinManager.sln
-dotnet test WinManager.sln --filter 'Category!=IsolatedInteractive'
+dotnet build HomeDesk.sln
+dotnet test HomeDesk.sln --filter 'Category!=IsolatedInteractive'
 ```
 
 Native desktop integration tests must run only in a disposable, isolated
 interactive Windows session, never Session 0 or a normal working desktop.
-Their opt-in instructions are in `tests\WinManager.Windows.Tests\README.md`.
+Their opt-in instructions are in `tests\HomeDesk.Windows.Tests\README.md`.
 Do not start the host on a desktop managed by another window manager.
 
 Run either visual app in safe sample mode without connecting to the manager:
 
 ```powershell
-dotnet run --project .\src\WinManager.DebugUi\WinManager.DebugUi.csproj -- --demo
-dotnet run --project .\src\WinManager.SpatialSwitcher\WinManager.SpatialSwitcher.csproj -- --demo
+dotnet run --project .\src\HomeDesk.DebugUi\HomeDesk.DebugUi.csproj -- --demo
+dotnet run --project .\src\HomeDeskManager\HomeDeskManager.csproj -- --demo
 ```
 
 Dependencies are version-pinned and NuGet lock files are committed with source.
@@ -93,12 +93,12 @@ Use `dotnet restore --locked-mode` to enforce the resolved dependency graph.
 .\scripts\Publish.ps1 -Mode Release -SelfContained
 .\scripts\Publish.ps1 -Mode NativeAot
 & '.\artifacts\win-x64\framework-dependent\host\HomeDeskSpace.exe'
-& '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'snapshot'
-& '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'watch' '--reconnect'
-& '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'status'
-'{"kind":"pause","paused":true}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
-'{"kind":"activateWorkspace","workspaceName":"2","monitorId":"<monitor-guid>"}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
-'{"kind":"exit"}' | & '.\artifacts\win-x64\framework-dependent\cli\WinManager.Cli.exe' 'command' '-'
+& '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'snapshot'
+& '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'watch' '--reconnect'
+& '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'status'
+'{"kind":"pause","paused":true}' | & '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'command' '-'
+'{"kind":"activateWorkspace","workspaceName":"2","monitorId":"<monitor-guid>"}' | & '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'command' '-'
+'{"kind":"exit"}' | & '.\artifacts\win-x64\framework-dependent\cli\HomeDesk.Cli.exe' 'command' '-'
 ```
 
 The script publishes all apps by default. Release HomeDeskSpace and Recovery
@@ -110,7 +110,7 @@ NativeAOT; Avalonia statically links its rendering dependencies. To publish only
 HomeDeskSpace, use `.\scripts\Publish.ps1 -Mode NativeAot -App Host`.
 See the [publishing guide](docs/publishing.md) for
 prerequisites, smoke checks and output details. Startup registration is opt-in;
-see `src\WinManager.Cli\README.md`.
+see `src\HomeDesk.Cli\README.md`.
 
 Default configuration: `%LOCALAPPDATA%\WinManager\config.json`, created on first
 launch. This legacy data location is retained for existing installations. Logs: `%LOCALAPPDATA%\WinManager\Logs`. Recovery journals:
@@ -123,7 +123,7 @@ another instance owns the session; `2` indicates startup/lifetime failure and
 For the full command reference and third-party CLI, .NET SDK, and named-pipe
 integration examples, see [External commands API](docs/external-api.md).
 For an updating workspace/window/event display with overflow titles when needed, use `status`; see the
-[live status guide](src/WinManager.Cli/README.md#live-status).
+[live status guide](src/HomeDesk.Cli/README.md#live-status).
 See also `docs\configuration.md`, `docs\protocol.md`, `docs\validation.md`,
 `docs\iteration-2.md`, [the desk goal](docs/project-goal.md), and
 [the desk migration plan](docs/desk-model-plan.md).

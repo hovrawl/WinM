@@ -58,7 +58,7 @@ function Invoke-Publish([string]$Project, [string]$Destination, [bool]$Aot) {
         "-p:PublishAot=$publishAotValue"
     )
     if ($SelfContained -or $Aot) { $arguments += '-p:RuntimeFrameworkVersion=10.0.14' }
-    if ($Aot -and $Project -notlike '*WinManager.Host.csproj') {
+    if ($Aot -and $Project -notlike '*HomeDeskSpace.csproj') {
         $arguments += '-p:AvaloniaSingleFileAot=true'
     }
 
@@ -77,7 +77,12 @@ foreach ($selectedApp in $selectedApps) {
         'SpatialSwitcher' { 'spatial-switcher' }
     }
     $destination = Join-Path $outputRootPath (Join-Path $RuntimeIdentifier (Join-Path $deployment $appName))
-    $project = Join-Path $repositoryRoot "src\WinManager.$selectedApp\WinManager.$selectedApp.csproj"
+    $project = switch ($selectedApp) {
+        'Host' { Join-Path $repositoryRoot 'src\HomeDeskSpace\HomeDeskSpace.csproj' }
+        'Cli' { Join-Path $repositoryRoot 'src\HomeDesk.Cli\HomeDesk.Cli.csproj' }
+        'DebugUi' { Join-Path $repositoryRoot 'src\HomeDesk.DebugUi\HomeDesk.DebugUi.csproj' }
+        'SpatialSwitcher' { Join-Path $repositoryRoot 'src\HomeDeskManager\HomeDeskManager.csproj' }
+    }
     Invoke-Publish $project $destination ($Mode -eq 'NativeAot')
 
     if ($Mode -eq 'NativeAot') {
@@ -101,7 +106,7 @@ foreach ($selectedApp in $selectedApps) {
     }
 
     if ($selectedApp -eq 'Host' -and $Mode -eq 'Release') {
-        $recoveryProject = Join-Path $repositoryRoot 'src\WinManager.Recovery\WinManager.Recovery.csproj'
+        $recoveryProject = Join-Path $repositoryRoot 'src\HomeDesk.Recovery\HomeDesk.Recovery.csproj'
         Invoke-Publish $recoveryProject $destination $false
     }
 }

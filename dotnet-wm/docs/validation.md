@@ -5,9 +5,9 @@ session, with `WINMANAGER_ISOLATED_INTERACTIVE=1`.
 
 ```powershell
 $env:WINMANAGER_ISOLATED_INTERACTIVE = '1'
-dotnet test WinManager.sln --verbosity minimal
+dotnet test HomeDesk.sln --verbosity minimal
 Remove-Item Env:\WINMANAGER_ISOLATED_INTERACTIVE
-dotnet restore WinManager.sln --locked-mode
+dotnet restore HomeDesk.sln --locked-mode
 ```
 
 Full suite: **234 passed, zero failed, zero skipped**:
@@ -41,7 +41,7 @@ In an isolated interactive session, retain the layouts briefly for inspection:
 ```powershell
 $env:WINMANAGER_ISOLATED_INTERACTIVE = '1'
 $env:WINMANAGER_TEST_LAYOUT_HOLD_SECONDS = '12'
-dotnet test tests\WinManager.Windows.Tests\WinManager.Windows.Tests.csproj --filter 'FullyQualifiedName~EngineTilesTwoNativeProcessesHorizontallyThenVerticallyResizesAndSwaps' --logger 'console;verbosity=detailed'
+dotnet test tests\HomeDesk.Windows.Tests\HomeDesk.Windows.Tests.csproj --filter 'FullyQualifiedName~EngineTilesTwoNativeProcessesHorizontallyThenVerticallyResizesAndSwaps' --logger 'console;verbosity=detailed'
 Remove-Item Env:\WINMANAGER_TEST_LAYOUT_HOLD_SECONDS
 Remove-Item Env:\WINMANAGER_ISOLATED_INTERACTIVE
 ```
@@ -83,7 +83,7 @@ Run it only in an explicitly isolated interactive desktop:
 
 ```powershell
 $env:WINMANAGER_ISOLATED_INTERACTIVE = '1'
-dotnet test tests\WinManager.Windows.Tests\WinManager.Windows.Tests.csproj --filter 'FullyQualifiedName~PreviewTargetResolutionAndDwmBindingPreserveSourceWindowGeometry'
+dotnet test tests\HomeDesk.Windows.Tests\HomeDesk.Windows.Tests.csproj --filter 'FullyQualifiedName~PreviewTargetResolutionAndDwmBindingPreserveSourceWindowGeometry'
 Remove-Item Env:\WINMANAGER_ISOLATED_INTERACTIVE
 ```
 
@@ -171,7 +171,7 @@ desktop while making a three-finger contact gesture:
 
 ```powershell
 $env:WINMANAGER_ISOLATED_INTERACTIVE = '1'
-dotnet test tests\WinManager.Windows.Tests\WinManager.Windows.Tests.csproj --filter 'FullyQualifiedName~RawTouchpadProbeCanObserveThreeFingerContactFrames'
+dotnet test tests\HomeDesk.Windows.Tests\HomeDesk.Windows.Tests.csproj --filter 'FullyQualifiedName~RawTouchpadProbeCanObserveThreeFingerContactFrames'
 Remove-Item Env:\WINMANAGER_ISOLATED_INTERACTIVE
 ```
 

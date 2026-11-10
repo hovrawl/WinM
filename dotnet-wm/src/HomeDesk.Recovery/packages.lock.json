@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0-windows7.0": {
+      "homedesk.contracts": {
+        "type": "Project"
+      },
+      "homedesk.core": {
+        "type": "Project",
+        "dependencies": {
+          "HomeDesk.Contracts": "[1.0.0, )"
+        }
+      },
+      "homedesk.windows": {
+        "type": "Project",
+        "dependencies": {
+          "HomeDesk.Core": "[1.0.0, )"
+        }
+      }
+    }
+  }
+}

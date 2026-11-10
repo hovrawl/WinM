@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0-windows7.0": {
+      "homedesk.cli": {
+        "type": "Project",
+        "dependencies": {
+          "HomeDesk.Client": "[1.0.0, )"
+        }
+      },
+      "homedesk.client": {
+        "type": "Project",
+        "dependencies": {
+          "HomeDesk.Contracts": "[1.0.0, )"
+        }
+      },
+      "homedesk.contracts": {
+        "type": "Project"
+      }
+    }
+  }
+}

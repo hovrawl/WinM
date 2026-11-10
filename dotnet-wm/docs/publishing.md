@@ -66,7 +66,7 @@ Run the published executables in isolated visual smoke mode to open their demo
 UI, avoid the manager and global keyboard hook, then exit automatically:
 
 ```powershell
-& '.\artifacts\win-x64\native-aot\debug-ui\WinManager.DebugUi.exe' '--smoke'
+& '.\artifacts\win-x64\native-aot\debug-ui\HomeDesk.DebugUi.exe' '--smoke'
 & '.\artifacts\win-x64\native-aot\spatial-switcher\HomeDeskManager.exe' '--smoke'
 ```
 
