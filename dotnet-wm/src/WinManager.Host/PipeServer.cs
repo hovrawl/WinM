@@ -15,6 +15,7 @@ public sealed class PipeServer : IAsyncDisposable
     private readonly int maximumClients;
     private readonly int outputCapacity;
     private readonly ConfigurationStore? configurationStore;
+    private readonly IPreviewTargetResolver? previewResolver;
     private readonly CancellationTokenSource shutdown = new();
     private readonly ConcurrentDictionary<long, Task> clients = new();
     private Task? run;
@@ -22,7 +23,7 @@ public sealed class PipeServer : IAsyncDisposable
     private int disposed;
 
     public PipeServer(ManagerEngine manager, string? pipeName = null, int maximumClients = 16, int outputCapacity = 128,
-        ConfigurationStore? configurationStore = null)
+        ConfigurationStore? configurationStore = null, IPreviewTargetResolver? previewResolver = null)
     {
         ArgumentNullException.ThrowIfNull(manager);
         ArgumentOutOfRangeException.ThrowIfLessThan(maximumClients, 1);
@@ -34,6 +35,7 @@ public sealed class PipeServer : IAsyncDisposable
         this.maximumClients = maximumClients;
         this.outputCapacity = outputCapacity;
         this.configurationStore = configurationStore;
+        this.previewResolver = previewResolver;
     }
 
     public Task RunAsync(CancellationToken cancellationToken)
@@ -60,7 +62,8 @@ public sealed class PipeServer : IAsyncDisposable
                     pipe = LocalPipeServer.Create(pipeName, maximumClients, 4096);
                     await pipe.WaitForConnectionAsync(stop.Token);
                     var id = ++nextClient;
-                    var connection = new Connection(manager, configurationStore, pipe, outputCapacity, stop.Token);
+                    var connection = new Connection(manager, configurationStore, previewResolver, pipe, outputCapacity,
+                        stop.Token);
                     pipe = null;
                     clients[id] = ServeAsync(connection, slots);
                     foreach (var finished in clients.Where(entry => entry.Value.IsCompletedSuccessfully))
@@ -108,6 +111,7 @@ public sealed class PipeServer : IAsyncDisposable
     {
         private readonly ManagerEngine manager;
         private readonly ConfigurationStore? configurationStore;
+        private readonly IPreviewTargetResolver? previewResolver;
         private readonly NamedPipeServerStream pipe;
         private readonly Channel<object> output;
         private readonly CancellationTokenSource stop;
@@ -115,11 +119,12 @@ public sealed class PipeServer : IAsyncDisposable
         private Guid? subscriptionId;
 
         internal Connection(ManagerEngine manager, ConfigurationStore? configurationStore,
-            NamedPipeServerStream pipe, int capacity,
+            IPreviewTargetResolver? previewResolver, NamedPipeServerStream pipe, int capacity,
             CancellationToken cancellationToken)
         {
             this.manager = manager;
             this.configurationStore = configurationStore;
+            this.previewResolver = previewResolver;
             this.pipe = pipe;
             stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             output = Channel.CreateBounded<object>(new BoundedChannelOptions(capacity)
@@ -255,6 +260,45 @@ public sealed class PipeServer : IAsyncDisposable
                         if (snapshot is null) Error(requestId, "not_ready", "Manager has no committed snapshot.");
                         else Respond(requestId, true, null, null, snapshot.StateRevision, Protocol.Payload(snapshot));
                         break;
+                    case "query.previewTargets":
+                        CheckObject(payload, "windowIds");
+                        var previewRequest = payload.Deserialize(Protocol.TypeInfo<PreviewTargetsRequest>()) ??
+                                             throw new ArgumentException("Preview-target request is required.");
+                        if (!PreviewTargetsRequestRules.IsValid(previewRequest))
+                            throw new ArgumentException("Preview queries require 1 to 64 unique, nonempty window IDs.");
+                        var previewSnapshot = manager.Current;
+                        if (previewSnapshot is null)
+                        {
+                            Error(requestId, "not_ready", "Manager has no committed snapshot.");
+                            break;
+                        }
+
+                        var knownIds = previewSnapshot.Desktop.Windows.Select(window => window.Id).ToHashSet();
+                        var requestedIds = previewRequest.WindowIds!;
+                        var knownRequests = requestedIds.Where(knownIds.Contains).ToArray();
+                        var failures = requestedIds.Where(id => !knownIds.Contains(id))
+                            .Select(id => new PreviewTargetFailure(id, "unknown_window")).ToList();
+                        PreviewTargetsResult resolved;
+                        if (previewResolver is null)
+                        {
+                            failures.AddRange(knownRequests.Select(id =>
+                                new PreviewTargetFailure(id, "preview_unavailable")));
+                            resolved = new PreviewTargetsResult(previewSnapshot.StateRevision, [], failures);
+                        }
+                        else if (knownRequests.Length == 0)
+                        {
+                            resolved = new PreviewTargetsResult(previewSnapshot.StateRevision, [], failures);
+                        }
+                        else
+                        {
+                            resolved = await previewResolver.ResolvePreviewTargetsAsync(knownRequests,
+                                previewSnapshot.StateRevision, stop.Token);
+                            failures.AddRange(resolved.Failures);
+                            resolved = resolved with { Failures = failures };
+                        }
+
+                        Respond(requestId, true, null, null, previewSnapshot.StateRevision, Protocol.Payload(resolved));
+                        break;
                     case "configuration.read":
                         CheckObject(payload);
                         var configuration = RequireConfigurationStore().Read();
@@ -359,7 +403,8 @@ public sealed class PipeServer : IAsyncDisposable
         }
 
         private ConfigurationStore RequireConfigurationStore() => configurationStore ??
-            throw new InvalidOperationException("Configuration editing is unavailable on this host.");
+                                                                  throw new InvalidOperationException(
+                                                                      "Configuration editing is unavailable on this host.");
 
         private void Error(Guid id, string code, string message) =>
             Respond(id, false, code, message, manager.Current?.StateRevision ?? 0);

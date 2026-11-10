@@ -55,12 +55,16 @@ internal sealed class SpatialApplication : Application
                 appearanceItems.Add(mode, item);
                 appearanceMenu.Items.Add(item);
             }
+
             menu.Items.Add(new NativeMenuItem("Appearance") { Menu = appearanceMenu });
             menu.Items.Add(new NativeMenuItemSeparator());
 
             var showWindows = new NativeMenuItem("Show window switcher");
             showWindows.Click += (_, _) => switcher.ShowWindowSwitcher();
             menu.Items.Add(showWindows);
+            var showCarousel = new NativeMenuItem("Show preview carousel · Ctrl+Alt+Space");
+            showCarousel.Click += async (_, _) => await switcher.ShowCarouselExperimentAsync();
+            menu.Items.Add(showCarousel);
             var showWorkspaces = new NativeMenuItem("Show workspace switcher");
             showWorkspaces.Click += (_, _) => switcher.ShowWorkspaceSwitcher();
             menu.Items.Add(showWorkspaces);
@@ -96,8 +100,10 @@ internal sealed class SpatialApplication : Application
                 };
                 smokeExitTimer.Start();
             }
+
             desktop.Exit += (_, _) => TrayIcon.SetIcons(this, new TrayIcons());
         }
+
         base.OnFrameworkInitializationCompleted();
     }
 

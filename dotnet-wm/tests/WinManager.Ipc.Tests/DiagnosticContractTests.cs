@@ -36,4 +36,21 @@ public sealed class DiagnosticContractTests
         Assert.Null(restored.Desktop.ConfiguredExclusions);
         Assert.Empty(restored.Desktop.Windows);
     }
+
+    [Fact]
+    public void PreviewTargetRequestsAreSourceGeneratedAndStrictlyBounded()
+    {
+        var request = new PreviewTargetsRequest([Guid.NewGuid(), Guid.NewGuid()]);
+        var payload = Protocol.Payload(request);
+        var restored = payload.Deserialize(Protocol.TypeInfo<PreviewTargetsRequest>())!;
+
+        Assert.True(PreviewTargetsRequestRules.IsValid(restored));
+        Assert.False(PreviewTargetsRequestRules.IsValid(new PreviewTargetsRequest([])));
+        Assert.False(PreviewTargetsRequestRules.IsValid(new PreviewTargetsRequest([Guid.Empty])));
+        var duplicate = Guid.NewGuid();
+        Assert.False(PreviewTargetsRequestRules.IsValid(new PreviewTargetsRequest([duplicate, duplicate])));
+        Assert.False(PreviewTargetsRequestRules.IsValid(new PreviewTargetsRequest(
+            Enumerable.Range(0, PreviewTargetsRequestRules.MaximumWindowIds + 1).Select(_ => Guid.NewGuid())
+                .ToArray())));
+    }
 }

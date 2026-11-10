@@ -15,12 +15,14 @@ using Windows.Win32.UI.WindowsAndMessaging;
 namespace WinManager.Windows;
 
 [SupportedOSPlatform("windows10.0.15063")]
-public sealed partial class WindowsDesktopObserver : IWindowPlatform
+public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTargetResolver
 {
     private const uint CaptureMessage = 0x8001;
     private const uint StopMessage = 0x8002;
     private const uint ApplyMessage = 0x8003;
     private const uint RecoveryCheckMessage = 0x8004;
+    private const uint PreviewTargetsMessage = 0x8005;
+    private const uint ForegroundWindowMessage = 0x8007;
     private const uint ObjectCreate = 0x8000;
     private const uint ObjectDestroy = 0x8001;
     private readonly object gate = new();
@@ -41,6 +43,16 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     private readonly Channel<ApplyRequest> applies = Channel.CreateBounded<ApplyRequest>(
         new BoundedChannelOptions(64)
             { SingleReader = true, FullMode = BoundedChannelFullMode.Wait, AllowSynchronousContinuations = false });
+
+    private readonly Channel<PreviewTargetsRequestWork> previewTargets =
+        Channel.CreateBounded<PreviewTargetsRequestWork>(
+            new BoundedChannelOptions(64)
+                { SingleReader = true, FullMode = BoundedChannelFullMode.Wait, AllowSynchronousContinuations = false });
+
+    private readonly Channel<ForegroundWindowRequest> foregroundWindowRequests =
+        Channel.CreateBounded<ForegroundWindowRequest>(
+            new BoundedChannelOptions(64)
+                { SingleReader = true, FullMode = BoundedChannelFullMode.Wait, AllowSynchronousContinuations = false });
 
     private readonly Dictionary<Guid, WindowInfo> observedWindows = [];
     private readonly Dictionary<Guid, RecoveryRecord> hiddenWindows = [];
@@ -103,6 +115,8 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                     stopped.TrySetResult();
                     captures.Writer.TryComplete(error);
                     applies.Writer.TryComplete(error);
+                    previewTargets.Writer.TryComplete(error);
+                    foregroundWindowRequests.Writer.TryComplete(error);
                     CompleteShortcuts(error);
                     notifications.Writer.TryComplete(error);
                     throw;
@@ -160,6 +174,63 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         return await request.Completion.Task.ConfigureAwait(false);
     }
 
+    public async Task<PreviewTargetsResult> ResolvePreviewTargetsAsync(IReadOnlyList<Guid> windowIds,
+        long stateRevision, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(windowIds);
+        var contract = new PreviewTargetsRequest(windowIds);
+        if (!PreviewTargetsRequestRules.IsValid(contract))
+            throw new ArgumentException("Preview queries require 1 to 64 unique, nonempty window IDs.",
+                nameof(windowIds));
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposing, this);
+            if (thread is null)
+                throw new InvalidOperationException("StartAsync must be called before resolving preview targets.");
+        }
+
+        await started.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var request = new PreviewTargetsRequestWork(windowIds.ToArray(), stateRevision, cancellationToken);
+        using var registration = cancellationToken.Register(() => request.Completion.TrySetCanceled(cancellationToken));
+        await previewTargets.Writer.WriteAsync(request, cancellationToken).ConfigureAwait(false);
+        lock (gate)
+        {
+            if (disposing)
+                request.Completion.TrySetException(new ObjectDisposedException(nameof(WindowsDesktopObserver)));
+            else if (!PInvoke.PostMessage(notificationWindow, PreviewTargetsMessage, default, default))
+                request.Completion.TrySetException(NativeError("PostMessage"));
+        }
+
+        return await request.Completion.Task.ConfigureAwait(false);
+    }
+
+    public async Task<Guid?> ResolveManagedForegroundWindowAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposing, this);
+            if (thread is null)
+                throw new InvalidOperationException(
+                    "StartAsync must be called before resolving the foreground window.");
+        }
+
+        await started.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var request = new ForegroundWindowRequest(cancellationToken);
+        using var registration = cancellationToken.Register(() => request.Completion.TrySetCanceled(cancellationToken));
+        await foregroundWindowRequests.Writer.WriteAsync(request, cancellationToken).ConfigureAwait(false);
+        lock (gate)
+        {
+            if (disposing)
+                request.Completion.TrySetException(new ObjectDisposedException(nameof(WindowsDesktopObserver)));
+            else if (!PInvoke.PostMessage(notificationWindow, ForegroundWindowMessage, default, default))
+                request.Completion.TrySetException(NativeError("PostMessage"));
+        }
+
+        return await request.Completion.Task.ConfigureAwait(false);
+    }
+
     public Task<ApplyResult> ApplyAsync(LayoutPlan plan, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -205,6 +276,8 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 disposing = true;
                 captures.Writer.TryComplete();
                 applies.Writer.TryComplete();
+                previewTargets.Writer.TryComplete();
+                foregroundWindowRequests.Writer.TryComplete();
                 shortcutRequests.Writer.TryComplete();
                 if (thread is null)
                 {
@@ -303,6 +376,18 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                     continue;
                 }
 
+                if (message.hwnd == window && message.message == PreviewTargetsMessage)
+                {
+                    ProcessPreviewTargets(window);
+                    continue;
+                }
+
+                if (message.hwnd == window && message.message == ForegroundWindowMessage)
+                {
+                    ProcessForegroundWindowRequests(window);
+                    continue;
+                }
+
                 if (message.hwnd == window && message.message == RecoveryCheckMessage)
                 {
                     CheckRecovery();
@@ -354,6 +439,15 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
             while (applies.Reader.TryRead(out var request))
                 request.Completion.TrySetException(failure ??
                                                    new ObjectDisposedException(nameof(WindowsDesktopObserver)));
+            previewTargets.Writer.TryComplete(failure);
+            while (previewTargets.Reader.TryRead(out var previewRequest))
+                previewRequest.Completion.TrySetException(failure ??
+                                                          new ObjectDisposedException(nameof(WindowsDesktopObserver)));
+            foregroundWindowRequests.Writer.TryComplete(failure);
+            while (foregroundWindowRequests.Reader.TryRead(out var foregroundRequest))
+                foregroundRequest.Completion.TrySetException(failure ??
+                                                             new ObjectDisposedException(
+                                                                 nameof(WindowsDesktopObserver)));
             notifications.Writer.TryComplete(failure);
             started.TrySetException(failure ?? new ObjectDisposedException(nameof(WindowsDesktopObserver)));
             stopped.TrySetResult();
@@ -494,6 +588,99 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
         }
 
         if (applies.Reader.TryPeek(out _)) PInvoke.PostMessage(window, ApplyMessage, default, default);
+    }
+
+    private void ProcessPreviewTargets(HWND window)
+    {
+        for (var count = 0; count < 8 && previewTargets.Reader.TryRead(out var request); count++)
+        {
+            if (request.Completion.Task.IsCompleted) continue;
+            try
+            {
+                request.CancellationToken.ThrowIfCancellationRequested();
+                request.Completion.TrySetResult(ResolvePreviewTargets(request.WindowIds, request.StateRevision,
+                    request.CancellationToken));
+            }
+            catch (OperationCanceledException)
+            {
+                request.Completion.TrySetCanceled(request.CancellationToken);
+            }
+            catch (Exception error)
+            {
+                request.Completion.TrySetException(error);
+            }
+        }
+
+        if (previewTargets.Reader.TryPeek(out _)) PInvoke.PostMessage(window, PreviewTargetsMessage, default, default);
+    }
+
+    private void ProcessForegroundWindowRequests(HWND window)
+    {
+        for (var count = 0; count < 8 && foregroundWindowRequests.Reader.TryRead(out var request); count++)
+        {
+            if (request.Completion.Task.IsCompleted) continue;
+            try
+            {
+                request.CancellationToken.ThrowIfCancellationRequested();
+                var foregroundHandle = GetForegroundWindow();
+                var id = foregroundHandle != 0 && identities.TryResolveHandle(foregroundHandle, out var resolvedId) &&
+                         observedWindows.ContainsKey(resolvedId) &&
+                         ValidateTarget(resolvedId, out _, out _, out _)
+                    ? resolvedId
+                    : (Guid?)null;
+                request.Completion.TrySetResult(id);
+            }
+            catch (OperationCanceledException)
+            {
+                request.Completion.TrySetCanceled(request.CancellationToken);
+            }
+            catch (Exception error)
+            {
+                request.Completion.TrySetException(error);
+            }
+        }
+
+        if (foregroundWindowRequests.Reader.TryPeek(out _))
+            PInvoke.PostMessage(window, ForegroundWindowMessage, default, default);
+    }
+
+    private PreviewTargetsResult ResolvePreviewTargets(IReadOnlyList<Guid> windowIds, long stateRevision,
+        CancellationToken cancellationToken)
+    {
+        var targets = new List<WindowPreviewTarget>(windowIds.Count);
+        var failures = new List<PreviewTargetFailure>();
+        foreach (var id in windowIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!ValidateTarget(id, out var window, out var info, out var failure))
+            {
+                failures.Add(new PreviewTargetFailure(id, failure?.Code ?? "stale_window"));
+                continue;
+            }
+
+            if (info!.Minimized)
+            {
+                failures.Add(new PreviewTargetFailure(id, "minimized"));
+                continue;
+            }
+
+            if (!info.Visible)
+            {
+                failures.Add(new PreviewTargetFailure(id, "not_visible"));
+                continue;
+            }
+
+            if (!identities.TryResolve(id, out var identity))
+            {
+                failures.Add(new PreviewTargetFailure(id, "stale_window"));
+                continue;
+            }
+
+            targets.Add(new WindowPreviewTarget(id, (long)identity.Handle, identity.ProcessId,
+                identity.ProcessCreationTime));
+        }
+
+        return new PreviewTargetsResult(stateRevision, targets, failures);
     }
 
     private unsafe DesktopSnapshot Capture(CancellationToken cancellationToken)
@@ -736,6 +923,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
                 failures.Add(ActionError(windowId, "SetWindowPos(z-order)"));
                 continue;
             }
+
             insertAfter = window;
         }
 
@@ -1227,6 +1415,9 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
 
     private static Win32Exception NativeError(string operation) => new(Marshal.GetLastWin32Error(), operation);
 
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
     private sealed record CaptureRequest(CancellationToken CancellationToken)
     {
         public TaskCompletionSource<DesktopSnapshot> Completion { get; } =
@@ -1236,6 +1427,21 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform
     private sealed record ApplyRequest(LayoutPlan Plan, CancellationToken CancellationToken, bool Restore)
     {
         public TaskCompletionSource<ApplyResult> Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed record PreviewTargetsRequestWork(
+        IReadOnlyList<Guid> WindowIds,
+        long StateRevision,
+        CancellationToken CancellationToken)
+    {
+        public TaskCompletionSource<PreviewTargetsResult> Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed record ForegroundWindowRequest(CancellationToken CancellationToken)
+    {
+        public TaskCompletionSource<Guid?> Completion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }

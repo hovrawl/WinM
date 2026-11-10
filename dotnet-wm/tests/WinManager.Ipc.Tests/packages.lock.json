@@ -606,7 +606,8 @@
           "Avalonia.Desktop": "[12.1.5, )",
           "Avalonia.Themes.Fluent": "[12.1.5, )",
           "WinManager.Contracts": "[1.0.0, )",
-          "WinManager.Ui": "[1.0.0, )"
+          "WinManager.Ui": "[1.0.0, )",
+          "WinManager.Windows": "[1.0.0, )"
         }
       },
       "winmanager.ui": {

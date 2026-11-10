@@ -20,6 +20,7 @@ try
             return await WindowsRecovery.RunAsync(args[3..], args[2]);
         return await WindowsRecovery.RunAsync(args[1..]);
     }
+
     if (args is ["--tray-smoke"])
     {
         var smokeBuilder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = [] });
@@ -31,6 +32,7 @@ try
         await smokeHost.RunAsync(smokeStop.Token);
         return 0;
     }
+
     if (args is ["--recovery-smoke"])
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "recovery-smoke-" + Guid.NewGuid().ToString("N"));
@@ -46,8 +48,10 @@ try
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
         }
     }
+
     using var process = System.Diagnostics.Process.GetCurrentProcess();
-    if (process.SessionId == 0) throw new PlatformNotSupportedException("Run in the interactive user session, not Session 0.");
+    if (process.SessionId == 0)
+        throw new PlatformNotSupportedException("Run in the interactive user session, not Session 0.");
     string? configPath = null;
     string? pipeName = null;
     string? recoveryPath = null;
@@ -55,9 +59,11 @@ try
     {
         if (args[index] == "--help")
         {
-            Console.WriteLine("WinManager.Host [--config PATH] [--data-dir PATH] [--pipe NAME] [--recovery-executable PATH]");
+            Console.WriteLine(
+                "WinManager.Host [--config PATH] [--data-dir PATH] [--pipe NAME] [--recovery-executable PATH]");
             return 0;
         }
+
         if (index + 1 >= args.Length) throw new ArgumentException("Host option requires a value.");
         switch (args[index++])
         {
@@ -68,6 +74,7 @@ try
             default: throw new ArgumentException("Unknown host option.");
         }
     }
+
     using var instance = new SingleInstanceLease("Local\\" + Protocol.DefaultPipeName() + ".instance");
     if (!instance.Acquired) return 5;
     var configurationPath = Path.GetFullPath(configPath ?? Path.Combine(dataDirectory, "config.json"));
@@ -81,17 +88,20 @@ try
     builder.Services.AddSingleton(configuration);
     builder.Services.AddSingleton(configurationStore);
     builder.Services.AddSingleton<HostRuntimeState>();
+    builder.Services.AddSingleton<TouchpadInputSource>();
     builder.Services.AddSingleton<IHostTray, WindowsHostTray>();
     HostComposition.AddNativeServices(builder.Services, configuration, recoveryPath);
     builder.Services.AddSingleton(services => new ManagerEngine(services.GetRequiredService<IWindowPlatform>(),
         configuration.InnerGap, configuration.OuterGap, configuration.InputCapacity, configuration.Workspaces,
         configuration.MonitorOrder));
     builder.Services.AddSingleton(services => new PipeServer(services.GetRequiredService<ManagerEngine>(), pipeName,
-        configuration.MaximumClients, configuration.OutputCapacity, configurationStore));
+        configuration.MaximumClients, configuration.OutputCapacity, configurationStore,
+        services.GetRequiredService<IWindowPlatform>() as IPreviewTargetResolver));
     builder.Services.AddHostedService<HostTrayService>();
     builder.Services.AddHostedService<ObservationService>();
     builder.Services.AddHostedService<PipeService>();
     builder.Services.AddHostedService<ShortcutService>();
+    builder.Services.AddHostedService<GestureService>();
     using var host = builder.Build();
     await host.StartAsync();
     await host.WaitForShutdownAsync();
@@ -106,14 +116,18 @@ catch (Exception error)
         using var emergency = new RotatingFileLoggerProvider(Path.Combine(dataDirectory, "Logs"), 2 * 1024 * 1024, 4);
         emergency.CreateLogger("Startup").LogError(error, "Host startup or lifetime failed");
     }
-    catch (Exception) { }
+    catch (Exception)
+    {
+    }
+
     return 2;
 }
 
 [SupportedOSPlatform("windows10.0.15063")]
 internal static class HostComposition
 {
-    public static void AddNativeServices(IServiceCollection services, ManagerConfiguration configuration, string? recoveryPath)
+    public static void AddNativeServices(IServiceCollection services, ManagerConfiguration configuration,
+        string? recoveryPath)
     {
         var recoveryLaunch = HostRecoveryLaunch.Resolve(recoveryPath, Environment.ProcessPath,
             HostBuild.IsNativeAot);
@@ -140,7 +154,8 @@ internal static class HostRecoveryLaunch
     {
         if (configuredPath is not null) return new RecoveryLaunch(configuredPath, []);
         if (useSelfExecutable)
-            return new RecoveryLaunch(processPath ?? throw new InvalidOperationException("The host executable path is unavailable."),
+            return new RecoveryLaunch(
+                processPath ?? throw new InvalidOperationException("The host executable path is unavailable."),
                 ["--recovery"]);
         return new RecoveryLaunch(Path.Combine(AppContext.BaseDirectory, "WinManager.Recovery.exe"), []);
     }
@@ -153,8 +168,11 @@ internal sealed class HostRuntimeState
     public void MarkFailed() => Interlocked.Exchange(ref failed, 1);
 }
 
-internal sealed class ObservationService(ManagerEngine observation,
-    IHostApplicationLifetime lifetime, ILogger<ObservationService> logger, HostRuntimeState status) : BackgroundService
+internal sealed class ObservationService(
+    ManagerEngine observation,
+    IHostApplicationLifetime lifetime,
+    ILogger<ObservationService> logger,
+    HostRuntimeState status) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -164,36 +182,76 @@ internal sealed class ObservationService(ManagerEngine observation,
         observation.ActionsFailed += failures =>
         {
             foreach (var failure in failures)
-                logger.LogWarning("Window action diagnostic: {Code} {WindowId} {Message}", failure.Code, failure.WindowId, failure.Message);
+                logger.LogWarning("Window action diagnostic: {Code} {WindowId} {Message}", failure.Code,
+                    failure.WindowId, failure.Message);
         };
-        try { await observation.RunAsync(stoppingToken); }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-        catch (Exception) { status.MarkFailed(); throw; }
-        finally { lifetime.StopApplication(); }
+        try
+        {
+            await observation.RunAsync(stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            status.MarkFailed();
+            throw;
+        }
+        finally
+        {
+            lifetime.StopApplication();
+        }
     }
 }
 
 internal sealed class PipeService(PipeServer server, ManagerEngine manager, HostRuntimeState status) : BackgroundService
 {
     private readonly CancellationTokenSource serverStop = new();
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try { await server.RunAsync(serverStop.Token); }
-        catch (OperationCanceledException) when (serverStop.IsCancellationRequested) { }
-        catch (Exception) { status.MarkFailed(); throw; }
+        try
+        {
+            await server.RunAsync(serverStop.Token);
+        }
+        catch (OperationCanceledException) when (serverStop.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            status.MarkFailed();
+            throw;
+        }
     }
+
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        try { await manager.Stopped.WaitAsync(cancellationToken); }
-        finally { await serverStop.CancelAsync(); }
+        try
+        {
+            await manager.Stopped.WaitAsync(cancellationToken);
+        }
+        finally
+        {
+            await serverStop.CancelAsync();
+        }
+
         await base.StopAsync(cancellationToken);
     }
-    public override void Dispose() { serverStop.Dispose(); base.Dispose(); }
+
+    public override void Dispose()
+    {
+        serverStop.Dispose();
+        base.Dispose();
+    }
 }
 
 [SupportedOSPlatform("windows10.0.15063")]
-internal sealed class ShortcutService(WindowsDesktopObserver platform, ManagerEngine manager,
-    ManagerConfiguration configuration, ILogger<ShortcutService> logger, HostRuntimeState status) : BackgroundService
+internal sealed class ShortcutService(
+    WindowsDesktopObserver platform,
+    ManagerEngine manager,
+    ManagerConfiguration configuration,
+    ILogger<ShortcutService> logger,
+    HostRuntimeState status) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -202,14 +260,22 @@ internal sealed class ShortcutService(WindowsDesktopObserver platform, ManagerEn
             await platform.StartAsync(stoppingToken);
             await manager.Ready.WaitAsync(stoppingToken);
             var failures = await platform.RegisterShortcutsAsync(configuration.BuildShortcutBindings(), stoppingToken);
-            if (failures.Count > 0) throw new InvalidOperationException(string.Join("; ", failures.Select(failure => failure.Message)));
+            if (failures.Count > 0)
+                throw new InvalidOperationException(string.Join("; ", failures.Select(failure => failure.Message)));
             await foreach (var command in platform.ShortcutCommands(stoppingToken))
             {
                 var result = await manager.ExecuteAsync(command, stoppingToken);
-                if (!result.Success) logger.LogWarning("Shortcut rejected: {Code} {Message}", result.ErrorCode, result.Message);
+                if (!result.Success)
+                    logger.LogWarning("Shortcut rejected: {Code} {Message}", result.ErrorCode, result.Message);
             }
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-        catch (Exception) { status.MarkFailed(); throw; }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            status.MarkFailed();
+            throw;
+        }
     }
 }

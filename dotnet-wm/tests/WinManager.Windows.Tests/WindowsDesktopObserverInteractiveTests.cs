@@ -25,7 +25,8 @@ public sealed class WindowsDesktopObserverInteractiveTests
             await observer.StartAsync(timeout.Token);
             Assert.Equal(count + 1, NativeInspection.ObserverWindowCount());
             var first = await observer.CaptureAsync(timeout.Token);
-            var candidates = first.Windows.Where(window => window.Title.StartsWith(fixture.Prefix, StringComparison.Ordinal)).ToArray();
+            var candidates = first.Windows
+                .Where(window => window.Title.StartsWith(fixture.Prefix, StringComparison.Ordinal)).ToArray();
             Assert.Equal(5, candidates.Length);
             foreach (var name in new[] { "normal", "popup", "tool", "owned", "noactivate" })
             {
@@ -38,9 +39,11 @@ public sealed class WindowsDesktopObserverInteractiveTests
                 Assert.Null(candidate.TilingOverride);
                 Assert.Equal(fixture.WindowClass, candidate.ClassName);
             }
+
             foreach (var name in new[] { "hidden", "child", "ignored", "own-process" })
                 Assert.DoesNotContain(first.Windows, candidate => candidate.Title == fixture.Prefix + "." + name);
-            var classExclusion = Assert.Single(first.ConfiguredExclusions!, candidate => candidate.Title == fixture.Prefix + ".ignored");
+            var classExclusion = Assert.Single(first.ConfiguredExclusions!,
+                candidate => candidate.Title == fixture.Prefix + ".ignored");
             Assert.True(classExclusion.ClassNameExcluded);
             Assert.False(classExclusion.ProcessNameExcluded);
             Assert.Equal(fixture.IgnoredClass, classExclusion.ClassName);
@@ -60,23 +63,138 @@ public sealed class WindowsDesktopObserverInteractiveTests
                 Assert.True(monitor.WorkArea.Width > 0 && monitor.WorkArea.Height > 0);
             });
             Assert.Contains(first.Monitors, monitor => monitor.Id == window.MonitorId);
-            Assert.Equal(NativeInspection.WindowDpi(window.Title), Assert.Single(first.Monitors, monitor => monitor.Id == window.MonitorId).Dpi);
-            Assert.DoesNotContain(first.Windows, candidate => candidate.ClassName.StartsWith("WinManager.Observer.", StringComparison.Ordinal));
+            Assert.Equal(NativeInspection.WindowDpi(window.Title),
+                Assert.Single(first.Monitors, monitor => monitor.Id == window.MonitorId).Dpi);
+            Assert.DoesNotContain(first.Windows,
+                candidate => candidate.ClassName.StartsWith("WinManager.Observer.", StringComparison.Ordinal));
             var second = await observer.CaptureAsync(timeout.Token);
             Assert.All(candidates, candidate =>
                 Assert.Equal(candidate.Id, Assert.Single(second.Windows, entry => entry.Title == candidate.Title).Id));
             Assert.Equal(first.Monitors.ToArray(), second.Monitors.ToArray());
 
-            await using var ignoreProcess = new WindowsDesktopObserver(ignoredProcessNames: [window.ProcessName.ToUpperInvariant() + ".exe"]);
+            await using var ignoreProcess = new WindowsDesktopObserver(ignoredProcessNames:
+                [window.ProcessName.ToUpperInvariant() + ".exe"]);
             await ignoreProcess.StartAsync(timeout.Token);
             var processExcluded = await ignoreProcess.CaptureAsync(timeout.Token);
             Assert.DoesNotContain(processExcluded.Windows,
                 candidate => candidate.Title.StartsWith(fixture.Prefix, StringComparison.Ordinal));
-            var processExclusion = Assert.Single(processExcluded.ConfiguredExclusions!, candidate => candidate.Title == window.Title);
+            var processExclusion = Assert.Single(processExcluded.ConfiguredExclusions!,
+                candidate => candidate.Title == window.Title);
             Assert.True(processExclusion.ProcessNameExcluded);
             Assert.False(processExclusion.ClassNameExcluded);
         }
+
         Assert.Equal(count, NativeInspection.ObserverWindowCount());
+    }
+
+    [IsolatedInteractiveFact]
+    [Trait("Category", "IsolatedInteractive")]
+    public async Task PreviewTargetResolutionAndDwmBindingPreserveSourceWindowGeometry()
+    {
+        await using var fixture = await NativeWindowFixture.StartAsync();
+        var destinationTitle = fixture.Prefix + ".preview-destination";
+        await using var destinationWindow = await OwnProcessWindow.CreateAsync(destinationTitle);
+        await using var observer = new WindowsDesktopObserver(ignoredClassNames: [fixture.IgnoredClass]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await observer.StartAsync(timeout.Token);
+        var source = Find(await observer.CaptureAsync(timeout.Token), fixture.Prefix + ".normal");
+        Assert.NotNull(source);
+        var before = NativeInspection.WindowBounds(source.Title);
+        var resolved = await observer.ResolvePreviewTargetsAsync([source.Id], 3, timeout.Token);
+        var target = Assert.Single(resolved.Targets);
+        Assert.Equal((uint)fixture.ProcessId, target.ProcessId);
+        Assert.True(target.HandleValue != 0 && target.ProcessCreationTime != 0);
+
+        var destinationHandle = NativeInspection.FindHandle(destinationTitle);
+        Assert.NotEqual((nint)0, destinationHandle);
+        using (var renderer = new DwmThumbnailRenderer(destinationHandle))
+        {
+            Assert.True(renderer.TryBind(target, out var sourceSize, out var failure), failure);
+            Assert.True(sourceSize.Width > 0 && sourceSize.Height > 0);
+            Assert.True(renderer.TryUpdate(source.Id, new PixelRect(20, 20, 300, 180)));
+            await Task.Delay(150, timeout.Token);
+            Assert.Equal(before, NativeInspection.WindowBounds(source.Title));
+        }
+
+        using (var reopened = new DwmThumbnailRenderer(destinationHandle))
+        {
+            Assert.True(reopened.TryBind(target, out _, out var failure), failure);
+            Assert.True(reopened.TryUpdate(source.Id, new PixelRect(40, 30, 240, 160)));
+        }
+
+        var missing = await observer.ResolvePreviewTargetsAsync([Guid.NewGuid()], 3, timeout.Token);
+        Assert.Equal("stale_window", Assert.Single(missing.Failures).Code);
+    }
+
+    [IsolatedInteractiveFact]
+    [Trait("Category", "IsolatedInteractive")]
+    public async Task RawTouchpadProbeReportsCapabilityWithoutClaimingShellGestureOwnership()
+    {
+        await using var source = new TouchpadInputSource();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        await source.StartAsync(timeout.Token);
+
+        var capability = source.Capability;
+        Assert.False(capability.GestureConflictSuppressionVerified);
+        Assert.False(capability.CanDispatchActions);
+        Assert.True(capability.State is TouchpadCapabilityState.UnsupportedDevice or
+            TouchpadCapabilityState.RegistrationFailed or TouchpadCapabilityState.DecodingFailed or
+            TouchpadCapabilityState.GestureConflictBlocked);
+    }
+
+    [IsolatedInteractiveFact]
+    [Trait("Category", "IsolatedInteractive")]
+    public async Task RawTouchpadProbeCanObserveThreeFingerContactFrames()
+    {
+        await using var source = new TouchpadInputSource();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var observed =
+            new TaskCompletionSource<TouchpadContactFrame>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void OnFrame(TouchpadContactFrame frame)
+        {
+            if (frame.Contacts.Count >= 3) observed.TrySetResult(frame);
+        }
+
+        source.FrameReceived += OnFrame;
+        await source.StartAsync(timeout.Token);
+        TouchpadContactFrame? sample = null;
+        try
+        {
+            sample = await observed.Task.WaitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            source.FrameReceived -= OnFrame;
+        }
+
+        Assert.True(sample is not null,
+            $"No three-finger contact frame arrived. Capability: {source.Capability.State}; " +
+            $"devices: {source.Capability.DeviceCount}; detail: {source.Capability.Detail}");
+        Assert.True(source.Capability.ContactReportsObserved);
+        Assert.False(source.Capability.GestureConflictSuppressionVerified);
+        Assert.False(source.Capability.CanDispatchActions);
+    }
+
+    [IsolatedInteractiveFact]
+    [Trait("Category", "IsolatedInteractive")]
+    public async Task ForegroundResolutionReturnsTheManagedIdentityOfTheActualForegroundWindow()
+    {
+        await using var fixture = await NativeWindowFixture.StartAsync();
+        await using var observer = new WindowsDesktopObserver(ignoredClassNames: [fixture.IgnoredClass]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await observer.StartAsync(timeout.Token);
+        var source = Find(await observer.CaptureAsync(timeout.Token), fixture.Prefix + ".normal");
+        Assert.NotNull(source);
+
+        await fixture.CommandAsync("focus");
+        var foregroundWindowId = await observer.ResolveManagedForegroundWindowAsync(timeout.Token);
+
+        Assert.Equal(source.Id, foregroundWindowId);
     }
 
     [IsolatedInteractiveFact]
@@ -90,31 +208,39 @@ public sealed class WindowsDesktopObserverInteractiveTests
         var first = Find(await observer.CaptureAsync(timeout.Token), fixture.Prefix + ".normal");
         Assert.NotNull(first);
         await fixture.CommandAsync("rename");
-        var renamed = await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed") is not null, timeout.Token);
+        var renamed = await EventuallyAsync(observer,
+            snapshot => Find(snapshot, fixture.Prefix + ".renamed") is not null, timeout.Token);
         Assert.Equal(first.Id, Find(renamed, fixture.Prefix + ".renamed")!.Id);
         await fixture.CommandAsync("move");
-        var moved = await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed")?.Bounds != first.Bounds, timeout.Token);
+        var moved = await EventuallyAsync(observer,
+            snapshot => Find(snapshot, fixture.Prefix + ".renamed")?.Bounds != first.Bounds, timeout.Token);
         Assert.Equal(first.Id, Find(moved, fixture.Prefix + ".renamed")!.Id);
         await fixture.CommandAsync("fullscreen");
-        await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed")?.Fullscreen == true, timeout.Token);
+        await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed")?.Fullscreen == true,
+            timeout.Token);
         await fixture.CommandAsync("minimize");
-        await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed")?.Minimized == true, timeout.Token);
+        await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed")?.Minimized == true,
+            timeout.Token);
         await fixture.CommandAsync("restore");
-        await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed")?.Minimized == false, timeout.Token);
+        await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed")?.Minimized == false,
+            timeout.Token);
         await fixture.CommandAsync("hide");
         await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed") is null, timeout.Token);
         await fixture.CommandAsync("show");
-        var shown = await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed") is not null, timeout.Token);
+        var shown = await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed") is not null,
+            timeout.Token);
         Assert.Equal(first.Id, Find(shown, fixture.Prefix + ".renamed")!.Id);
         await fixture.CommandAsync("cloak");
         await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed") is null, timeout.Token);
         await fixture.CommandAsync("uncloak");
-        var uncloaked = await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed") is not null, timeout.Token);
+        var uncloaked = await EventuallyAsync(observer,
+            snapshot => Find(snapshot, fixture.Prefix + ".renamed") is not null, timeout.Token);
         Assert.Equal(first.Id, Find(uncloaked, fixture.Prefix + ".renamed")!.Id);
         await fixture.CommandAsync("destroy");
         await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".renamed") is null, timeout.Token);
         await fixture.CommandAsync("create");
-        var created = await EventuallyAsync(observer, snapshot => Find(snapshot, fixture.Prefix + ".normal") is not null, timeout.Token);
+        var created = await EventuallyAsync(observer,
+            snapshot => Find(snapshot, fixture.Prefix + ".normal") is not null, timeout.Token);
         Assert.NotEqual(first.Id, Find(created, fixture.Prefix + ".normal")!.Id);
     }
 
@@ -131,7 +257,8 @@ public sealed class WindowsDesktopObserverInteractiveTests
             snapshot => Find(snapshot, fixture.Prefix + ".normal")?.Minimized == true, timeout.Token);
         var window = Find(minimized, fixture.Prefix + ".normal")!;
 
-        var result = await observer.ApplyAsync(new LayoutPlan([], Minimizations: [new(window.Id, false)]), timeout.Token);
+        var result =
+            await observer.ApplyAsync(new LayoutPlan([], Minimizations: [new(window.Id, false)]), timeout.Token);
 
         Assert.Empty(result.Failures);
         var restored = await EventuallyAsync(observer,
@@ -180,26 +307,42 @@ public sealed class WindowsDesktopObserverInteractiveTests
             await observer.DisposeAsync().AsTask().WaitAsync(timeout.Token);
             foreach (var capture in pending)
             {
-                try { await capture.WaitAsync(timeout.Token); }
-                catch (ObjectDisposedException) { }
-                catch (System.Threading.Channels.ChannelClosedException) { }
+                try
+                {
+                    await capture.WaitAsync(timeout.Token);
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+                catch (System.Threading.Channels.ChannelClosedException)
+                {
+                }
             }
+
             Assert.Equal(count, NativeInspection.ObserverWindowCount());
         }
+
         for (var iteration = 0; iteration < 10; iteration++)
         {
             await using var observer = new WindowsDesktopObserver();
             using var cancellation = new CancellationTokenSource();
             var starting = observer.StartAsync(cancellation.Token);
             cancellation.Cancel();
-            try { await starting.WaitAsync(TimeSpan.FromSeconds(15)); }
-            catch (OperationCanceledException) { }
+            try
+            {
+                await starting.WaitAsync(TimeSpan.FromSeconds(15));
+            }
+            catch (OperationCanceledException)
+            {
+            }
+
             await observer.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(15));
             Assert.Equal(count, NativeInspection.ObserverWindowCount());
         }
     }
 
-    private static WindowInfo? Find(DesktopSnapshot snapshot, string title) => snapshot.Windows.SingleOrDefault(window => window.Title == title);
+    private static WindowInfo? Find(DesktopSnapshot snapshot, string title) =>
+        snapshot.Windows.SingleOrDefault(window => window.Title == title);
 
     private static async Task<DesktopSnapshot> EventuallyAsync(WindowsDesktopObserver observer,
         Func<DesktopSnapshot, bool> condition, CancellationToken cancellationToken)

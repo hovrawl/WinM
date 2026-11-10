@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using WinManager.Contracts;
 using Windows.Win32.UI.WindowsAndMessaging;
 using PInvoke = global::Windows.Win32.TestPInvoke;
 
@@ -9,6 +10,7 @@ namespace WinManager.Windows.Tests;
 internal static class NativeInspection
 {
     public static void GrantForeground(uint pid) => PInvoke.AllowSetForegroundWindow(pid);
+
     public static unsafe nint FindHandle(string title)
     {
         nint target = 0;
@@ -20,6 +22,7 @@ internal static class NativeInspection
                 var length = PInvoke.GetWindowText(window, buffer, text.Length);
                 if (text[..Math.Max(0, length)].SequenceEqual(title)) target = (nint)window.Value;
             }
+
             return true;
         };
         if (!PInvoke.EnumWindows(callback, default)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -27,12 +30,22 @@ internal static class NativeInspection
         return target;
     }
 
-    public static bool Visible(string title) => PInvoke.IsWindowVisible(new global::Windows.Win32.Foundation.HWND(FindHandle(title)));
+    public static bool Visible(string title) =>
+        PInvoke.IsWindowVisible(new global::Windows.Win32.Foundation.HWND(FindHandle(title)));
 
     public static uint ProcessId(string title)
     {
         PInvoke.GetWindowThreadProcessId(new global::Windows.Win32.Foundation.HWND(FindHandle(title)), out var pid);
         return pid;
+    }
+
+    public static PixelRect WindowBounds(string title)
+    {
+        var window = new global::Windows.Win32.Foundation.HWND(FindHandle(title));
+        if (!PInvoke.GetWindowRect(window, out var rectangle))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        return new PixelRect(rectangle.left, rectangle.top, rectangle.right - rectangle.left,
+            rectangle.bottom - rectangle.top);
     }
 
     public static SHOW_WINDOW_CMD ShowCommand(string title)
@@ -42,6 +55,7 @@ internal static class NativeInspection
             throw new Win32Exception(Marshal.GetLastWin32Error());
         return placement.showCmd;
     }
+
     public static unsafe (nint Foreground, nint Previous, nint Next) WindowState(string title)
     {
         var target = default(global::Windows.Win32.Foundation.HWND);
@@ -53,6 +67,7 @@ internal static class NativeInspection
                 var length = PInvoke.GetWindowText(window, buffer, text.Length);
                 if (text[..Math.Max(0, length)].SequenceEqual(title)) target = window;
             }
+
             return true;
         };
         if (!PInvoke.EnumWindows(callback, default)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -72,9 +87,11 @@ internal static class NativeInspection
             fixed (char* buffer = name)
             {
                 var length = PInvoke.GetClassName(window, buffer, name.Length);
-                if (pid == (uint)Environment.ProcessId && name[..Math.Max(0, length)].StartsWith("WinManager.Observer.", StringComparison.Ordinal))
+                if (pid == (uint)Environment.ProcessId && name[..Math.Max(0, length)]
+                        .StartsWith("WinManager.Observer.", StringComparison.Ordinal))
                     count++;
             }
+
             return true;
         };
         if (!PInvoke.EnumWindows(callback, default)) throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -94,6 +111,7 @@ internal static class NativeInspection
                 var length = PInvoke.GetWindowText(window, buffer, text.Length);
                 if (text[..Math.Max(0, length)].SequenceEqual(title)) dpi = PInvoke.GetDpiForWindow(window);
             }
+
             return true;
         };
         if (!PInvoke.EnumWindows(callback, default)) throw new Win32Exception(Marshal.GetLastWin32Error());

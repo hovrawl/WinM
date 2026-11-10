@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -7,6 +8,7 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using WinManager.Contracts;
 using WinManager.Ui;
+using WinManager.Windows;
 
 namespace WinManager.SpatialSwitcher;
 
@@ -32,6 +34,9 @@ internal sealed class SwitcherWindow : Window
     private readonly ComboBox monitorTarget = new();
     private readonly WorkspaceDetailsControl workspaceDetails;
     private readonly CurrentWorkspaceWindow currentWorkspaceWindow;
+    private readonly CarouselWindow carouselWindow;
+    private readonly CarouselScrollAccumulator scrollAccumulator;
+    private TouchpadInputSource? touchpadInput;
     private Task? connectionRetry;
     private Button activateButton = null!;
     private Button reconnectButton = null!;
@@ -48,6 +53,9 @@ internal sealed class SwitcherWindow : Window
     private bool connecting;
     private bool commandBusy;
     private bool allowClose;
+    private bool touchpadConfigurationLoaded;
+    private bool touchpadEnabled = true;
+    private TouchpadCapabilityState touchpadCapabilityState = TouchpadCapabilityState.Disabled;
     private string? lastMessage;
 
     public SwitcherWindow(bool demoMode, string? pipeName = null, Action<string, string>? trayStatusChanged = null)
@@ -57,6 +65,11 @@ internal sealed class SwitcherWindow : Window
         this.trayStatusChanged = trayStatusChanged;
         workspaceDetails = new WorkspaceDetailsControl(ExecuteWorkspaceLayoutAsync);
         currentWorkspaceWindow = new CurrentWorkspaceWindow(FocusWindowAsync, ExecuteWorkspaceLayoutAsync);
+        carouselWindow = new CarouselWindow(QueryPreviewTargetsAsync, FocusWindowAsync);
+        scrollAccumulator = new CarouselScrollAccumulator(action => Dispatcher.UIThread.Post(action), delta =>
+        {
+            if (carouselWindow.IsVisible) carouselWindow.ScrollBy(delta);
+        });
         Title = "Spatial switcher — One desk";
         Width = 716;
         Height = 592;
@@ -83,6 +96,13 @@ internal sealed class SwitcherWindow : Window
         {
             keyboardHook?.Dispose();
             keyboardHook = null;
+            carouselWindow.PrepareForShutdown();
+            if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063) && touchpadInput is { } source)
+            {
+                touchpadInput = null;
+                _ = source.DisposeAsync();
+            }
+
             _ = CloseConnectionAsync();
         };
     }
@@ -107,6 +127,7 @@ internal sealed class SwitcherWindow : Window
     public void ShowWorkspaceSwitcher()
     {
         var (placement, context) = CapturePopupContext();
+        carouselWindow.Dismiss();
         currentWorkspaceWindow.Hide();
         PopupPlacement.Place(this, placement);
         ApplyPopupContext(context);
@@ -118,7 +139,22 @@ internal sealed class SwitcherWindow : Window
 
     public void ShowWindowSwitcher()
     {
+        carouselWindow.Dismiss();
         ShowCurrentWorkspaceSwitcher(false);
+    }
+
+    public async Task ShowCarouselExperimentAsync()
+    {
+        if (demoMode || !connected || snapshot is null)
+        {
+            status.Text = "The live preview carousel requires a connected manager.";
+            return;
+        }
+
+        var (placement, context) = CapturePopupContext();
+        Hide();
+        currentWorkspaceWindow.Hide();
+        await carouselWindow.ShowForContextAsync(snapshot, context, connected, placement);
     }
 
     public async Task PrepareForShutdownAsync()
@@ -127,6 +163,13 @@ internal sealed class SwitcherWindow : Window
         keyboardHook?.Dispose();
         keyboardHook = null;
         currentWorkspaceWindow.PrepareForShutdown();
+        carouselWindow.PrepareForShutdown();
+        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063) && touchpadInput is { } source)
+        {
+            touchpadInput = null;
+            await source.DisposeAsync();
+        }
+
         await CloseConnectionAsync();
     }
 
@@ -329,7 +372,7 @@ internal sealed class SwitcherWindow : Window
         try
         {
             keyboardHook = new SwitcherKeyboardHook(action => Dispatcher.UIThread.Post(() => HandleShortcut(action)));
-            shortcutStatus.Text = "Alt+Tab cycles windows · Win+Tab or Win+Space opens workspaces";
+            shortcutStatus.Text = "Alt+Tab windows · Win+Tab / Space workspaces · Ctrl+Alt+Space carousel";
         }
         catch (Exception error)
         {
@@ -372,6 +415,7 @@ internal sealed class SwitcherWindow : Window
                     status.Text = $"Connected · {eventType} · revision {nextSnapshot.StateRevision}";
                 }),
                 failure => Dispatcher.UIThread.Post(() => HandleDisconnect(connectedSession, failure)), lifetime.Token);
+            if (!touchpadConfigurationLoaded) await ConfigureTouchpadAsync(connectedSession, deadline.Token);
             UpdateActions();
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
@@ -395,6 +439,8 @@ internal sealed class SwitcherWindow : Window
         if (!ReferenceEquals(session, source)) return;
         session = null;
         connected = false;
+        carouselWindow.Dismiss();
+        currentWorkspaceWindow.Hide();
         keyboardHook?.Dispose();
         keyboardHook = null;
         keyboardHookAttempted = false;
@@ -439,6 +485,7 @@ internal sealed class SwitcherWindow : Window
             .FirstOrDefault(choice => choice.Id == selectedMonitor?.Id);
         popupContext.SelectMonitor(selectedMonitor?.Id ?? context.MonitorId);
         currentWorkspaceWindow.UpdateSnapshot(next, popupContext.WorkspaceId, popupContext.MonitorId, connected);
+        if (carouselWindow.IsVisible) _ = carouselWindow.UpdateSnapshotAsync(next, connected);
         RenderMap();
         UpdateSelectedDetails();
         UpdateActions();
@@ -642,8 +689,10 @@ internal sealed class SwitcherWindow : Window
         var shortcuts = demoMode
             ? "Alt+Tab / Win+Tab / Win+Space disabled in demo"
             : keyboardHook is not null
-                ? "Alt+Tab windows · Win+Tab / Space workspaces"
-                : "Alt+Tab / Win+Tab / Win+Space unavailable";
+                ? "Alt+Tab windows · Win+Tab / Space workspaces · Ctrl+Alt+Space carousel"
+                : "Keyboard shortcuts unavailable";
+        if (!demoMode)
+            shortcuts += touchpadEnabled ? $" · Touchpad {touchpadCapabilityState}" : " · Touchpad disabled";
         trayStatusChanged?.Invoke(connection, shortcuts);
     }
 
@@ -685,6 +734,14 @@ internal sealed class SwitcherWindow : Window
 
     private void HandleShortcut(SwitcherKeyboardAction action)
     {
+        if (action == SwitcherKeyboardAction.ToggleCarousel)
+        {
+            if (demoMode || !connected || keyboardHook is null || snapshot is null) return;
+            if (carouselWindow.IsVisible) carouselWindow.CancelSelection();
+            else _ = ShowCarouselExperimentAsync();
+            return;
+        }
+
         if (demoMode || !connected || keyboardHook is null || snapshot is null) return;
         if (action is SwitcherKeyboardAction.CycleWindowForward or SwitcherKeyboardAction.CycleWindowBackward)
         {
@@ -715,11 +772,140 @@ internal sealed class SwitcherWindow : Window
         }
     }
 
+    private async Task ConfigureTouchpadAsync(ManagerSession activeSession, CancellationToken cancellationToken)
+    {
+        touchpadConfigurationLoaded = true;
+        try
+        {
+            var configuration = await activeSession.ReadConfigurationAsync(cancellationToken);
+            touchpadEnabled = ReadTouchpadEnabled(configuration);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception error)
+        {
+            touchpadEnabled = true;
+            status.Text = $"Touchpad configuration unavailable · using default enabled setting · {error.Message}";
+        }
+
+        if (!touchpadEnabled)
+        {
+            UpdateTouchpadCapability(new(TouchpadCapabilityState.Disabled, 0, false, false,
+                "Disabled by host configuration."));
+            return;
+        }
+
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063))
+        {
+            UpdateTouchpadCapability(new(TouchpadCapabilityState.UnsupportedDevice, 0, false, false,
+                "Native touchpad input requires Windows 10 build 15063 or newer."));
+            return;
+        }
+
+        var source = new TouchpadInputSource();
+        touchpadInput = source;
+        source.GestureRecognized += OnTouchpadGesture;
+        source.CapabilityChanged += OnTouchpadCapabilityChanged;
+        try
+        {
+            await source.StartAsync(cancellationToken);
+            UpdateTouchpadCapability(source.Capability);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            source.GestureRecognized -= OnTouchpadGesture;
+            source.CapabilityChanged -= OnTouchpadCapabilityChanged;
+            touchpadInput = null;
+            await source.DisposeAsync();
+            throw;
+        }
+        catch (Exception error)
+        {
+            source.GestureRecognized -= OnTouchpadGesture;
+            source.CapabilityChanged -= OnTouchpadCapabilityChanged;
+            touchpadInput = null;
+            await source.DisposeAsync();
+            UpdateTouchpadCapability(new(TouchpadCapabilityState.RegistrationFailed, 0, false, false, error.Message));
+        }
+    }
+
+    internal static bool ReadTouchpadEnabled(ConfigurationDocument configuration)
+    {
+        if (!configuration.IsValid) return true;
+        try
+        {
+            using var document = JsonDocument.Parse(configuration.Content);
+            return document.RootElement.TryGetProperty("touchpad", out var options) &&
+                   options.ValueKind == JsonValueKind.Object &&
+                   options.TryGetProperty("enabled", out var enabled) &&
+                   enabled.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? enabled.GetBoolean()
+                : true;
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
+    }
+
+    private void OnTouchpadCapabilityChanged(TouchpadCapabilityResult capability) =>
+        Dispatcher.UIThread.Post(() => UpdateTouchpadCapability(capability));
+
+    private void UpdateTouchpadCapability(TouchpadCapabilityResult capability)
+    {
+        touchpadCapabilityState = capability.State;
+        shortcutStatus.Text = TouchpadStatusText();
+        UpdateActions();
+    }
+
+    private string TouchpadStatusText()
+    {
+        var shortcuts = keyboardHook is null
+            ? "Keyboard shortcuts unavailable"
+            : "Alt+Tab windows · Win+Tab / Space workspaces · Ctrl+Alt+Space carousel";
+        return touchpadEnabled
+            ? $"{shortcuts} · Touchpad {touchpadCapabilityState}"
+            : $"{shortcuts} · Touchpad disabled";
+    }
+
+    private void OnTouchpadGesture(TouchpadGesture gesture)
+    {
+        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063) || !touchpadEnabled ||
+            touchpadInput is not { } input) return;
+        if (SwitcherTouchpadPolicy.TryGetScrollDelta(gesture, input.Capability, out var horizontalDelta))
+        {
+            if (carouselWindow.IsVisible) scrollAccumulator.Add(horizontalDelta);
+            return;
+        }
+
+        var action = SwitcherTouchpadPolicy.Route(gesture, input.Capability);
+        if (action is null) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!connected || snapshot is null) return;
+            if (action == CarouselGestureAction.Open)
+            {
+                if (!carouselWindow.IsVisible) _ = ShowCarouselExperimentAsync();
+            }
+            else if (carouselWindow.IsVisible) carouselWindow.CancelSelection();
+        });
+    }
+
     private Task<CommandResult> FocusWindowAsync(Guid windowId)
     {
         if (!connected || session is not { } activeSession)
             throw new InvalidOperationException("The manager is disconnected. Reconnect before focusing a window.");
         return activeSession.ExecuteAsync(SpatialSwitcherPresentation.FocusCommand(windowId), lifetime.Token);
+    }
+
+    private Task<PreviewTargetsResult> QueryPreviewTargetsAsync(IReadOnlyList<Guid> windowIds,
+        CancellationToken cancellationToken)
+    {
+        if (!connected || session is not { IsConnected: true } activeSession)
+            throw new InvalidOperationException("The manager is disconnected. Reconnect before querying previews.");
+        return activeSession.QueryPreviewTargetsAsync(windowIds, cancellationToken);
     }
 
     private async Task<CommandResult> ExecuteWorkspaceLayoutAsync(ManagerCommand command)

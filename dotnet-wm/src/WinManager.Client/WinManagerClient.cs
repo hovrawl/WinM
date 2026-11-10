@@ -28,7 +28,8 @@ public sealed class WinManagerClient : IAsyncDisposable
     {
         this.pipe = pipe;
         this.eventQueueCapacity = eventQueueCapacity;
-        this.tryGrantForegroundActivation = tryGrantForegroundActivation ?? ForegroundActivation.TryAllowForegroundActivation;
+        this.tryGrantForegroundActivation =
+            tryGrantForegroundActivation ?? ForegroundActivation.TryAllowForegroundActivation;
         lifetimeToken = lifetime.Token;
         reader = ReadAsync();
     }
@@ -71,13 +72,63 @@ public sealed class WinManagerClient : IAsyncDisposable
         var response = await RequestAsync("query.snapshot", Protocol.EmptyPayload, cancellationToken);
         var snapshot = ReadPayload<ManagerSnapshot>(response);
         if (snapshot.InstanceId == Guid.Empty || snapshot.StateRevision != response.StateRevision ||
-            snapshot.Desktop is null || snapshot.Trees is null || snapshot.Desktop.Monitors is null || snapshot.Desktop.Windows is null)
+            snapshot.Desktop is null || snapshot.Trees is null || snapshot.Desktop.Monitors is null ||
+            snapshot.Desktop.Windows is null)
         {
-            var error = new WinManagerProtocolException("Snapshot response is incomplete or has a mismatched state revision.");
+            var error = new WinManagerProtocolException(
+                "Snapshot response is incomplete or has a mismatched state revision.");
             Abort(error);
             throw error;
         }
+
         return snapshot;
+    }
+
+    public async Task<PreviewTargetsResult> QueryPreviewTargetsAsync(IReadOnlyList<Guid> windowIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(windowIds);
+        var request = new PreviewTargetsRequest(windowIds.ToArray());
+        if (!PreviewTargetsRequestRules.IsValid(request))
+            throw new ArgumentException("Preview queries require 1 to 64 unique, nonempty window IDs.",
+                nameof(windowIds));
+
+        var response = await RequestAsync("query.previewTargets", Protocol.Payload(request), cancellationToken);
+        var result = ReadPayload<PreviewTargetsResult>(response);
+        var requested = request.WindowIds!.ToHashSet();
+        var targets = result.Targets ?? Array.Empty<WindowPreviewTarget>();
+        var failures = result.Failures ?? Array.Empty<PreviewTargetFailure>();
+        var returned = new HashSet<Guid>();
+        var valid = result.StateRevision == response.StateRevision && result.Targets is not null &&
+                    result.Failures is not null && targets.Count + failures.Count == requested.Count;
+        if (valid)
+        {
+            foreach (var target in targets)
+                if (target is null || target.WindowId == Guid.Empty || !requested.Contains(target.WindowId) ||
+                    !returned.Add(target.WindowId) || target.HandleValue == 0 || target.ProcessId == 0 ||
+                    target.ProcessCreationTime == 0)
+                {
+                    valid = false;
+                    break;
+                }
+        }
+
+        if (valid)
+        {
+            foreach (var failure in failures)
+                if (failure is null || failure.WindowId == Guid.Empty || !requested.Contains(failure.WindowId) ||
+                    !returned.Add(failure.WindowId) || string.IsNullOrWhiteSpace(failure.Code) ||
+                    failure.Code.Length > 64)
+                {
+                    valid = false;
+                    break;
+                }
+        }
+
+        if (valid && returned.SetEquals(requested)) return result;
+        var error = new WinManagerProtocolException("Preview-target response is incomplete or invalid.");
+        Abort(error);
+        throw error;
     }
 
     public async Task<CommandResult> ExecuteAsync(ManagerCommand command, CancellationToken cancellationToken = default)
@@ -93,6 +144,7 @@ public sealed class WinManagerClient : IAsyncDisposable
             Abort(error);
             throw error;
         }
+
         return result;
     }
 
@@ -108,7 +160,8 @@ public sealed class WinManagerClient : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(revision);
         ArgumentNullException.ThrowIfNull(content);
         if (System.Text.Encoding.UTF8.GetByteCount(content) > Protocol.MaximumConfigurationContentBytes)
-            throw new ArgumentException($"Configuration must be no larger than {Protocol.MaximumConfigurationContentBytes} UTF-8 bytes.",
+            throw new ArgumentException(
+                $"Configuration must be no larger than {Protocol.MaximumConfigurationContentBytes} UTF-8 bytes.",
                 nameof(content));
         var response = await RequestAsync("configuration.save",
             Protocol.Payload(new SaveConfigurationRequest(revision, content)), cancellationToken);
@@ -125,14 +178,18 @@ public sealed class WinManagerClient : IAsyncDisposable
             lock (sync)
             {
                 ThrowIfDisconnected();
-                if (subscription is not null) throw new InvalidOperationException("Only one subscription per connection is supported.");
+                if (subscription is not null)
+                    throw new InvalidOperationException("Only one subscription per connection is supported.");
                 created = new ManagerSubscription(this, eventQueueCapacity);
                 subscription = created;
             }
-            var response = await RequestAsync("subscribe", Protocol.Payload(new SubscribeRequest(eventTypes)), cancellationToken);
+
+            var response = await RequestAsync("subscribe", Protocol.Payload(new SubscribeRequest(eventTypes)),
+                cancellationToken);
             var result = ReadPayload<SubscriptionResult>(response);
             if (!result.Success)
-                throw new WinManagerRemoteException(result.ErrorCode ?? "subscription_failed", "Subscription was rejected.", result.StateRevision);
+                throw new WinManagerRemoteException(result.ErrorCode ?? "subscription_failed",
+                    "Subscription was rejected.", result.StateRevision);
             if (result.SubscriptionId is not { } id || id == Guid.Empty)
                 throw new WinManagerProtocolException("Subscription response has no subscription ID.");
             created.SubscriptionId = id;
@@ -144,7 +201,10 @@ public sealed class WinManagerClient : IAsyncDisposable
             if (created is not null) Abort(error);
             throw;
         }
-        finally { subscriptionGate.Release(); }
+        finally
+        {
+            subscriptionGate.Release();
+        }
     }
 
     public async Task UnsubscribeAsync(CancellationToken cancellationToken = default)
@@ -168,18 +228,27 @@ public sealed class WinManagerClient : IAsyncDisposable
                     return;
                 }
             }
+
             try
             {
-                await RequestAsync("unsubscribe", Protocol.Payload(new UnsubscribeRequest(active.SubscriptionId)), cancellationToken);
+                await RequestAsync("unsubscribe", Protocol.Payload(new UnsubscribeRequest(active.SubscriptionId)),
+                    cancellationToken);
                 lock (sync)
                 {
                     subscription = null;
                     active.Complete();
                 }
             }
-            catch (Exception error) { Abort(error); throw; }
+            catch (Exception error)
+            {
+                Abort(error);
+                throw;
+            }
         }
-        finally { subscriptionGate.Release(); }
+        finally
+        {
+            subscriptionGate.Release();
+        }
     }
 
     private async Task<ResponseEnvelope> RequestAsync(string operation, JsonElement payload,
@@ -193,7 +262,9 @@ public sealed class WinManagerClient : IAsyncDisposable
             ThrowIfDisconnected();
             pending[request.RequestId] = completion;
         }
-        using var cancellation = cancellationToken.Register(() => Abort(new OperationCanceledException(cancellationToken)));
+
+        using var cancellation =
+            cancellationToken.Register(() => Abort(new OperationCanceledException(cancellationToken)));
         try
         {
             await writeGate.WaitAsync(lifetimeToken);
@@ -203,12 +274,20 @@ public sealed class WinManagerClient : IAsyncDisposable
                     _ = tryGrantForegroundActivation(pipe);
                 await PipeFraming.WriteAsync(pipe, request, lifetimeToken);
             }
-            finally { writeGate.Release(); }
+            finally
+            {
+                writeGate.Release();
+            }
         }
-        catch (Exception error) { Abort(error); }
+        catch (Exception error)
+        {
+            Abort(error);
+        }
+
         var response = await completion.Task;
         if (!response.Success)
-            throw new WinManagerRemoteException(response.ErrorCode ?? "server_error", response.Message ?? "Request failed.", response.StateRevision);
+            throw new WinManagerRemoteException(response.ErrorCode ?? "server_error",
+                response.Message ?? "Request failed.", response.StateRevision);
         return response;
     }
 
@@ -219,25 +298,29 @@ public sealed class WinManagerClient : IAsyncDisposable
             while (true)
             {
                 using var document = await PipeFraming.ReadAsync(pipe, lifetimeToken)
-                    ?? throw new IOException("The WinManager server disconnected.");
+                                     ?? throw new IOException("The WinManager server disconnected.");
                 var root = document.RootElement;
                 if (root.ValueKind != JsonValueKind.Object)
                     throw new WinManagerProtocolException("Server envelope must be an object.");
-                if (!root.TryGetProperty("protocolVersion", out var version) || version.ValueKind != JsonValueKind.Number ||
+                if (!root.TryGetProperty("protocolVersion", out var version) ||
+                    version.ValueKind != JsonValueKind.Number ||
                     !version.TryGetInt32(out var number) || number != Protocol.Version)
                     throw new WinManagerProtocolException("Unsupported or missing protocol version.");
                 if (!root.TryGetProperty("kind", out var kind) || kind.ValueKind != JsonValueKind.String)
                     throw new WinManagerProtocolException("Missing envelope kind.");
-                if (!root.TryGetProperty("stateRevision", out var revision) || revision.ValueKind != JsonValueKind.Number ||
+                if (!root.TryGetProperty("stateRevision", out var revision) ||
+                    revision.ValueKind != JsonValueKind.Number ||
                     !revision.TryGetInt64(out var stateRevision) || stateRevision < 0)
                     throw new WinManagerProtocolException("Missing or invalid state revision.");
                 switch (kind.GetString())
                 {
                     case "response":
-                        if (!root.TryGetProperty("success", out var success) || success.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                        if (!root.TryGetProperty("success", out var success) ||
+                            success.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
                             throw new WinManagerProtocolException("Response has no success flag.");
                         var response = Deserialize<ResponseEnvelope>(root);
-                        if (response.RequestId == Guid.Empty || !pending.TryRemove(response.RequestId, out var completion))
+                        if (response.RequestId == Guid.Empty ||
+                            !pending.TryRemove(response.RequestId, out var completion))
                             throw new WinManagerProtocolException("Response has an unknown request ID.");
                         completion.TrySetResult(response);
                         break;
@@ -247,9 +330,13 @@ public sealed class WinManagerClient : IAsyncDisposable
                             throw new WinManagerProtocolException("Missing event type.");
                         lock (sync)
                         {
-                            if (subscription is null) throw new WinManagerProtocolException("Received an event without an active subscription.");
-                            if (!subscription.TryPublish(envelope)) throw new WinManagerConsumerLagException(eventQueueCapacity);
+                            if (subscription is null)
+                                throw new WinManagerProtocolException(
+                                    "Received an event without an active subscription.");
+                            if (!subscription.TryPublish(envelope))
+                                throw new WinManagerConsumerLagException(eventQueueCapacity);
                         }
+
                         break;
                     default: throw new WinManagerProtocolException("Unknown server envelope kind.");
                 }
@@ -258,7 +345,8 @@ public sealed class WinManagerClient : IAsyncDisposable
         catch (Exception error)
         {
             Abort(error is JsonException or InvalidDataException or EndOfStreamException or InvalidOperationException
-                ? new WinManagerProtocolException("Invalid server frame.", error) : error);
+                ? new WinManagerProtocolException("Invalid server frame.", error)
+                : error);
         }
     }
 
@@ -268,17 +356,22 @@ public sealed class WinManagerClient : IAsyncDisposable
             throw new WinManagerProtocolException($"{typeof(T).Name} payload must be an object.");
         if (typeof(T) == typeof(CommandResult) || typeof(T) == typeof(SubscriptionResult))
         {
-            if (!payload.TryGetProperty("success", out var success) || success.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            if (!payload.TryGetProperty("success", out var success) ||
+                success.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
                 throw new WinManagerProtocolException($"{typeof(T).Name} has no success flag.");
         }
+
         if (typeof(T) == typeof(ManagerSnapshot))
         {
-            if (!payload.TryGetProperty("paused", out var paused) || paused.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
-                !payload.TryGetProperty("stateRevision", out var revision) || revision.ValueKind != JsonValueKind.Number)
+            if (!payload.TryGetProperty("paused", out var paused) ||
+                paused.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+                !payload.TryGetProperty("stateRevision", out var revision) ||
+                revision.ValueKind != JsonValueKind.Number)
                 throw new WinManagerProtocolException("Snapshot is incomplete.");
         }
+
         return payload.Deserialize(Protocol.TypeInfo<T>())
-            ?? throw new WinManagerProtocolException($"Missing {typeof(T).Name} payload.");
+               ?? throw new WinManagerProtocolException($"Missing {typeof(T).Name} payload.");
     }
 
     private T ReadPayload<T>(ResponseEnvelope response)
@@ -288,10 +381,12 @@ public sealed class WinManagerClient : IAsyncDisposable
             var payload = response.Payload ?? throw new WinManagerProtocolException("Response has no payload.");
             return Deserialize<T>(payload);
         }
-        catch (Exception error) when (error is JsonException or InvalidOperationException or WinManagerProtocolException)
+        catch (Exception error) when
+            (error is JsonException or InvalidOperationException or WinManagerProtocolException)
         {
             var protocolError = error as WinManagerProtocolException
-                ?? new WinManagerProtocolException($"Invalid {typeof(T).Name} response payload.", error);
+                                ?? new WinManagerProtocolException($"Invalid {typeof(T).Name} response payload.",
+                                    error);
             Abort(protocolError);
             throw protocolError;
         }
@@ -311,7 +406,8 @@ public sealed class WinManagerClient : IAsyncDisposable
             lifetime.Cancel();
             pipe.Dispose();
             foreach (var entry in pending)
-                if (pending.TryRemove(entry.Key, out var completion)) completion.TrySetException(error);
+                if (pending.TryRemove(entry.Key, out var completion))
+                    completion.TrySetException(error);
             subscription?.Complete(error);
         }
     }
@@ -342,15 +438,28 @@ public sealed class WinManagerClient : IAsyncDisposable
                     client = await ConnectAsync(pipeName, connectTimeout, cancellationToken, eventQueueCapacity);
                     active = await client.SubscribeAsync(eventTypes, cancellationToken);
                 }
-                catch (Exception error) when (reconnect && IsReconnectable(error) && !cancellationToken.IsCancellationRequested) { }
+                catch (Exception error) when (reconnect && IsReconnectable(error) &&
+                                              !cancellationToken.IsCancellationRequested)
+                {
+                }
+
                 if (active is not null)
                 {
-                    await using var enumerator = active.ReadEventsAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
+                    await using var enumerator =
+                        active.ReadEventsAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
                     while (true)
                     {
                         bool moved;
-                        try { moved = await enumerator.MoveNextAsync(); }
-                        catch (Exception error) when (reconnect && IsReconnectable(error) && !cancellationToken.IsCancellationRequested) { break; }
+                        try
+                        {
+                            moved = await enumerator.MoveNextAsync();
+                        }
+                        catch (Exception error) when (reconnect && IsReconnectable(error) &&
+                                                      !cancellationToken.IsCancellationRequested)
+                        {
+                            break;
+                        }
+
                         if (!moved) break;
                         yield return enumerator.Current;
                     }
@@ -360,6 +469,7 @@ public sealed class WinManagerClient : IAsyncDisposable
             {
                 if (client is not null) await client.DisposeAsync();
             }
+
             if (!reconnect) yield break;
             await Task.Delay(delay, cancellationToken);
         }

@@ -54,6 +54,9 @@ public sealed class ManagerSession : IAsyncDisposable
     public Task<CommandResult> ExecuteAsync(ManagerCommand command, CancellationToken cancellationToken = default) =>
         client.ExecuteAsync(command, cancellationToken);
 
+    public Task<PreviewTargetsResult> QueryPreviewTargetsAsync(IReadOnlyList<Guid> windowIds,
+        CancellationToken cancellationToken = default) => client.QueryPreviewTargetsAsync(windowIds, cancellationToken);
+
     public Task<ConfigurationDocument> ReadConfigurationAsync(CancellationToken cancellationToken = default) =>
         client.ReadConfigurationAsync(cancellationToken);
 

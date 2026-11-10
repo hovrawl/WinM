@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WinManager.Contracts;
 using WinManager.Host;
+using WinManager.Windows;
 using Xunit;
 
 namespace WinManager.Ipc.Tests;
@@ -23,16 +24,83 @@ public sealed class HostConfigurationTests
         Assert.All(loaded.Workspaces, workspace => Assert.Equal(WorkspaceLayout.Layered, workspace.Layout));
         Assert.Equal(1, LayeredLayoutOptions.Default.WindowWidthRatio);
         Assert.Equal(32, LayeredLayoutOptions.Default.HorizontalOffset);
+        Assert.True(loaded.Touchpad.Enabled);
+        using var serialized = JsonDocument.Parse(ManagerConfiguration.Serialize(loaded));
+        Assert.True(serialized.RootElement.GetProperty("touchpad").GetProperty("enabled").GetBoolean());
     }
+
+    [Fact]
+    public void TouchpadConfigurationDefaultsOnForLegacyFilesAndCanBeDisabledExplicitly()
+    {
+        var legacy = ManagerConfiguration.Parse("""{"workspaces":[{"name":"Old"}]}""");
+        var disabled = ManagerConfiguration.Parse("""{"touchpad":{"enabled":false}}""");
+
+        Assert.True(legacy.Touchpad.Enabled);
+        Assert.False(disabled.Touchpad.Enabled);
+        Assert.Throws<InvalidDataException>(() => ManagerConfiguration.Parse("""{"touchpad":null}"""));
+        Assert.Throws<JsonException>(() => ManagerConfiguration.Parse("""{"touchpad":{"enabled":true,"unknown":1}}"""));
+    }
+
+    [Theory]
+    [InlineData(TouchpadSwipeDirection.Left, Direction.Right)]
+    [InlineData(TouchpadSwipeDirection.Right, Direction.Left)]
+    public void ThreeFingerHorizontalSwipesInvertDirectionalFocus(TouchpadSwipeDirection physical,
+        Direction expected)
+    {
+        var command = TouchpadGesturePolicy.CreateCommand(
+            new TouchpadGesture(TouchpadGestureKind.Swipe, 3, physical, 0, 100), AvailableTouchpad());
+
+        Assert.Equal(new ManagerCommand(CommandKind.Focus, Direction: expected), command);
+    }
+
+    [Theory]
+    [InlineData(TouchpadSwipeDirection.Left, Direction.Left)]
+    [InlineData(TouchpadSwipeDirection.Right, Direction.Right)]
+    [InlineData(TouchpadSwipeDirection.Up, Direction.Up)]
+    [InlineData(TouchpadSwipeDirection.Down, Direction.Down)]
+    public void FourFingerSwipesMoveSpatiallyInTheirPhysicalDirection(TouchpadSwipeDirection physical,
+        Direction expected)
+    {
+        var command = TouchpadGesturePolicy.CreateCommand(
+            new TouchpadGesture(TouchpadGestureKind.Swipe, 4, physical, 0, 100), AvailableTouchpad());
+
+        Assert.Equal(new ManagerCommand(CommandKind.MoveSpatial, Direction: expected), command);
+    }
+
+    [Fact]
+    public void VerticalThreeFingerAndContinuousGesturesDoNotBecomeHostCommands()
+    {
+        Assert.Null(TouchpadGesturePolicy.CreateCommand(
+            new TouchpadGesture(TouchpadGestureKind.Swipe, 3, TouchpadSwipeDirection.Up, 0, 100),
+            AvailableTouchpad()));
+        Assert.Null(TouchpadGesturePolicy.CreateCommand(
+            new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 2, null, 0.1, 100), AvailableTouchpad()));
+    }
+
+    [Fact]
+    public void HostGesturePolicyBlocksActionsUntilExclusiveOwnershipIsVerified()
+    {
+        var blocked = new TouchpadCapabilityResult(TouchpadCapabilityState.GestureConflictBlocked, 1, true, false,
+            "unverified");
+
+        Assert.Null(TouchpadGesturePolicy.CreateCommand(
+            new TouchpadGesture(TouchpadGestureKind.Swipe, 3, TouchpadSwipeDirection.Left, 0, 100), blocked));
+    }
+
+    private static TouchpadCapabilityResult AvailableTouchpad() =>
+        new(TouchpadCapabilityState.Available, 1, true, true, null);
 
     [Fact]
     public void GeneratedConfigurationMetadataRoundTripsNestedWorkspaceSettings()
     {
         var configuration = new ManagerConfiguration
         {
-            Workspaces = [new("Research", Layout: WorkspaceLayout.Layered,
-                Position: new DeskPosition(-125, 64),
-                LayeredLayoutOptions: new LayeredLayoutOptions(0.75, 48))]
+            Workspaces =
+            [
+                new("Research", Layout: WorkspaceLayout.Layered,
+                    Position: new DeskPosition(-125, 64),
+                    LayeredLayoutOptions: new LayeredLayoutOptions(0.75, 48))
+            ]
         };
 
         var json = ManagerConfiguration.Serialize(configuration);
@@ -90,7 +158,8 @@ public sealed class HostConfigurationTests
     [Fact]
     public void ConfigurationStoreReturnsInvalidDiskTextForRepairAndCanReplaceIt()
     {
-        var directory = Path.Combine(AppContext.BaseDirectory, "ConfigurationRepairTests", Guid.NewGuid().ToString("N"));
+        var directory = Path.Combine(AppContext.BaseDirectory, "ConfigurationRepairTests",
+            Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         try
         {
@@ -147,7 +216,8 @@ public sealed class HostConfigurationTests
 
         var loaded = ManagerConfiguration.Load(file, createDefault: false);
 
-        Assert.Equal(WorkspaceLayout.Layered, loaded.Workspaces.Single(workspace => workspace.Name == "Layered").Layout);
+        Assert.Equal(WorkspaceLayout.Layered,
+            loaded.Workspaces.Single(workspace => workspace.Name == "Layered").Layout);
         Assert.Equal(WorkspaceLayout.Split, loaded.Workspaces.Single(workspace => workspace.Name == "Split").Layout);
     }
 
@@ -180,6 +250,7 @@ public sealed class HostConfigurationTests
                                                  binding.Command.Direction == direction &&
                                                  binding.VirtualKey == key && (binding.Modifiers & 0xF) == 5);
         }
+
         Assert.Equal(defaults.Count, defaults.Select(binding => (binding.Modifiers & 0xF, binding.VirtualKey))
             .Distinct().Count());
 
@@ -517,7 +588,10 @@ public sealed class HostConfigurationTests
         {
             requestShutdown = stopApplication;
             Started.TrySetResult();
-            try { await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken); }
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+            }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 StopObserved = true;

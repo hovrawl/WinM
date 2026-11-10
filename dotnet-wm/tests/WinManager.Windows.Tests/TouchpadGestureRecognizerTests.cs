@@ -1,0 +1,135 @@
+using WinManager.Windows;
+using Xunit;
+
+namespace WinManager.Windows.Tests;
+
+public sealed class TouchpadGestureRecognizerTests
+{
+    [Fact]
+    public void ThreeFingerHorizontalSwipeIsCommittedOnceAtContactEnd()
+    {
+        var recognizer = new TouchpadGestureRecognizer();
+
+        Assert.Empty(recognizer.Process(Frame(0, 3, 0.3, 0.5, 0.7)));
+        Assert.Empty(recognizer.Process(Frame(40, 3, 0.3, 0.5, 0.7)));
+        Assert.Empty(recognizer.Process(Frame(56, 3, 0.25, 0.45, 0.65)));
+        Assert.Empty(recognizer.Process(Frame(72, 3, 0.1, 0.3, 0.5)));
+        var completed = recognizer.Process(Frame(88, 0));
+
+        var gesture = Assert.Single(completed);
+        Assert.Equal(TouchpadGestureKind.Swipe, gesture.Kind);
+        Assert.Equal(3, gesture.FingerCount);
+        Assert.Equal(TouchpadSwipeDirection.Left, gesture.Direction);
+        Assert.Empty(recognizer.Process(Frame(104, 0)));
+    }
+
+    [Fact]
+    public void FourFingerTransitionCancelsThreeFingerCandidateAndFollowsSwipeDirection()
+    {
+        var recognizer = new TouchpadGestureRecognizer();
+        recognizer.Process(Frame(0, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(40, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(56, 3, 0.1, 0.3, 0.5));
+        Assert.Empty(recognizer.Process(Frame(64, 4, 0.2, 0.4, 0.6, 0.8)));
+        Assert.Empty(recognizer.Process(Frame(104, 4, 0.2, 0.4, 0.6, 0.8)));
+        Assert.Empty(recognizer.Process(Frame(120, 4, 0.4, 0.6, 0.8, 1.0)));
+
+        var completed = recognizer.Process(Frame(136, 0));
+
+        var gesture = Assert.Single(completed);
+        Assert.Equal(4, gesture.FingerCount);
+        Assert.Equal(TouchpadSwipeDirection.Right, gesture.Direction);
+    }
+
+    [Fact]
+    public void TwoFingerMovementProducesOnlyContinuousHorizontalDeltas()
+    {
+        var recognizer = new TouchpadGestureRecognizer();
+        recognizer.Process(Frame(0, 2, 0.4, 0.6));
+        recognizer.Process(Frame(40, 2, 0.4, 0.6));
+
+        var movement = Assert.Single(recognizer.Process(Frame(56, 2, 0.5, 0.7)));
+        Assert.Equal(TouchpadGestureKind.HorizontalDelta, movement.Kind);
+        Assert.Equal(2, movement.FingerCount);
+        Assert.Null(movement.Direction);
+        Assert.True(movement.HorizontalDelta > 0);
+        Assert.Empty(recognizer.Process(Frame(72, 0)));
+    }
+
+    [Fact]
+    public void ThreeFingerVerticalSwipeIsRecognizedSeparatelyFromHorizontalFocus()
+    {
+        var recognizer = new TouchpadGestureRecognizer();
+        recognizer.Process(FramePoints(0, (0.5, 0.3), (0.5, 0.5), (0.5, 0.7)));
+        recognizer.Process(FramePoints(40, (0.5, 0.3), (0.5, 0.5), (0.5, 0.7)));
+        recognizer.Process(FramePoints(56, (0.5, 0.25), (0.5, 0.45), (0.5, 0.65)));
+        recognizer.Process(FramePoints(72, (0.5, 0.1), (0.5, 0.3), (0.5, 0.5)));
+
+        var gesture = Assert.Single(recognizer.Process(Frame(88, 0)));
+
+        Assert.Equal(3, gesture.FingerCount);
+        Assert.Equal(TouchpadSwipeDirection.Up, gesture.Direction);
+    }
+
+    [Fact]
+    public void DiagonalMovementDoesNotBecomeADirectionalSwipe()
+    {
+        var recognizer = new TouchpadGestureRecognizer();
+        recognizer.Process(FramePoints(0, (0.3, 0.3), (0.5, 0.5), (0.7, 0.7)));
+        recognizer.Process(FramePoints(40, (0.3, 0.3), (0.5, 0.5), (0.7, 0.7)));
+        recognizer.Process(FramePoints(56, (0.25, 0.25), (0.45, 0.45), (0.65, 0.65)));
+        recognizer.Process(FramePoints(72, (0.1, 0.1), (0.3, 0.3), (0.5, 0.5)));
+
+        Assert.Empty(recognizer.Process(Frame(88, 0)));
+    }
+
+    [Fact]
+    public void AmbiguousShortMalformedAndDiscontinuousInputNeverCompletesASwipe()
+    {
+        var recognizer = new TouchpadGestureRecognizer();
+        recognizer.Process(Frame(0, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(40, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(56, 3, 0.28, 0.48, 0.68));
+        Assert.Empty(recognizer.Process(Frame(72, 0)));
+
+        recognizer.Process(Frame(100, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(140, 3, 0.3, 0.5, 0.7));
+        recognizer.Process(Frame(156, 3, 0.2, 0.4, 0.6));
+        Assert.Empty(recognizer.Process(Frame(300, 3, 0.1, 0.3, 0.5)));
+        Assert.Empty(recognizer.Process(Frame(316, 0)));
+
+        recognizer.Process(Frame(340, 3, 0.3, 0.5, 0.7));
+        Assert.Empty(recognizer.Process(Frame(380, 3, 0.3, 0.5, 0.7)));
+        Assert.Empty(recognizer.Process(new TouchpadContactFrame(42, 396, 3, 3,
+        [
+            new TouchpadContact(1, true, 1.2, 0.5), new TouchpadContact(2, true, 0.5, 0.5),
+            new TouchpadContact(3, true, 0.7, 0.5)
+        ])));
+        Assert.Empty(recognizer.Process(Frame(412, 0)));
+    }
+
+    [Fact]
+    public void InsufficientExpectedContactsCancelTheCurrentFrameSequence()
+    {
+        var recognizer = new TouchpadGestureRecognizer();
+        recognizer.Process(Frame(0, 3, 0.3, 0.5, 0.7));
+        var incomplete = new TouchpadContactFrame(42, 40, 3, 3,
+            [new TouchpadContact(1, true, 0.3, 0.5), new TouchpadContact(2, true, 0.5, 0.5)]);
+
+        Assert.Empty(recognizer.Process(incomplete));
+        Assert.Empty(recognizer.Process(Frame(56, 0)));
+    }
+
+    private static TouchpadContactFrame Frame(long timestamp, int expectedCount, params double[] xPositions)
+    {
+        var contacts = xPositions.Select((x, index) => new TouchpadContact((uint)(index + 1), true, x, 0.5)).ToArray();
+        return new TouchpadContactFrame(42, timestamp, (uint)timestamp, expectedCount, contacts);
+    }
+
+    private static TouchpadContactFrame FramePoints(long timestamp, params (double X, double Y)[] points)
+    {
+        var contacts = points.Select((point, index) =>
+            new TouchpadContact((uint)(index + 1), true, point.X, point.Y)).ToArray();
+        return new TouchpadContactFrame(42, timestamp, (uint)timestamp, points.Length, contacts);
+    }
+}

@@ -30,6 +30,7 @@ public sealed record ManagerConfiguration
     public IReadOnlyList<string> IgnoredClassNames { get; init; } = [];
     public IReadOnlyList<ShortcutBinding> Shortcuts { get; init; } = [];
     public bool EnableDefaultShortcuts { get; init; } = true;
+    public TouchpadOptions Touchpad { get; init; } = new();
     public IReadOnlyList<string> MonitorOrder { get; init; } = [];
     public int InputCapacity { get; init; } = 256;
     public int MaximumClients { get; init; } = 16;
@@ -63,6 +64,7 @@ public sealed record ManagerConfiguration
             throw new InvalidDataException("Monitor order must contain at most ten unique device names.");
         if (Shortcuts is null || Shortcuts.Count > 128 || Shortcuts.Any(binding => binding is null))
             throw new InvalidDataException("Invalid shortcut list.");
+        if (Touchpad is null) throw new InvalidDataException("Touchpad options are required.");
         var seen = new HashSet<(uint, uint)>();
         foreach (var shortcut in Shortcuts)
         {
@@ -135,18 +137,30 @@ public sealed record ManagerConfiguration
              command.WorkspaceName is not null || command.WorkspaceNumber is < 1 or > 10) ||
             command.Kind != CommandKind.FocusMonitor && command.MonitorNumber is not null ||
             command.Kind == CommandKind.FocusMonitor && (command.WorkspaceId is not null ||
-                command.WorkspaceName is not null || command.WorkspaceNumber is not null ||
-                command.WindowId is not null || command.MonitorId is not null || command.Direction is not null ||
-                command.Amount is not null || command.Orientation is not null || command.Mode is not null ||
-                command.Paused is not null || command.NodeId is not null || command.Navigation is not null ||
-                command.CycleDirection is not null || command.Layout is not null || command.Position is not null ||
-                command.LayeredLayoutOptions is not null) ||
+                                                         command.WorkspaceName is not null ||
+                                                         command.WorkspaceNumber is not null ||
+                                                         command.WindowId is not null ||
+                                                         command.MonitorId is not null ||
+                                                         command.Direction is not null ||
+                                                         command.Amount is not null ||
+                                                         command.Orientation is not null || command.Mode is not null ||
+                                                         command.Paused is not null || command.NodeId is not null ||
+                                                         command.Navigation is not null ||
+                                                         command.CycleDirection is not null ||
+                                                         command.Layout is not null || command.Position is not null ||
+                                                         command.LayeredLayoutOptions is not null) ||
             command.Kind == CommandKind.MoveSpatial && (command.WorkspaceId is not null ||
-                command.WorkspaceName is not null || command.WorkspaceNumber is not null ||
-                command.MonitorId is not null || command.MonitorNumber is not null || command.Amount is not null ||
-                command.Orientation is not null || command.Mode is not null || command.Paused is not null ||
-                command.NodeId is not null || command.Navigation is not null || command.CycleDirection is not null ||
-                command.Layout is not null || command.Position is not null || command.LayeredLayoutOptions is not null) ||
+                                                        command.WorkspaceName is not null ||
+                                                        command.WorkspaceNumber is not null ||
+                                                        command.MonitorId is not null ||
+                                                        command.MonitorNumber is not null ||
+                                                        command.Amount is not null ||
+                                                        command.Orientation is not null || command.Mode is not null ||
+                                                        command.Paused is not null ||
+                                                        command.NodeId is not null || command.Navigation is not null ||
+                                                        command.CycleDirection is not null ||
+                                                        command.Layout is not null || command.Position is not null ||
+                                                        command.LayeredLayoutOptions is not null) ||
             command.Kind == CommandKind.ActivateWorkspace && command.MonitorId == Guid.Empty ||
             command.Kind != CommandKind.SetWorkspaceLayout && command.Layout is not null ||
             command.Kind != CommandKind.SetWorkspaceLayout && command.LayeredLayoutOptions is not null ||
@@ -255,7 +269,8 @@ public sealed record ManagerConfiguration
         if (content.StartsWith('\uFEFF')) content = content[1..];
         using var document = JsonDocument.Parse(content, new JsonDocumentOptions { MaxDepth = 64 });
         RejectDuplicateProperties(document.RootElement);
-        var typeInfo = (JsonTypeInfo<ManagerConfiguration>)ConfigurationJsonOptions.GetTypeInfo(typeof(ManagerConfiguration));
+        var typeInfo =
+            (JsonTypeInfo<ManagerConfiguration>)ConfigurationJsonOptions.GetTypeInfo(typeof(ManagerConfiguration));
         var input = JsonNode.Parse(document.RootElement.GetRawText()) as JsonObject ??
                     throw new JsonException("Configuration must be a JSON object.");
         var result = MergeDefaults(input).Deserialize(typeInfo) ??

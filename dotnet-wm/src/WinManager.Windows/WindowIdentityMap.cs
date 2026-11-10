@@ -18,6 +18,7 @@ internal sealed class WindowIdentityMap
             if (eventTime > previous) lifecycleChanges[handle] = eventTime;
             return;
         }
+
         if (lifecycleChanges.Count >= MaximumPendingChanges)
         {
             lifecycleChanges.Clear();
@@ -29,12 +30,14 @@ internal sealed class WindowIdentityMap
     public void ReconcileLifecycle()
     {
         if (overflow) identities.Clear();
-        else foreach (var (handle, eventTime) in lifecycleChanges)
-        {
-            // Out-of-context events can arrive after a snapshot of the newly created window.
-            if (identities.TryGetValue(handle, out var entry) && eventTime >= entry.ObservedAt)
-                identities.Remove(handle);
-        }
+        else
+            foreach (var (handle, eventTime) in lifecycleChanges)
+            {
+                // Out-of-context events can arrive after a snapshot of the newly created window.
+                if (identities.TryGetValue(handle, out var entry) && eventTime >= entry.ObservedAt)
+                    identities.Remove(handle);
+            }
+
         lifecycleChanges.Clear();
         overflow = false;
     }
@@ -63,7 +66,21 @@ internal sealed class WindowIdentityMap
             identity = entry.Identity;
             return true;
         }
+
         identity = default;
+        return false;
+    }
+
+    public bool TryResolveHandle(nint handle, out Guid id)
+    {
+        ReconcileLifecycle();
+        if (identities.TryGetValue(handle, out var entry))
+        {
+            id = entry.Id;
+            return true;
+        }
+
+        id = Guid.Empty;
         return false;
     }
 

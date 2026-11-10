@@ -24,7 +24,8 @@ public sealed class PipeServerTests
             var path = Path.Combine(directory, "config.json");
             File.WriteAllText(path, ManagerConfiguration.Serialize(new ManagerConfiguration()));
             await using var host = await PipeHost.StartAsync(configurationStore: new ConfigurationStore(path));
-            await using var client = await WinManagerClient.ConnectAsync(host.Name, TimeSpan.FromSeconds(5), host.Token);
+            await using var client =
+                await WinManagerClient.ConnectAsync(host.Name, TimeSpan.FromSeconds(5), host.Token);
 
             var document = await client.ReadConfigurationAsync(host.Token);
             Assert.Equal(Path.GetFullPath(path), document.Path);
@@ -203,6 +204,15 @@ public sealed class PipeServerTests
         "invalid_argument")]
     [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"query.snapshot\",\"payload\":{\"extra\":1}",
         "invalid_argument")]
+    [InlineData(
+        "\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"query.previewTargets\",\"payload\":{\"windowIds\":[]}",
+        "invalid_argument")]
+    [InlineData(
+        "\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"query.previewTargets\",\"payload\":{\"windowIds\":[\"00000000-0000-0000-0000-000000000001\",\"00000000-0000-0000-0000-000000000001\"]}",
+        "invalid_argument")]
+    [InlineData(
+        "\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"query.previewTargets\",\"payload\":{\"windowIds\":[\"00000000-0000-0000-0000-000000000001\"],\"extra\":true}",
+        "invalid_argument")]
     [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"command\",\"payload\":{}",
         "invalid_argument")]
     [InlineData("\"protocolVersion\":1,\"kind\":\"request\",\"operation\":\"command\",\"payload\":{\"kind\":100}",
@@ -235,6 +245,24 @@ public sealed class PipeServerTests
         Assert.Equal(revision, host.Engine.Current.StateRevision);
         await Send(client, Request("query.snapshot", Protocol.EmptyPayload), host.Token);
         Assert.True((await Response(client, host.Token)).Success);
+    }
+
+    [Fact]
+    public async Task PreviewTargetQueryReturnsBoundedPerWindowFailuresAndRoundTripsContracts()
+    {
+        await using var host = await PipeHost.StartAsync();
+        await using var client = await WinManagerClient.ConnectAsync(host.Name, TimeSpan.FromSeconds(5), host.Token);
+        var known = Assert.Single(host.Engine.Current!.Desktop.Windows).Id;
+        var unknown = Guid.NewGuid();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => client.QueryPreviewTargetsAsync([], host.Token));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.QueryPreviewTargetsAsync([known, known], host.Token));
+        var result = await client.QueryPreviewTargetsAsync([known, unknown], host.Token);
+
+        Assert.Equal(host.Engine.Current.StateRevision, result.StateRevision);
+        Assert.Empty(result.Targets);
+        Assert.Equal("preview_unavailable", Assert.Single(result.Failures, failure => failure.WindowId == known).Code);
+        Assert.Equal("unknown_window", Assert.Single(result.Failures, failure => failure.WindowId == unknown).Code);
     }
 
     [Theory]
@@ -283,14 +311,16 @@ public sealed class PipeServerTests
         await using var client = await host.ConnectAsync();
         var windowId = Assert.Single(host.Engine.Current!.Desktop.Windows).Id;
 
-        await Send(client, Request("command", new ManagerCommand(CommandKind.FocusMonitor, MonitorNumber: 1)), host.Token);
+        await Send(client, Request("command", new ManagerCommand(CommandKind.FocusMonitor, MonitorNumber: 1)),
+            host.Token);
         Assert.True((await Response(client, host.Token)).Success);
         Assert.Equal(windowId, host.Engine.Current!.Desktop.FocusedWindowId);
 
         await Send(client, Request("command", new ManagerCommand(CommandKind.MoveToWorkspace, WindowId: windowId,
             WorkspaceNumber: 2)), host.Token);
         Assert.True((await Response(client, host.Token)).Success);
-        Assert.Contains(windowId, host.Engine.Current!.Workspaces!.Single(workspace => workspace.Name == "Two").WindowIds);
+        Assert.Contains(windowId,
+            host.Engine.Current!.Workspaces!.Single(workspace => workspace.Name == "Two").WindowIds);
     }
 
     [Fact]

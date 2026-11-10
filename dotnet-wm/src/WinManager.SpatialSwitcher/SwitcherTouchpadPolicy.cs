@@ -1,0 +1,34 @@
+using WinManager.Windows;
+
+namespace WinManager.SpatialSwitcher;
+
+internal enum CarouselGestureAction
+{
+    Open,
+    Cancel
+}
+
+internal static class SwitcherTouchpadPolicy
+{
+    public static bool TryGetScrollDelta(TouchpadGesture gesture, TouchpadCapabilityResult capability,
+        out double horizontalDelta)
+    {
+        horizontalDelta = 0;
+        if (!capability.CanDispatchActions || gesture.Kind != TouchpadGestureKind.HorizontalDelta ||
+            gesture.FingerCount != 2 || !double.IsFinite(gesture.HorizontalDelta)) return false;
+        horizontalDelta = gesture.HorizontalDelta;
+        return true;
+    }
+
+    public static CarouselGestureAction? Route(TouchpadGesture gesture, TouchpadCapabilityResult capability)
+    {
+        if (!capability.CanDispatchActions || gesture.Kind != TouchpadGestureKind.Swipe || gesture.FingerCount != 3)
+            return null;
+        return gesture.Direction switch
+        {
+            TouchpadSwipeDirection.Up => CarouselGestureAction.Open,
+            TouchpadSwipeDirection.Down => CarouselGestureAction.Cancel,
+            _ => null
+        };
+    }
+}

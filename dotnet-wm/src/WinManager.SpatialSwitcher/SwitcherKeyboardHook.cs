@@ -27,7 +27,8 @@ internal sealed class SwitcherKeyboardHook : IDisposable
 
     public SwitcherKeyboardHook(Action<SwitcherKeyboardAction> onAction)
     {
-        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("The keyboard hook requires Windows.");
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("The keyboard hook requires Windows.");
         this.onAction = onAction;
         callback = HookCallback;
         hook = SetWindowsHookEx(WhKeyboardLl, callback, GetModuleHandle(null), 0);
@@ -64,7 +65,8 @@ internal sealed class SwitcherKeyboardHook : IDisposable
             if (!decision.Suppress) return CallNextHookEx(hook, code, wParam, lParam);
 
             if (decision.Action is { } action) onAction(action);
-            if (decision.Action is not null) SendNeutralKey();
+            if (decision.Action is not null && decision.Action != SwitcherKeyboardAction.ToggleCarousel)
+                SendNeutralKey();
             return 1;
         }
         catch
@@ -80,7 +82,8 @@ internal sealed class SwitcherKeyboardHook : IDisposable
         var inputs = new[]
         {
             new NativeInput { Type = 1, Data = new InputUnion { Keyboard = new() { VirtualKey = VkNoname } } },
-            new NativeInput { Type = 1, Data = new InputUnion { Keyboard = new() { VirtualKey = VkNoname, Flags = 2 } } }
+            new NativeInput
+                { Type = 1, Data = new InputUnion { Keyboard = new() { VirtualKey = VkNoname, Flags = 2 } } }
         };
         SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<NativeInput>());
     }
@@ -107,11 +110,9 @@ internal sealed class SwitcherKeyboardHook : IDisposable
     [StructLayout(LayoutKind.Explicit)]
     private struct InputUnion
     {
-        [FieldOffset(0)]
-        public KeyboardInput Keyboard;
+        [FieldOffset(0)] public KeyboardInput Keyboard;
 
-        [FieldOffset(0)]
-        public MouseInput Mouse;
+        [FieldOffset(0)] public MouseInput Mouse;
     }
 
     [StructLayout(LayoutKind.Sequential)]

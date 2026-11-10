@@ -39,11 +39,23 @@ ID receives `Guid.Empty` as its response ID. Errors do not mutate manager state.
 | Operation | Payload | Successful response payload |
 | --- | --- | --- |
 | `query.snapshot` | `{}` or `null` | Complete committed `ManagerSnapshot` |
+| `query.previewTargets` | `{"windowIds":["<GUID>", ...]}` | `PreviewTargetsResult` with short-lived native target identities or per-window failures |
 | `configuration.read` | `{}` | `ConfigurationDocument` with the host-selected file path, raw UTF-8 content, SHA-256 revision, and validation status |
 | `configuration.save` | `{"revision":"<sha256>","content":"<configuration-json>"}` | Updated `ConfigurationDocument`; invalid or stale writes return `invalid_argument` or `configuration_conflict` |
 | `command` | Typed `ManagerCommand` object; `kind` is required | `CommandResult`; also reflected in response fields |
 | `subscribe` | `{"eventTypes": null}` or `{}` for all events; otherwise an array of known event names | `SubscriptionResult`, including `subscriptionId` |
 | `unsubscribe` | `{"subscriptionId": "<GUID>"}` | None |
+
+`query.previewTargets` accepts 1–64 unique, nonempty managed window IDs from the
+current snapshot. It never accepts a caller-supplied HWND. The response includes
+`stateRevision`, `targets`, and `failures`; each target has `windowId`, signed
+64-bit `handleValue`, `processId`, and 64-bit `processCreationTime`. A target
+identity is transient and must be validated immediately before native preview
+registration. Each requested ID appears exactly once in either list; inaccessible,
+stale, minimized, or otherwise unavailable windows use a per-window failure code
+and do not fail the whole query. Hosts without this operation return
+`unknown_operation`; clients should keep a placeholder rather than retrying with
+raw handles. The existing same-user/session pipe protections still apply.
 
 Configuration operations are restricted to the path selected by the host's
 `--config` option or its default `%LOCALAPPDATA%\WinManager\config.json`;

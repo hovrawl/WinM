@@ -20,6 +20,20 @@ public sealed class WindowIdentityMapTests
         Assert.Equal(identity, resolved);
     }
 
+    [Fact]
+    public void ForegroundHandleResolutionHonorsLifecycleInvalidation()
+    {
+        var map = new WindowIdentityMap();
+        var identity = new WindowIdentity(123, 4, 5);
+        var id = map.GetOrCreate(identity, 100);
+
+        Assert.True(map.TryResolveHandle(identity.Handle, out var resolvedId));
+        Assert.Equal(id, resolvedId);
+        map.RecordLifecycleChange(identity.Handle, 101);
+
+        Assert.False(map.TryResolveHandle(identity.Handle, out _));
+    }
+
     [Theory]
     [InlineData(6, 5)]
     [InlineData(4, 6)]

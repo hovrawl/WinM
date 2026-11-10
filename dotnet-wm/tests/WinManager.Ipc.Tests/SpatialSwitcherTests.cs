@@ -7,7 +7,9 @@ using Avalonia.Media;
 using Avalonia.Styling;
 using WinManager.Contracts;
 using WinManager.SpatialSwitcher;
+using WinManager.Windows;
 using Xunit;
+using ContractPixelRect = WinManager.Contracts.PixelRect;
 
 namespace WinManager.Ipc.Tests;
 
@@ -299,6 +301,213 @@ public sealed class SpatialSwitcherTests
     }
 
     [Fact]
+    public void CarouselBrowseChangesSelectionWithoutFocusingAndAcceptFocusesOnlySelectedWindow()
+    {
+        var workspaceId = Guid.NewGuid();
+        var original = Window("Original");
+        var other = Window("Other");
+        var state = new CarouselState();
+        state.BeginOpen(new SwitcherContext(workspaceId, original.Id, original.MonitorId), [original, other]);
+
+        Assert.Equal(CarouselLifecycleState.Opening, state.Lifecycle);
+        Assert.Null(state.Accept());
+        Assert.True(state.MarkOpen());
+        Assert.True(state.Select(other.Id));
+        Assert.Equal(original.Id, state.OriginalWindowId);
+        Assert.Equal(other.Id, state.SelectedWindowId);
+
+        var accepted = state.Accept();
+
+        Assert.Equal(CarouselLifecycleState.Closing, state.Lifecycle);
+        Assert.Equal(new ManagerCommand(CommandKind.Focus, WindowId: other.Id), accepted);
+    }
+
+    [Fact]
+    public void CarouselCancelAndExternalActivationNeverCreateAnAcceptanceCommand()
+    {
+        var original = Window("Original");
+        var other = Window("Other");
+        var state = new CarouselState();
+        state.BeginOpen(new SwitcherContext(Guid.NewGuid(), original.Id, original.MonitorId), [original, other]);
+        state.MarkOpen();
+        state.Select(other.Id);
+
+        Assert.Equal(original.Id, state.Cancel());
+        Assert.Equal(CarouselLifecycleState.Closing, state.Lifecycle);
+        state.CompleteClose();
+        Assert.Equal(CarouselLifecycleState.Closed, state.Lifecycle);
+        Assert.Null(state.SelectedWindowId);
+
+        state.BeginOpen(new SwitcherContext(Guid.NewGuid(), original.Id, original.MonitorId), [original, other]);
+        state.MarkOpen();
+        state.CloseExternally();
+        Assert.Equal(CarouselLifecycleState.Closed, state.Lifecycle);
+        Assert.Null(state.Accept());
+    }
+
+    [Fact]
+    public void CarouselScrollClampsAtStripEndsAndMovesSelectionUnderViewportAnchor()
+    {
+        var windows = new[] { Window("A"), Window("B"), Window("C"), Window("D") };
+        var state = new CarouselState();
+        state.BeginOpen(new SwitcherContext(Guid.NewGuid(), windows[0].Id, windows[0].MonitorId), windows);
+        state.MarkOpen();
+        var maximumOffset = CarouselPresentation.MaximumScrollOffset(windows.Length, 800, 400);
+        var stride = CarouselPresentation.CardStride(800);
+        var cardWidth = CarouselPresentation.CardWidth(800);
+
+        Assert.True(state.ScrollBy(500, maximumOffset, stride, cardWidth, 400));
+        Assert.Equal(500, state.HorizontalOffset);
+        Assert.Equal(windows[1].Id, state.SelectedWindowId);
+        Assert.True(state.ScrollBy(10000, maximumOffset, stride, cardWidth, 400));
+        Assert.Equal(maximumOffset, state.HorizontalOffset);
+        Assert.Equal(windows[3].Id, state.SelectedWindowId);
+        Assert.True(state.ScrollBy(-10000, maximumOffset, stride, cardWidth, 400));
+        Assert.Equal(0, state.HorizontalOffset);
+        Assert.Equal(windows[0].Id, state.SelectedWindowId);
+    }
+
+    [Fact]
+    public void CarouselSnapshotReconciliationPreservesSelectionByIdAndFallsBackWhenRemoved()
+    {
+        var original = Window("Original");
+        var selected = Window("Selected");
+        var remaining = Window("Remaining");
+        var state = new CarouselState();
+        state.BeginOpen(new SwitcherContext(Guid.NewGuid(), original.Id, original.MonitorId),
+            [original, selected, remaining]);
+        state.MarkOpen();
+        state.Select(selected.Id);
+
+        state.UpdateCandidates([original, selected with { Title = "Selected renamed" }, remaining]);
+        Assert.Equal(selected.Id, state.SelectedWindowId);
+
+        state.UpdateCandidates([original, remaining]);
+        Assert.Equal(original.Id, state.SelectedWindowId);
+        Assert.Equal(original.Id, state.Cancel());
+    }
+
+    [Fact]
+    public void CarouselCapturedViewClosesWhenWorkspaceOrMonitorIsRemovedOrSwitched()
+    {
+        var monitor = Monitor(Guid.NewGuid());
+        var workspace = Workspace("Captured", new(0, 0)) with { Active = true, MonitorId = monitor.Id };
+        var otherWorkspace = Workspace("Other", new(400, 0)) with { Active = true, MonitorId = monitor.Id };
+        var context = new SwitcherContext(workspace.Id, null, monitor.Id);
+        var snapshot = new ManagerSnapshot(Guid.NewGuid(), 1, new DesktopSnapshot([monitor], [], null),
+            new Dictionary<Guid, SplitNodeInfo?>(), false, [workspace, otherWorkspace], null,
+            [new(monitor.Id, workspace.Id)]);
+
+        Assert.True(CarouselWindow.IsCapturedViewValid(snapshot, context));
+        Assert.False(CarouselWindow.IsCapturedViewValid(snapshot with
+        {
+            WorkspaceViews = [new(monitor.Id, otherWorkspace.Id)]
+        }, context));
+        Assert.False(CarouselWindow.IsCapturedViewValid(snapshot with
+        {
+            Desktop = snapshot.Desktop with { Monitors = [] }
+        }, context));
+        Assert.False(CarouselWindow.IsCapturedViewValid(snapshot with
+        {
+            Workspaces = [otherWorkspace]
+        }, context));
+    }
+
+    [Theory]
+    [InlineData(TouchpadSwipeDirection.Up, "Open")]
+    [InlineData(TouchpadSwipeDirection.Down, "Cancel")]
+    public void SwitcherRoutesOnlyVerticalThreeFingerSwipesWhenOwnershipIsVerified(
+        TouchpadSwipeDirection direction, string expected)
+    {
+        var capability = new TouchpadCapabilityResult(TouchpadCapabilityState.Available, 1, true, true, null);
+        var gesture = new TouchpadGesture(TouchpadGestureKind.Swipe, 3, direction, 0, 100);
+
+        Assert.Equal(Enum.Parse<CarouselGestureAction>(expected), SwitcherTouchpadPolicy.Route(gesture, capability));
+    }
+
+    [Fact]
+    public void SwitcherDoesNotRouteHostHorizontalOrUnverifiedNativeGestures()
+    {
+        var available = new TouchpadCapabilityResult(TouchpadCapabilityState.Available, 1, true, true, null);
+        var blocked = available with
+        {
+            State = TouchpadCapabilityState.GestureConflictBlocked,
+            GestureConflictSuppressionVerified = false
+        };
+
+        Assert.Null(SwitcherTouchpadPolicy.Route(
+            new TouchpadGesture(TouchpadGestureKind.Swipe, 3, TouchpadSwipeDirection.Left, 0, 100), available));
+        Assert.Null(SwitcherTouchpadPolicy.Route(
+            new TouchpadGesture(TouchpadGestureKind.Swipe, 3, TouchpadSwipeDirection.Up, 0, 100), blocked));
+        Assert.Null(SwitcherTouchpadPolicy.Route(
+            new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 2, null, 0.1, 100), available));
+    }
+
+    [Fact]
+    public void SwitcherRoutesTwoFingerHorizontalDeltasOnlyWhenCapabilityIsAvailable()
+    {
+        var available = new TouchpadCapabilityResult(TouchpadCapabilityState.Available, 1, true, true, null);
+        var blocked = available with
+        {
+            State = TouchpadCapabilityState.GestureConflictBlocked,
+            GestureConflictSuppressionVerified = false
+        };
+        var gesture = new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 2, null, -0.07, 100);
+
+        Assert.True(SwitcherTouchpadPolicy.TryGetScrollDelta(gesture, available, out var delta));
+        Assert.Equal(-0.07, delta, 6);
+        Assert.False(SwitcherTouchpadPolicy.TryGetScrollDelta(gesture, blocked, out _));
+        Assert.False(SwitcherTouchpadPolicy.TryGetScrollDelta(
+            new TouchpadGesture(TouchpadGestureKind.HorizontalDelta, 3, null, 0.1, 100), available, out _));
+    }
+
+    [Fact]
+    public void SwitcherReadsSharedTouchpadSettingAndDefaultsOnForOlderConfiguration()
+    {
+        var legacy = new ConfigurationDocument("config.json", "{}", "revision", true, null);
+        var disabled = new ConfigurationDocument("config.json", "{\"touchpad\":{\"enabled\":false}}",
+            "revision", true, null);
+        var invalid = new ConfigurationDocument("config.json", "not json", "revision", false, "invalid");
+
+        Assert.True(SwitcherWindow.ReadTouchpadEnabled(legacy));
+        Assert.False(SwitcherWindow.ReadTouchpadEnabled(disabled));
+        Assert.True(SwitcherWindow.ReadTouchpadEnabled(invalid));
+    }
+
+    [Fact]
+    public void CtrlAltSpaceTogglesCarouselOnceAndConsumesItsMatchingRelease()
+    {
+        var policy = new SwitcherKeyboardPolicy();
+
+        var open = policy.Process(0, 0x20, true, true, false, false, true, false, true);
+        var repeat = policy.Process(0, 0x20, true, true, false, false, true, false, true);
+        var release = policy.Process(0, 0x20, false, false, false, false, false, false, true);
+
+        Assert.True(open.Suppress);
+        Assert.Equal(SwitcherKeyboardAction.ToggleCarousel, open.Action);
+        Assert.True(repeat.Suppress);
+        Assert.Null(repeat.Action);
+        Assert.True(release.Suppress);
+        Assert.False(policy.Process(0, 0x20, false, false, false, false, false, false, true).Suppress);
+    }
+
+    [Theory]
+    [InlineData(true, false, false, false)]
+    [InlineData(false, false, true, false)]
+    [InlineData(true, true, false, false)]
+    [InlineData(true, false, false, true)]
+    public void CarouselKeybindRejectsInjectedDisabledOrModifiedChords(bool enabled, bool injected,
+        bool altDown, bool shiftDown)
+    {
+        var policy = new SwitcherKeyboardPolicy();
+
+        var decision = policy.Process(0, 0x20, true, true, false, shiftDown, altDown, injected, enabled);
+
+        Assert.False(decision.Suppress);
+        Assert.Null(decision.Action);
+    }
+
+    [Fact]
     public void KeyboardPolicyPassesUnrelatedAndInactiveKeysAndPairsConsumedReleases()
     {
         var policy = new SwitcherKeyboardPolicy();
@@ -530,6 +739,33 @@ public sealed class SpatialSwitcherTests
 
         Assert.Equal([active.Id], groups.Active.Select(window => window.Id));
         Assert.Equal([minimized.Id, overflow.Id], groups.Inactive.Select(window => window.Id));
+    }
+
+    [Fact]
+    public void CarouselCardsFitAspectRatioAndStayNonOverlappingWithSourceAwareClipping()
+    {
+        var wide = Window("Wide") with { Bounds = new ContractPixelRect(0, 0, 3200, 1800) };
+        var tall = Window("Tall") with { Bounds = new ContractPixelRect(0, 0, 600, 1200) };
+        var sourceSizes = new Dictionary<Guid, DwmThumbnailSourceSize>
+        {
+            [wide.Id] = new(1600, 900),
+            [tall.Id] = new(600, 1200)
+        };
+
+        var cards = CarouselPresentation.Layout([wide, tall], sourceSizes, 1920, 1080, 1800, 680);
+
+        Assert.Equal(2, cards.Count);
+        Assert.True(cards[0].CardBounds.Right < cards[1].CardBounds.Left);
+        Assert.True(cards[0].PreviewBounds.Width <= 960);
+        Assert.True(cards[0].PreviewBounds.Height <= 540);
+        Assert.Equal(16d / 9, cards[0].PreviewBounds.Width / cards[0].PreviewBounds.Height, 6);
+        Assert.True(CarouselPresentation.TryClipPreview(cards[0].PreviewBounds, new Rect(0, 0, 500, 600),
+            sourceSizes[wide.Id], out var clip));
+        Assert.True(clip.DestinationBounds.Right <= 500);
+        Assert.True(clip.SourceBounds.Width < sourceSizes[wide.Id].Width);
+        Assert.True(clip.SourceBounds.Height < sourceSizes[wide.Id].Height);
+        Assert.Equal(0, CarouselPresentation.MaximumScrollOffset(1, 1920, 1800));
+        Assert.True(CarouselPresentation.MaximumScrollOffset(4, 1920, 1800) > 0);
     }
 
     [Fact]

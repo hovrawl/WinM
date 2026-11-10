@@ -46,6 +46,7 @@ Example configuration (default manager shortcuts are enabled unless opted out):
   "ignoredProcessNames": ["example.exe"],
   "ignoredClassNames": ["ExampleToolWindow"],
   "enableDefaultShortcuts": true,
+  "touchpad": { "enabled": true },
   "monitorOrder": ["\\\\.\\DISPLAY2", "\\\\.\\DISPLAY1"],
   "shortcuts": [
     { "modifiers": 16390, "virtualKey": 80, "command": { "kind": "pause", "paused": true } },
@@ -145,14 +146,19 @@ are replaced by custom bindings rather than registered twice.
   direction. Alt+Shift+H/J/K/L performs the corresponding spatial move: it floats
   and positions the focused window beside a local neighbor, or moves it to the
   neighboring monitor's viewed workspace when there is no local neighbor.
-- Three-finger directional gestures can be assigned in Windows Touchpad settings
-  to `Ctrl+Alt+Arrow`; these focus the nearest eligible window in the current
-  workspace, then fall back to the nearest eligible window on a monitor in that
-  direction. Four-finger gestures can be assigned to `Ctrl+Alt+Shift+Arrow`;
-  these float and move the focused window to the nearest directional local
-  window's origin, or, if none exists, move its workspace membership to the
-  neighboring monitor's viewed workspace and center it there. Configure the OS
-  gesture mapping manually; support depends on the touchpad and Windows version.
+- `touchpad.enabled` defaults to `true`. The Host registers its own native
+  Precision Touchpad input source; it does not depend on Windows Settings
+  shortcut mappings or change registry settings. Three-finger left/right maps
+  inversely to `Focus` (swipe left focuses right); four-finger swipes map directly
+  to the existing `MoveSpatial` command. Three-finger vertical gestures are not
+  Host focus commands. Keyboard shortcuts remain available, and setting this to
+  `false` disables Host-native gesture input. Restart both the Host and
+  SpatialSwitcher after changing it. The carousel can also be opened or closed
+  from SpatialSwitcher with `Ctrl+Alt+Space`; keyboard shortcuts remain usable
+  when native touchpad input is disabled or unsupported.
+  Native actions remain capability-gated: current builds report
+  `gestureConflictBlocked` and do not dispatch gestures until both contact input
+  and suppression of conflicting Windows shell actions have been verified.
 - Shortcut modifier bits: Alt `1`, Control `2`, Shift `4`, Win `8`, NoRepeat
   `16384`. The example uses Control+Shift+NoRepeat. `virtualKey` uses Windows
   virtual-key codes; reserved F12 is rejected. Duplicate keys and invalid command
