@@ -11,7 +11,7 @@ namespace WinManager.Windows;
 
 public sealed partial class WindowsDesktopObserver
 {
-    private const uint RegisterShortcutsMessage = 0x8005;
+    private const uint RegisterShortcutsMessage = 0x8006;
     private const uint ShortcutModifiers = 0x400F;
     private readonly Channel<ShortcutRequest> shortcutRequests = Channel.CreateBounded<ShortcutRequest>(
         new BoundedChannelOptions(64) { SingleReader = true, FullMode = BoundedChannelFullMode.Wait, AllowSynchronousContinuations = false });
