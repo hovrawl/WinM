@@ -178,7 +178,8 @@ public sealed class SpatialSwitcherTests
         var retry = ConnectionRetry.RunAsync(_ =>
         {
             attempts++;
-            if (attempts == 2) connected = true;
+            if (attempts == 1) throw new InvalidOperationException("Connection failed.");
+            if (attempts == 3) connected = true;
             return Task.CompletedTask;
         }, () => connected, TimeSpan.FromSeconds(5), (interval, token) =>
         {
@@ -194,16 +195,17 @@ public sealed class SpatialSwitcherTests
 
         var secondDelay = await delays.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(2, attempts);
-        Assert.True(connected);
+        Assert.False(connected);
         secondDelay.SetResult(true);
 
         var connectedDelay = await delays.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
-        Assert.Equal(2, attempts);
+        Assert.Equal(3, attempts);
+        Assert.True(connected);
         connected = false;
         connectedDelay.SetResult(true);
 
         var recoveryDelay = await delays.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2));
-        Assert.Equal(3, attempts);
+        Assert.Equal(4, attempts);
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => retry);
         recoveryDelay.SetResult(true);

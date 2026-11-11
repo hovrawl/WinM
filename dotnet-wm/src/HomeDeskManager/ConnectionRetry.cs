@@ -10,7 +10,18 @@ internal static class ConnectionRetry
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!isConnected()) await connect(cancellationToken);
+            if (!isConnected())
+            {
+                try
+                {
+                    await connect(cancellationToken);
+                }
+                catch (Exception)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+            }
+
             await delay(interval, cancellationToken);
         }
     }

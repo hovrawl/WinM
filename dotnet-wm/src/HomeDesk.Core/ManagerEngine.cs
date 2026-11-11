@@ -49,6 +49,7 @@ public sealed class ManagerEngine
     private readonly HashSet<Guid> overflowWindowIds = [];
     private readonly HashSet<Guid> managerMinimizedWindowIds = [];
     private readonly Dictionary<Guid, HashSet<Guid>> stagedWindowIds = [];
+    private readonly Dictionary<Guid, Guid> lastFocusedStagedTileByWorkspace = [];
     private readonly Dictionary<Guid, Guid> lastFocusedWindowByWorkspace = [];
     private readonly Dictionary<Guid, Guid[]> appliedLayeredStackOrders = [];
     private readonly Guid instanceId = Guid.NewGuid();
@@ -85,7 +86,8 @@ public sealed class ManagerEngine
         this.monitorDeviceOrder = monitorDeviceOrder?.ToArray() ?? [];
         if (this.monitorDeviceOrder.Length > 10 ||
             this.monitorDeviceOrder.Any(string.IsNullOrWhiteSpace) ||
-            this.monitorDeviceOrder.Distinct(StringComparer.OrdinalIgnoreCase).Count() != this.monitorDeviceOrder.Length)
+            this.monitorDeviceOrder.Distinct(StringComparer.OrdinalIgnoreCase).Count() !=
+            this.monitorDeviceOrder.Length)
             throw new ArgumentException("Monitor device order must contain at most ten unique names.",
                 nameof(monitorDeviceOrder));
         inputs = Channel.CreateBounded<ManagerInput>(new BoundedChannelOptions(capacity)
@@ -321,6 +323,9 @@ public sealed class ManagerEngine
         var workspaceIds = workspaces.Snapshot.Select(workspace => workspace.Id).ToHashSet();
         foreach (var workspaceId in appliedLayeredStackOrders.Keys.Where(id => !workspaceIds.Contains(id)).ToArray())
             appliedLayeredStackOrders.Remove(workspaceId);
+        foreach (var (workspaceId, windowId) in lastFocusedStagedTileByWorkspace.ToArray())
+            if (workspaces.WorkspaceFor(windowId) != workspaceId)
+                lastFocusedStagedTileByWorkspace.Remove(workspaceId);
         foreach (var (workspaceId, windowId) in lastFocusedWindowByWorkspace.ToArray())
             if (workspaces.WorkspaceFor(windowId) != workspaceId)
                 lastFocusedWindowByWorkspace.Remove(workspaceId);
@@ -329,7 +334,7 @@ public sealed class ManagerEngine
     private Guid? PreviouslyFocusedTile(WorkspaceInfo workspace, DesktopSnapshot desktop)
     {
         if (desktop.FocusedWindowId is { } focused && IsStagedTile(workspace, desktop, focused)) return focused;
-        return lastFocusedWindowByWorkspace.TryGetValue(workspace.Id, out var remembered) &&
+        return lastFocusedStagedTileByWorkspace.TryGetValue(workspace.Id, out var remembered) &&
                IsStagedTile(workspace, desktop, remembered)
             ? remembered
             : null;
@@ -348,8 +353,23 @@ public sealed class ManagerEngine
         var workspace = workspaces.Snapshot.FirstOrDefault(candidate =>
             candidate.Active && candidate.WindowIds.Contains(focused));
         if (workspace is not null && IsStagedTile(workspace, desktop, focused))
+            lastFocusedStagedTileByWorkspace[workspace.Id] = focused;
+    }
+
+    private void RememberFocusedWindow(DesktopSnapshot desktop)
+    {
+        if (desktop.FocusedWindowId is not { } focused) return;
+        var workspace = workspaces.Snapshot.FirstOrDefault(candidate =>
+            candidate.Active && candidate.WindowIds.Contains(focused));
+        if (workspace is not null && IsEligibleWorkspaceWindow(workspace, desktop, focused))
             lastFocusedWindowByWorkspace[workspace.Id] = focused;
     }
+
+    private bool IsEligibleWorkspaceWindow(WorkspaceInfo workspace, DesktopSnapshot desktop, Guid windowId) =>
+        workspace.Active && workspace.WindowIds.Contains(windowId) &&
+        workspaces.WorkspaceFor(windowId) == workspace.Id &&
+        desktop.Windows.FirstOrDefault(window => window.Id == windowId) is { } window &&
+        window.MonitorId == workspace.MonitorId && SpatialNavigation.IsEligible(window);
 
     private async Task<IReadOnlyList<NativeActionFailure>> ReconcileAsync(CancellationToken cancellationToken,
         Guid? focus = null,
@@ -360,7 +380,8 @@ public sealed class ManagerEngine
     {
         var desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
         var restoreFocusedWindowWasMinimized = restoreFocusedWindowId is { } restoreId &&
-            desktop.Windows.Any(window => window.Id == restoreId && window.Minimized);
+                                               desktop.Windows.Any(window =>
+                                                   window.Id == restoreId && window.Minimized);
         if (restoreFocusedWindowWasMinimized)
             desktop = desktop with
             {
@@ -476,6 +497,7 @@ public sealed class ManagerEngine
                     }
                     else
                         appliedLayeredStackOrders.Remove(workspace.Id);
+
                     nextOverflow.ExceptWith(workspace.WindowIds);
                     nextOverflow.UnionWith(plan.OverflowWindowIds ?? []);
                     stagedWindowIds[workspace.Id] = plan.Placements.Select(placement => placement.WindowId).ToHashSet();
@@ -495,9 +517,9 @@ public sealed class ManagerEngine
                                  explicitPlacement.WindowId == window.Id
                         ? explicitPlacement.Bounds
                         : window.Id == restoreFloatingWindowId &&
-                                 floatingBounds.TryGetValue(window.Id, out var saved)
-                        ? saved
-                        : window.Bounds;
+                          floatingBounds.TryGetValue(window.Id, out var saved)
+                            ? saved
+                            : window.Bounds;
                     var width = Math.Min(bounds.Width, area.Width);
                     var height = Math.Min(bounds.Height, area.Height);
                     if (width < window.MinimumWidth || height < window.MinimumHeight)
@@ -547,13 +569,14 @@ public sealed class ManagerEngine
             droppedWindowId is not null || stackingOrderWindowIds.Count > 0)
         {
             var applyResult = await platform.ApplyAsync(new(changes, focus, visibility,
-                droppedWindowId is { } completed ? [completed] : null, minimizations,
-                StackingOrderWindowIds: stackingOrderWindowIds.Count == 0 ? null : stackingOrderWindowIds),
+                    droppedWindowId is { } completed ? [completed] : null, minimizations,
+                    StackingOrderWindowIds: stackingOrderWindowIds.Count == 0 ? null : stackingOrderWindowIds),
                 cancellationToken);
             failures.AddRange(applyResult.Failures);
             foreach (var (workspaceId, stackOrder) in changedLayeredStackOrders)
                 if (!applyResult.Failures.Any(failure => failure.WindowId is null ||
-                        stackOrder.Contains(failure.WindowId.Value)) && !stackOrder.Any(movingWindows.ContainsKey))
+                                                         stackOrder.Contains(failure.WindowId.Value)) &&
+                    !stackOrder.Any(movingWindows.ContainsKey))
                     appliedLayeredStackOrders[workspaceId] = stackOrder;
             desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
             var observed = desktop.Windows.ToDictionary(window => window.Id);
@@ -572,6 +595,7 @@ public sealed class ManagerEngine
 
         Commit(desktop);
         RememberFocusedStagedWindow(desktop);
+        RememberFocusedWindow(desktop);
         var diagnostics = failures.ToArray();
         if (!reportedFailures.SequenceEqual(diagnostics))
         {
@@ -803,7 +827,8 @@ public sealed class ManagerEngine
         {
             if (command.Kind != CommandKind.MoveToWorkspace || command.WorkspaceId is not null ||
                 command.WorkspaceName is not null || workspaceNumber is < 1 or > 10)
-                return Error("invalid_argument", "Workspace number is only valid from 1 through 10 on moveToWorkspace.");
+                return Error("invalid_argument",
+                    "Workspace number is only valid from 1 through 10 on moveToWorkspace.");
             var numberedWorkspace = workspaces.Snapshot.ElementAtOrDefault(workspaceNumber - 1);
             if (numberedWorkspace is null) return Error("not_found", "Numbered workspace does not exist.");
             command = command with { WorkspaceId = numberedWorkspace.Id, WorkspaceNumber = null };
@@ -857,7 +882,8 @@ public sealed class ManagerEngine
         if (command.Kind == CommandKind.FocusMonitor &&
             (command.WindowId is not null || command.Direction is not null || command.Amount is not null ||
              command.Orientation is not null || command.Mode is not null || command.Paused is not null ||
-             command.WorkspaceId is not null || command.WorkspaceName is not null || command.WorkspaceNumber is not null ||
+             command.WorkspaceId is not null || command.WorkspaceName is not null ||
+             command.WorkspaceNumber is not null ||
              command.MonitorId is not null || command.NodeId is not null || command.Navigation is not null ||
              command.CycleDirection is not null || command.Layout is not null || command.Position is not null ||
              command.LayeredLayoutOptions is not null))
@@ -1100,7 +1126,8 @@ public sealed class ManagerEngine
                         command.MonitorNumber is not null || command.WorkspaceNumber is not null ||
                         command.Amount is not null || command.Orientation is not null || command.Mode is not null ||
                         command.Paused is not null || command.NodeId is not null || command.Navigation is not null ||
-                        command.CycleDirection is not null || command.Layout is not null || command.Position is not null ||
+                        command.CycleDirection is not null || command.Layout is not null ||
+                        command.Position is not null ||
                         command.LayeredLayoutOptions is not null)
                         return Error("invalid_argument", "moveSpatial accepts only a window and direction.");
                     return await MoveSpatialAsync(window, assigned, spatialDirection, cancellationToken);
@@ -1161,10 +1188,17 @@ public sealed class ManagerEngine
         if (monitor is null) return Error("not_found", "Numbered monitor is not connected.");
         var workspaceId = workspaces.Views.FirstOrDefault(view => view.MonitorId == monitor.Id)?.WorkspaceId;
         if (workspaceId is null) return Error("not_found", "Monitor has no workspace view.");
+        var workspace = workspaces.Snapshot.FirstOrDefault(candidate => candidate.Id == workspaceId);
+        if (workspace is null) return Error("not_found", "Monitor has no workspace view.");
         var candidates = desktop.Windows.Where(window => workspaces.WorkspaceFor(window.Id) == workspaceId &&
-                                                          window.MonitorId == monitor.Id &&
-                                                          SpatialNavigation.IsEligible(window));
-        var target = SpatialNavigation.ClosestWindow(monitor.WorkArea, candidates);
+                                                         window.MonitorId == monitor.Id &&
+                                                         SpatialNavigation.IsEligible(window)).ToArray();
+        var target = desktop.FocusedWindowId is { } focused
+            ? candidates.FirstOrDefault(window => window.Id == focused)
+            : null;
+        if (target is null && lastFocusedWindowByWorkspace.TryGetValue(workspaceId.Value, out var remembered))
+            target = candidates.FirstOrDefault(window => window.Id == remembered);
+        target ??= SpatialNavigation.ClosestWindow(monitor.WorkArea, candidates);
         if (target is null) return Error("not_found", "The numbered monitor has no eligible window to focus.");
         if (desktop.FocusedWindowId == target.Id) return new(true, null, null, revision);
         return Result(await ReconcileAsync(cancellationToken, target.Id));
@@ -1175,7 +1209,7 @@ public sealed class ManagerEngine
     {
         if (!workspaces.Snapshot.Any(workspace => workspace.Id == workspaceId && workspace.Active)) return null;
         var workspaceWindows = desktop.Windows.Where(window => workspaces.WorkspaceFor(window.Id) == workspaceId &&
-                                                                SpatialNavigation.IsEligible(window)).ToArray();
+                                                               SpatialNavigation.IsEligible(window)).ToArray();
         var local = SpatialNavigation.ClosestWindowInDirection(origin.Bounds, direction, workspaceWindows,
             origin.Id);
         if (local is not null) return local;
@@ -1187,8 +1221,10 @@ public sealed class ManagerEngine
             {
                 Monitor = monitor,
                 Windows = desktop.Windows.Where(window => window.MonitorId == monitor.Id &&
-                    activeViews.TryGetValue(monitor.Id, out var viewedWorkspace) &&
-                    workspaces.WorkspaceFor(window.Id) == viewedWorkspace && SpatialNavigation.IsEligible(window)).ToArray()
+                                                          activeViews.TryGetValue(monitor.Id,
+                                                              out var viewedWorkspace) &&
+                                                          workspaces.WorkspaceFor(window.Id) == viewedWorkspace &&
+                                                          SpatialNavigation.IsEligible(window)).ToArray()
             })
             .Where(item => item.Windows.Length > 0);
         var neighbor = SpatialNavigation.ClosestMonitorInDirection(sourceMonitor.Bounds, direction,
@@ -1212,7 +1248,8 @@ public sealed class ManagerEngine
         var desktop = Current!.Desktop;
         var sourceMonitor = desktop.Monitors.FirstOrDefault(monitor => monitor.Id == sourceWorkspace.MonitorId);
         if (sourceMonitor is null) return Error("not_found", "The window's monitor is not connected.");
-        var localWindows = desktop.Windows.Where(candidate => workspaces.WorkspaceFor(candidate.Id) == sourceWorkspaceId);
+        var localWindows =
+            desktop.Windows.Where(candidate => workspaces.WorkspaceFor(candidate.Id) == sourceWorkspaceId);
         var localTarget = SpatialNavigation.ClosestWindowInDirection(window.Bounds, direction, localWindows, window.Id);
         Guid targetWorkspaceId = sourceWorkspaceId;
         PixelRect targetBounds;
@@ -1256,7 +1293,8 @@ public sealed class ManagerEngine
     private MonitorInfo? ResolveMonitorNumber(DesktopSnapshot desktop, int monitorNumber)
     {
         var stable = desktop.Monitors.OrderBy(monitor => monitor.Bounds.X == 0 && monitor.Bounds.Y == 0 ? 0 : 1)
-            .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase).ThenBy(monitor => monitor.Id).ToArray();
+            .ThenBy(monitor => monitor.DeviceName, StringComparer.OrdinalIgnoreCase).ThenBy(monitor => monitor.Id)
+            .ToArray();
         if (monitorDeviceOrder.Length == 0) return stable.ElementAtOrDefault(monitorNumber - 1);
         if (monitorNumber <= monitorDeviceOrder.Length)
             return stable.FirstOrDefault(monitor => string.Equals(monitor.DeviceName,

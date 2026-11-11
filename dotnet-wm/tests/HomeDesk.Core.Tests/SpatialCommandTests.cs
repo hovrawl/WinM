@@ -42,6 +42,91 @@ public sealed class SpatialCommandTests
         }
     }
 
+    [Theory]
+    [InlineData(WorkspaceLayout.Split, WindowMode.Floating)]
+    [InlineData(WorkspaceLayout.Layered, WindowMode.Tiling)]
+    public async Task FocusMonitorPreservesLastFocusedWindowForWorkspace(WorkspaceLayout layout, WindowMode mode)
+    {
+        await using var fake = new FakeWindowPlatform();
+        var left = Monitor("left", new(-1000, 0, 1000, 900));
+        var right = Monitor("right", new(0, 0, 1000, 900));
+        var leftWindow = Window("left", left.Id, new(-900, 100, 200, 200));
+        var remembered = Window("remembered", right.Id, new(50, 50, 200, 200)) with { Mode = mode };
+        var closest = Window("closest", right.Id, new(400, 350, 200, 200)) with { Mode = mode };
+        fake.Desktop = new([left, right], [leftWindow, remembered, closest], leftWindow.Id);
+        var engine = new ManagerEngine(fake, workspaceDefinitions:
+        [
+            new("Left", Layout: layout),
+            new("Right", Layout: layout)
+        ], monitorDeviceOrder: ["left", "right"]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Focus, remembered.Id), timeout.Token)).Success);
+            Assert.True((await engine.ExecuteAsync(
+                new(CommandKind.FocusMonitor, MonitorNumber: 2), timeout.Token)).Success);
+            Assert.Equal(remembered.Id, engine.Current!.Desktop.FocusedWindowId);
+
+            Assert.True((await engine.ExecuteAsync(
+                new(CommandKind.FocusMonitor, MonitorNumber: 1), timeout.Token)).Success);
+            Assert.Equal(leftWindow.Id, engine.Current!.Desktop.FocusedWindowId);
+            Assert.True((await engine.ExecuteAsync(
+                new(CommandKind.FocusMonitor, MonitorNumber: 2), timeout.Token)).Success);
+            Assert.Equal(remembered.Id, engine.Current!.Desktop.FocusedWindowId);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FocusMonitorFallsBackWhenRememberedWindowIsUnavailable(bool minimizeRememberedWindow)
+    {
+        await using var fake = new FakeWindowPlatform();
+        var left = Monitor("left", new(-1000, 0, 1000, 900));
+        var right = Monitor("right", new(0, 0, 1000, 900));
+        var leftWindow = Window("left", left.Id, new(-900, 100, 200, 200));
+        var remembered = Window("remembered", right.Id, new(50, 50, 200, 200));
+        var closest = Window("closest", right.Id, new(400, 350, 200, 200));
+        fake.Desktop = new([left, right], [leftWindow, remembered, closest], leftWindow.Id);
+        var engine = new ManagerEngine(fake, workspaceDefinitions: [new("Left"), new("Right")],
+            monitorDeviceOrder: ["left", "right"]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Focus, remembered.Id), timeout.Token)).Success);
+            Assert.True((await engine.ExecuteAsync(
+                new(CommandKind.FocusMonitor, MonitorNumber: 1), timeout.Token)).Success);
+
+            fake.Desktop = fake.Desktop with
+            {
+                Windows = minimizeRememberedWindow
+                    ? fake.Desktop.Windows.Select(window => window.Id == remembered.Id
+                        ? window with { Minimized = true }
+                        : window).ToArray()
+                    : fake.Desktop.Windows.Where(window => window.Id != remembered.Id).ToArray()
+            };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            Assert.True((await engine.ExecuteAsync(
+                new(CommandKind.FocusMonitor, MonitorNumber: 2), timeout.Token)).Success);
+            Assert.Equal(closest.Id, engine.Current!.Desktop.FocusedWindowId);
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
     [Fact]
     public async Task MoveToMonitorNumberUsesConfiguredDeviceOrderAndActiveWorkspace()
     {
