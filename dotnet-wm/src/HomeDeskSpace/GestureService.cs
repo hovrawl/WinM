@@ -23,7 +23,7 @@ internal static class TouchpadGesturePolicy
                 : FocusCycleDirection.Previous);
         }
 
-        if (!capability.CanDispatchActions || gesture.FingerCount != 4) return null;
+        if (!capability.CanRecognizeGestures || gesture.FingerCount != 4) return null;
         var physicalDirection = direction switch
         {
             TouchpadSwipeDirection.Left => Direction.Left,
@@ -32,7 +32,7 @@ internal static class TouchpadGesturePolicy
             TouchpadSwipeDirection.Down => Direction.Down,
             _ => throw new ArgumentOutOfRangeException(nameof(gesture))
         };
-        return new ManagerCommand(CommandKind.MoveSpatial, Direction: physicalDirection);
+        return new ManagerCommand(CommandKind.Move, Direction: physicalDirection);
     }
 }
 
@@ -111,7 +111,7 @@ internal sealed class GestureService(
         if (capability.CanRecognizeGestures && !capability.GestureConflictSuppressionVerified)
         {
             logger.LogWarning(
-                "Native touchpad capability: {State}; devices {DeviceCount}; contacts observed {Contacts}; {Detail}. Three-finger horizontal focus may also trigger Windows' configured touchpad action because suppression is unverified; four-finger movement remains disabled.",
+                "Native touchpad capability: {State}; devices {DeviceCount}; contacts observed {Contacts}; {Detail}. Three-finger horizontal focus and four-finger window movement may also trigger Windows' configured touchpad action because suppression is unverified.",
                 capability.State, capability.DeviceCount, capability.ContactReportsObserved, capability.Detail);
             return;
         }

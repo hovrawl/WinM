@@ -73,13 +73,13 @@ public sealed class HostConfigurationTests
     [InlineData(TouchpadSwipeDirection.Right, Direction.Right)]
     [InlineData(TouchpadSwipeDirection.Up, Direction.Up)]
     [InlineData(TouchpadSwipeDirection.Down, Direction.Down)]
-    public void FourFingerSwipesMoveSpatiallyInTheirPhysicalDirection(TouchpadSwipeDirection physical,
+    public void FourFingerSwipesMoveInTheirPhysicalDirection(TouchpadSwipeDirection physical,
         Direction expected)
     {
         var command = TouchpadGesturePolicy.CreateCommand(
             new TouchpadGesture(TouchpadGestureKind.Swipe, 4, physical, 0, 100), AvailableTouchpad());
 
-        Assert.Equal(new ManagerCommand(CommandKind.MoveSpatial, Direction: expected), command);
+        Assert.Equal(new ManagerCommand(CommandKind.Move, Direction: expected), command);
     }
 
     [Fact]
@@ -117,17 +117,28 @@ public sealed class HostConfigurationTests
     }
 
     [Fact]
-    public void FourFingerMovementStillRequiresVerifiedExclusiveOwnership()
+    public void FourFingerMovementCanDispatchWhenContactsAreObservedWithoutVerifiedSuppression()
     {
         var blocked = new TouchpadCapabilityResult(TouchpadCapabilityState.GestureConflictBlocked, 1, true, false,
             "unverified");
 
-        Assert.Null(TouchpadGesturePolicy.CreateCommand(
-            new TouchpadGesture(TouchpadGestureKind.Swipe, 4, TouchpadSwipeDirection.Left, 0, 100), blocked));
-        Assert.Equal(new ManagerCommand(CommandKind.MoveSpatial, Direction: Direction.Left),
+        Assert.Equal(new ManagerCommand(CommandKind.Move, Direction: Direction.Left),
             TouchpadGesturePolicy.CreateCommand(
                 new TouchpadGesture(TouchpadGestureKind.Swipe, 4, TouchpadSwipeDirection.Left, 0, 100),
-                AvailableTouchpad()));
+                blocked));
+    }
+
+    [Theory]
+    [InlineData(TouchpadCapabilityState.Disabled, 1, false)]
+    [InlineData(TouchpadCapabilityState.UnsupportedDevice, 0, true)]
+    [InlineData(TouchpadCapabilityState.GestureConflictBlocked, 1, false)]
+    public void FourFingerMovementRequiresRecognizableContactInput(TouchpadCapabilityState state, int deviceCount,
+        bool contactsObserved)
+    {
+        var capability = new TouchpadCapabilityResult(state, deviceCount, contactsObserved, false, "unavailable");
+
+        Assert.Null(TouchpadGesturePolicy.CreateCommand(
+            new TouchpadGesture(TouchpadGestureKind.Swipe, 4, TouchpadSwipeDirection.Left, 0, 100), capability));
     }
 
     private static TouchpadCapabilityResult AvailableTouchpad() =>

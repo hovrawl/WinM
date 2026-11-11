@@ -227,6 +227,61 @@ public sealed class SpatialCommandTests
     }
 
     [Fact]
+    public async Task MoveSwapsFocusedTiledWindowWithAdjacentStackEntryAndDoesNotWrapAtEdge()
+    {
+        await using var fake = new FakeWindowPlatform();
+        var monitor = fake.Desktop.Monitors.Single();
+        var windows = Enumerable.Range(0, 3).Select(index => Window($"Window {index}", monitor.Id,
+                new(-900 + index * 240, 100, 200, 200)) with
+            {
+                Mode = WindowMode.Tiling
+            }).ToArray();
+        fake.Desktop = new([monitor], windows, null);
+        var engine = new ManagerEngine(fake, workspaceDefinitions:
+            [new("One", Layout: WorkspaceLayout.Layered, LayeredLayoutOptions: new(0.8, 32))]);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var run = engine.RunAsync(timeout.Token);
+        try
+        {
+            await engine.Ready.WaitAsync(timeout.Token);
+            var workspace = Assert.Single(engine.Current!.Workspaces!);
+            var originalOrder = workspace.WindowIds.ToArray();
+            var originalTreeOrder = TreeWindowOrder(engine.Current.Trees[workspace.Id]);
+            Assert.Equal(3, originalTreeOrder.Length);
+            var focused = originalTreeOrder[1];
+            fake.Desktop = fake.Desktop with { FocusedWindowId = focused };
+            Assert.True((await engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token)).Success);
+            var focusedIndex = Array.IndexOf(originalTreeOrder, focused);
+
+            var moved = await engine.ExecuteAsync(new(CommandKind.Move, WindowId: focused, Direction: Direction.Left),
+                timeout.Token);
+
+            Assert.True(moved.Success);
+            var expectedOrder = originalTreeOrder.ToArray();
+            (expectedOrder[focusedIndex - 1], expectedOrder[focusedIndex]) =
+                (expectedOrder[focusedIndex], expectedOrder[focusedIndex - 1]);
+            Assert.Equal(expectedOrder, TreeWindowOrder(engine.Current!.Trees[workspace.Id]));
+            Assert.Equal(focused, engine.Current.Desktop.FocusedWindowId);
+            Assert.Equal(WindowMode.Tiling, engine.Current.Desktop.Windows.Single(window => window.Id == focused).Mode);
+            Assert.Equal(originalOrder, engine.Current.Workspaces!.Single().WindowIds);
+
+            var movedOrder = TreeWindowOrder(engine.Current.Trees[workspace.Id]);
+            var edgeWindow = movedOrder[0];
+            var edgeMove = await engine.ExecuteAsync(new(CommandKind.Move, WindowId: edgeWindow,
+                Direction: Direction.Left), timeout.Token);
+
+            Assert.False(edgeMove.Success);
+            Assert.Equal("not_found", edgeMove.ErrorCode);
+            Assert.Equal(movedOrder, TreeWindowOrder(engine.Current.Trees[workspace.Id]));
+        }
+        finally
+        {
+            await engine.ExecuteAsync(new(CommandKind.Exit), timeout.Token);
+            await run;
+        }
+    }
+
+    [Fact]
     public async Task SpatialMoveFloatsAndPlacesAtLocalDirectionalWindowOriginAndStaysStable()
     {
         await using var fake = new FakeWindowPlatform();
@@ -383,6 +438,12 @@ public sealed class SpatialCommandTests
 
     private static WindowInfo Window(string title, Guid monitorId, PixelRect bounds) =>
         new(Guid.NewGuid(), monitorId, title, "test", "test", bounds, true, false, false, WindowMode.Floating);
+
+    private static Guid[] TreeWindowOrder(SplitNodeInfo? node) => node is null
+        ? []
+        : node.WindowId is { } windowId
+            ? [windowId]
+            : TreeWindowOrder(node.First).Concat(TreeWindowOrder(node.Second)).ToArray();
 
     private static MonitorInfo Monitor(string name, PixelRect bounds) =>
         new(Guid.NewGuid(), name, bounds, bounds, 96);

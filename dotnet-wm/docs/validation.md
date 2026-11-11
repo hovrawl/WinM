@@ -180,18 +180,19 @@ not verify suppression of Windows' own actions. In the current session, the
 interactive probe was skipped, so neither physical contact delivery nor shell
 coexistence is established. The Host can dispatch three-finger horizontal focus
 when contacts are recognized, with a warning that Windows may also perform its
-configured action; four-finger movement remains blocked until suppression is
-verified.
+  configured action. Four-finger tiled-window movement is also dispatched from
+  recognized contacts, but Windows may perform its configured action as well when
+  suppression is unverified.
 
 ## Host gesture policy
 
 `touchpad.enabled` defaults to `true`, is compatible with configuration files that
 omit the section, and can disable Host-native input. Deterministic tests verify the
-three-finger horizontal inversion, four-finger `MoveSpatial` directions, vertical
-gesture exclusion from Host commands, and capability routing: three-finger focus
-uses observed contacts, while four-finger `MoveSpatial` requires verified exclusive
-ownership. The Host warns that Windows may also perform its configured gesture when
-suppression is unverified. The Host also requires the observer-resolved foreground
+  three-finger horizontal inversion, four-finger `Move` directions, vertical gesture
+  exclusion from Host commands, and capability routing: both horizontal focus and
+  tiled-window movement use observed contacts without requiring verified suppression.
+  The Host warns that Windows may also perform its configured gesture when suppression
+  is unverified. The Host also requires the observer-resolved foreground
 identity to match its current focused window before executing a command. Keyboard
 shortcuts remain available regardless of native touchpad capability.
 
@@ -209,8 +210,8 @@ exclusive shell ownership is unverified; Windows may also perform its configured
 gesture, and the switcher displays that warning. Switcher policy inverts both signs
 of the raw two-finger horizontal delta so carousel movement follows scroll direction.
 Host three-finger horizontal focus also dispatches from observed contacts with an
-explicit coexistence warning; Host four-finger movement remains gated on verified
-shell suppression. Deterministic scroll tests
+explicit coexistence warning; four-finger tiled-window movement dispatches from
+observed contacts with the same warning. Deterministic scroll tests
 cover coalescing, bounds, viewport anchoring, selection preservation, and preview
 source clipping; snapshot reconciliation closes on a changed workspace view or
 monitor and rebinds when candidate identities change. These presentation paths

@@ -150,8 +150,11 @@ are replaced by custom bindings rather than registered twice.
   Precision Touchpad input source; it does not depend on Windows Settings
   shortcut mappings or change registry settings. Three-finger left/right maps
   inversely to `Focus` (swipe left focuses right); four-finger swipes map directly
-  to the existing `MoveSpatial` command. Three-finger vertical gestures are not
-  Host focus commands. Keyboard shortcuts remain available, and setting this to
+  to the existing `Move` command, swapping the focused tiled window with its
+  directional neighbor one position in the stack. Stack edges do not wrap. Three-finger
+  vertical gestures are not Host focus commands. If shell gesture suppression is
+  unverified, Windows may also perform its configured four-finger action. Keyboard
+  shortcuts remain available, and setting this to
   `false` disables HomeDeskSpace-native gesture input. Restart HomeDeskSpace and
   HomeDeskManager after changing it. The carousel can also be opened or closed
   from HomeDeskManager with `Ctrl+Alt+Space`; keyboard shortcuts remain usable
