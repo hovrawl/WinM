@@ -25,7 +25,7 @@ internal sealed class ActualHostFixture : IAsyncDisposable
     public string ConfigPath => Path.Combine(DirectoryPath, "config.json");
     public string HelperPath => Path.Combine(DirectoryPath, "Host", "HomeDesk.Recovery.exe");
     public Process HostProcess { get; private set; } = null!;
-    public WinManagerClient Client { get; private set; } = null!;
+    public HomeDeskClient Client { get; private set; } = null!;
     public DesktopSnapshot Before { get; private set; } = null!;
     public CancellationTokenSource Deadline { get; } = new(TimeSpan.FromSeconds(60));
     public CancellationToken Token => Deadline.Token;
@@ -133,7 +133,7 @@ internal sealed class ActualHostFixture : IAsyncDisposable
                     $"Actual Host exited {HostProcess.ExitCode}: {await DiagnosticsAsync()}");
             try
             {
-                Client ??= await WinManagerClient.ConnectAsync(PipeName, TimeSpan.FromMilliseconds(250), Token);
+                Client ??= await HomeDeskClient.ConnectAsync(PipeName, TimeSpan.FromMilliseconds(250), Token);
                 var snapshot = await Client.QuerySnapshotAsync(Token);
                 Assert.All(snapshot.Desktop.Windows, window => Assert.Contains(window.Title, allowedTitles));
                 if (!missingHelper)

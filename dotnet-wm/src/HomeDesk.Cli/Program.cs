@@ -92,7 +92,7 @@ public static class Program
             }
             if (options.Verb == "watch")
             {
-                await foreach (var envelope in WinManagerClient.WatchAsync(options.EventTypes, options.Pipe,
+                await foreach (var envelope in HomeDeskClient.WatchAsync(options.EventTypes, options.Pipe,
                     options.Reconnect, cancellationToken: cancellation.Token))
                     Print(envelope);
                 return 0;
@@ -100,7 +100,7 @@ public static class Program
             if (options.Verb == "status")
             {
                 var display = new StatusDisplay(new ConsoleStatusTerminal());
-                await foreach (var envelope in WinManagerClient.WatchAsync(pipeName: options.Pipe,
+                await foreach (var envelope in HomeDeskClient.WatchAsync(pipeName: options.Pipe,
                     reconnect: options.Reconnect, cancellationToken: cancellation.Token))
                     display.Update(StatusDisplay.Format(envelope));
                 return 0;
@@ -116,7 +116,7 @@ public static class Program
                 using var document = JsonDocument.Parse(json);
                 if (!document.RootElement.TryGetProperty("kind", out _)) throw new ArgumentException("Command JSON requires 'kind'.");
             }
-            await using var client = await WinManagerClient.ConnectAsync(options.Pipe, cancellationToken: cancellation.Token);
+            await using var client = await HomeDeskClient.ConnectAsync(options.Pipe, cancellationToken: cancellation.Token);
             if (command is null) Print(await client.QuerySnapshotAsync(cancellation.Token));
             else
             {

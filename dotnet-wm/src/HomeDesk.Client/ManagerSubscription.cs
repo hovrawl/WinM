@@ -6,7 +6,7 @@ namespace HomeDesk.Client;
 
 public sealed class ManagerSubscription : IAsyncDisposable
 {
-    private readonly WinManagerClient client;
+    private readonly HomeDeskClient client;
     private readonly Channel<EventEnvelope> events;
     private readonly TaskCompletionSource initialSnapshot = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int enumerated;
@@ -14,7 +14,7 @@ public sealed class ManagerSubscription : IAsyncDisposable
     private long lastSequence;
     private long lastRevision;
 
-    internal ManagerSubscription(WinManagerClient client, int capacity)
+    internal ManagerSubscription(HomeDeskClient client, int capacity)
     {
         this.client = client;
         events = Channel.CreateBounded<EventEnvelope>(new BoundedChannelOptions(capacity)
@@ -32,7 +32,7 @@ public sealed class ManagerSubscription : IAsyncDisposable
 
     internal bool TryPublish(EventEnvelope envelope)
     {
-        var snapshot = WinManagerClient.Deserialize<ManagerSnapshot>(envelope.Payload);
+        var snapshot = HomeDeskClient.Deserialize<ManagerSnapshot>(envelope.Payload);
         if (envelope.InstanceId == Guid.Empty || snapshot.InstanceId != envelope.InstanceId ||
             envelope.Sequence < 0 || envelope.StateRevision < 0 ||
             snapshot.StateRevision != envelope.StateRevision || snapshot.Desktop is null || snapshot.Trees is null ||

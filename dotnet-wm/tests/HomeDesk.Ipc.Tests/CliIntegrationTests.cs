@@ -109,7 +109,7 @@ public sealed class CliIntegrationTests
         Assert.Equal("Current Config direction: Not exposed by host", await status.ReadLineAsync(host.Token));
         Assert.StartsWith("Latest event: snapshot ", await status.ReadLineAsync(host.Token));
 
-        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        await using var client = await HomeDeskClient.ConnectAsync(host.Name, cancellationToken: host.Token);
         var window = host.Engine.Current!.Desktop.Windows.Single();
         Assert.True((await client.ExecuteAsync(new(CommandKind.Focus, WindowId: window.Id), host.Token)).Success);
         Assert.Equal("Current Workspace: test", await status.ReadLineAsync(host.Token));
@@ -186,7 +186,7 @@ public sealed class CliIntegrationTests
         Assert.Equal(host.Engine.Current!.InstanceId, initial.InstanceId);
         Assert.False(initial.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!.Paused);
 
-        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        await using var client = await HomeDeskClient.ConnectAsync(host.Name, cancellationToken: host.Token);
         await using var subscription = await client.SubscribeAsync(["pause.changed"], host.Token);
         await using var events = subscription.ReadEventsAsync(host.Token).GetAsyncEnumerator();
         Assert.True(await events.MoveNextAsync());
@@ -250,7 +250,7 @@ public sealed class CliIntegrationTests
         Assert.False(string.IsNullOrWhiteSpace(error.RootElement.GetProperty("message").GetString()));
         Assert.Equal(before.StateRevision, host.Engine.Current!.StateRevision);
         Assert.False(host.Engine.Current.Paused);
-        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        await using var client = await HomeDeskClient.ConnectAsync(host.Name, cancellationToken: host.Token);
         Assert.Equal(before.InstanceId, (await client.QuerySnapshotAsync(host.Token)).InstanceId);
     }
 

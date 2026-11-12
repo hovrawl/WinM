@@ -12,7 +12,7 @@ public sealed class ClientIntegrationTests
     public async Task SdkTransmitsWorkspaceViewTargetAndReadsDeskViewSnapshot()
     {
         await using var host = await PipeHost.StartAsync(workspaceDefinitions: [new("One"), new("Two")]);
-        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        await using var client = await HomeDeskClient.ConnectAsync(host.Name, cancellationToken: host.Token);
         var initial = await client.QuerySnapshotAsync(host.Token);
         var monitorId = Assert.Single(initial.Desktop.Monitors).Id;
         var target = initial.Workspaces!.Single(workspace => workspace.Name == "Two");
@@ -32,7 +32,7 @@ public sealed class ClientIntegrationTests
     public async Task SdkSetsWorkspaceLayoutThroughPipeAndReadsItFromSnapshot()
     {
         await using var host = await PipeHost.StartAsync();
-        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        await using var client = await HomeDeskClient.ConnectAsync(host.Name, cancellationToken: host.Token);
         var initial = await client.QuerySnapshotAsync(host.Token);
         var workspace = Assert.Single(initial.Workspaces!);
         var tree = initial.Trees[workspace.Id];
@@ -50,7 +50,7 @@ public sealed class ClientIntegrationTests
     public async Task SdkCyclesFilteredFocusAndReceivesObservedFocusEvents()
     {
         await using var host = await PipeHost.StartAsync();
-        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        await using var client = await HomeDeskClient.ConnectAsync(host.Name, cancellationToken: host.Token);
         var initial = await client.QuerySnapshotAsync(host.Token);
         var windowId = Assert.Single(initial.Desktop.Windows).Id;
         var workspace = Assert.Single(initial.Workspaces!);
@@ -77,7 +77,7 @@ public sealed class ClientIntegrationTests
     public async Task SdkSelectsContainersAndReceivesSelectionSnapshots()
     {
         await using var host = await PipeHost.StartAsync();
-        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        await using var client = await HomeDeskClient.ConnectAsync(host.Name, cancellationToken: host.Token);
         var initial = await client.QuerySnapshotAsync(host.Token);
         var node = Assert.Single(initial.Trees).Value!;
         await using var subscription = await client.SubscribeAsync([ManagerEventTypes.SelectionChanged], host.Token);
@@ -107,7 +107,7 @@ public sealed class ClientIntegrationTests
     public async Task SdkTogglesIndividualWindowsAndExposesSemanticDefaults(bool popup)
     {
         await using var host = await PipeHost.StartAsync(popup: popup);
-        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        await using var client = await HomeDeskClient.ConnectAsync(host.Name, cancellationToken: host.Token);
         var initial = Assert.Single((await client.QuerySnapshotAsync(host.Token)).Desktop.Windows);
         Assert.Equal(popup, initial.IsPopup);
         Assert.Equal(popup, initial.IsIgnored);
@@ -134,7 +134,7 @@ public sealed class ClientIntegrationTests
     public async Task SdkDemultiplexesSnapshotCommandsAndEventsAndUnsubscribes()
     {
         await using var host = await PipeHost.StartAsync();
-        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        await using var client = await HomeDeskClient.ConnectAsync(host.Name, cancellationToken: host.Token);
         var before = await client.QuerySnapshotAsync(host.Token);
         await using var subscription = await client.SubscribeAsync([ManagerEventTypes.PauseChanged], host.Token);
         await using var events = subscription.ReadEventsAsync(host.Token).GetAsyncEnumerator();
@@ -160,8 +160,8 @@ public sealed class ClientIntegrationTests
     public async Task SdkWatchAcceptsEventConstantsAndFiltersEvents()
     {
         await using var host = await PipeHost.StartAsync();
-        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
-        await using var events = WinManagerClient.WatchAsync(
+        await using var client = await HomeDeskClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        await using var events = HomeDeskClient.WatchAsync(
             eventTypes: [ManagerEventTypes.PauseChanged], pipeName: host.Name,
             cancellationToken: host.Token).GetAsyncEnumerator();
         Assert.True(await events.MoveNextAsync());
@@ -176,7 +176,7 @@ public sealed class ClientIntegrationTests
     public async Task SdkErrorsAreStructuredAndDoNotBreakConnection()
     {
         await using var host = await PipeHost.StartAsync();
-        await using var client = await WinManagerClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        await using var client = await HomeDeskClient.ConnectAsync(host.Name, cancellationToken: host.Token);
         var invalid = await Assert.ThrowsAsync<WinManagerRemoteException>(() =>
             client.ExecuteAsync(new(CommandKind.Pause), host.Token));
         Assert.Equal("invalid_argument", invalid.ErrorCode);
@@ -226,11 +226,11 @@ public sealed class ClientIntegrationTests
         Guid instance;
         await using (var host = await PipeHost.StartAsync(name))
         {
-            await using var client = await WinManagerClient.ConnectAsync(name, cancellationToken: host.Token);
+            await using var client = await HomeDeskClient.ConnectAsync(name, cancellationToken: host.Token);
             instance = (await client.QuerySnapshotAsync(host.Token)).InstanceId;
         }
         await using var next = await PipeHost.StartAsync(name);
-        await using var reconnected = await WinManagerClient.ConnectAsync(name, cancellationToken: next.Token);
+        await using var reconnected = await HomeDeskClient.ConnectAsync(name, cancellationToken: next.Token);
         await using var subscription = await reconnected.SubscribeAsync(cancellationToken: next.Token);
         await using var events = subscription.ReadEventsAsync(next.Token).GetAsyncEnumerator();
         Assert.True(await events.MoveNextAsync());
@@ -238,14 +238,14 @@ public sealed class ClientIntegrationTests
         Assert.NotEqual(instance, events.Current.InstanceId);
     }
 
-    private static async Task<WinManagerClient> ConnectWithForegroundPermissionAsync(PipeHost host,
+    private static async Task<HomeDeskClient> ConnectWithForegroundPermissionAsync(PipeHost host,
         Func<NamedPipeClientStream, bool> tryGrantForegroundActivation)
     {
         var pipe = new NamedPipeClientStream(".", host.Name, PipeDirection.InOut, PipeOptions.Asynchronous);
         try
         {
             await pipe.ConnectAsync(host.Token);
-            return new WinManagerClient(pipe, 256, tryGrantForegroundActivation);
+            return new HomeDeskClient(pipe, 256, tryGrantForegroundActivation);
         }
         catch
         {

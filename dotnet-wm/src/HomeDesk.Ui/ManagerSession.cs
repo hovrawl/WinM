@@ -6,7 +6,7 @@ namespace HomeDesk.Ui;
 
 public sealed class ManagerSession : IAsyncDisposable
 {
-    private readonly WinManagerClient client;
+    private readonly HomeDeskClient client;
     private readonly ManagerSubscription subscription;
     private readonly CancellationTokenSource shutdown = new();
     private CancellationTokenSource? runCancellation;
@@ -14,7 +14,7 @@ public sealed class ManagerSession : IAsyncDisposable
     private int started;
     private int disposed;
 
-    private ManagerSession(WinManagerClient client, ManagerSubscription subscription)
+    private ManagerSession(HomeDeskClient client, ManagerSubscription subscription)
     {
         this.client = client;
         this.subscription = subscription;
@@ -26,7 +26,7 @@ public sealed class ManagerSession : IAsyncDisposable
         CancellationToken cancellationToken = default, int eventQueueCapacity = 64,
         bool registerManagerPresence = false)
     {
-        var client = await WinManagerClient.ConnectAsync(pipeName, timeout: TimeSpan.FromSeconds(5),
+        var client = await HomeDeskClient.ConnectAsync(pipeName, timeout: TimeSpan.FromSeconds(5),
             cancellationToken: cancellationToken, eventQueueCapacity: eventQueueCapacity);
         try
         {

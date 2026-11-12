@@ -7,7 +7,7 @@ using HomeDesk.Contracts;
 
 namespace HomeDesk.Client;
 
-public sealed class WinManagerClient : IAsyncDisposable
+public sealed class HomeDeskClient : IAsyncDisposable
 {
     private readonly NamedPipeClientStream pipe;
     private readonly CancellationTokenSource lifetime = new();
@@ -23,7 +23,7 @@ public sealed class WinManagerClient : IAsyncDisposable
     private Exception? failure;
     private int disposed;
 
-    internal WinManagerClient(NamedPipeClientStream pipe, int eventQueueCapacity,
+    internal HomeDeskClient(NamedPipeClientStream pipe, int eventQueueCapacity,
         Func<NamedPipeClientStream, bool>? tryGrantForegroundActivation = null)
     {
         this.pipe = pipe;
@@ -36,7 +36,7 @@ public sealed class WinManagerClient : IAsyncDisposable
 
     public bool IsConnected => Volatile.Read(ref failure) is null && pipe.IsConnected;
 
-    public static async Task<WinManagerClient> ConnectAsync(string? pipeName = null, TimeSpan? timeout = null,
+    public static async Task<HomeDeskClient> ConnectAsync(string? pipeName = null, TimeSpan? timeout = null,
         CancellationToken cancellationToken = default, int eventQueueCapacity = 256)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("WinManager IPC requires Windows.");
@@ -53,7 +53,7 @@ public sealed class WinManagerClient : IAsyncDisposable
         try
         {
             await pipe.ConnectAsync(deadline.Token);
-            return new WinManagerClient(pipe, eventQueueCapacity);
+            return new HomeDeskClient(pipe, eventQueueCapacity);
         }
         catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested)
         {
@@ -419,7 +419,7 @@ public sealed class WinManagerClient : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        Abort(new ObjectDisposedException(nameof(WinManagerClient)));
+        Abort(new ObjectDisposedException(nameof(HomeDeskClient)));
         await reader;
         if (Interlocked.Exchange(ref disposed, 1) == 0) lifetime.Dispose();
     }
@@ -434,7 +434,7 @@ public sealed class WinManagerClient : IAsyncDisposable
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            WinManagerClient? client = null;
+            HomeDeskClient? client = null;
             ManagerSubscription? active = null;
             try
             {

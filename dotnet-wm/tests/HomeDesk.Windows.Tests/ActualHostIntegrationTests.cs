@@ -171,7 +171,7 @@ public sealed class ActualHostIntegrationTests
         var second = host.Launch(secondPipe);
         await second.WaitForExitAsync(host.Token);
         Assert.Equal(5, second.ExitCode);
-        await Assert.ThrowsAsync<TimeoutException>(() => WinManagerClient.ConnectAsync(secondPipe, TimeSpan.FromMilliseconds(250), host.Token));
+        await Assert.ThrowsAsync<TimeoutException>(() => HomeDeskClient.ConnectAsync(secondPipe, TimeSpan.FromMilliseconds(250), host.Token));
         var after = await host.Client.QuerySnapshotAsync(host.Token);
         Assert.Equal(before.InstanceId, after.InstanceId);
         Assert.False(after.Paused);

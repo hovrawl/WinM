@@ -62,7 +62,7 @@ public sealed class PipeServerTests
             File.WriteAllText(path, ManagerConfiguration.Serialize(new ManagerConfiguration()));
             await using var host = await PipeHost.StartAsync(configurationStore: new ConfigurationStore(path));
             await using var client =
-                await WinManagerClient.ConnectAsync(host.Name, TimeSpan.FromSeconds(5), host.Token);
+                await HomeDeskClient.ConnectAsync(host.Name, TimeSpan.FromSeconds(5), host.Token);
 
             var document = await client.ReadConfigurationAsync(host.Token);
             Assert.Equal(Path.GetFullPath(path), document.Path);
@@ -288,7 +288,7 @@ public sealed class PipeServerTests
     public async Task PreviewTargetQueryReturnsBoundedPerWindowFailuresAndRoundTripsContracts()
     {
         await using var host = await PipeHost.StartAsync();
-        await using var client = await WinManagerClient.ConnectAsync(host.Name, TimeSpan.FromSeconds(5), host.Token);
+        await using var client = await HomeDeskClient.ConnectAsync(host.Name, TimeSpan.FromSeconds(5), host.Token);
         var known = Assert.Single(host.Engine.Current!.Desktop.Windows).Id;
         var unknown = Guid.NewGuid();
 
