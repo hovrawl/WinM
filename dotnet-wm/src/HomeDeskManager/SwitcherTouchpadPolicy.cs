@@ -1,6 +1,6 @@
-using WinManager.Windows;
+using HomeDesk.Windows;
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 internal enum CarouselGestureAction
 {

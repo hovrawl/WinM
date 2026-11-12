@@ -1,9 +1,9 @@
 ﻿using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
-using WinManager.Ui;
+using HomeDesk.Ui;
 
-namespace WinManager.DebugUi;
+namespace HomeDesk.DebugUi;
 
 internal sealed class DebugApplication : Application
 {

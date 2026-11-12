@@ -1,6 +1,6 @@
 ﻿using Avalonia.Input;
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 internal static class SwitcherAcceptKeyPolicy
 {

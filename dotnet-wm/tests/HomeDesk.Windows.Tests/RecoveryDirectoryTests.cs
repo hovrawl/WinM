@@ -3,7 +3,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 [SupportedOSPlatform("windows10.0.15063")]
 public sealed class RecoveryDirectoryTests

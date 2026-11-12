@@ -1,8 +1,8 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Nodes;
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.DebugUi;
+namespace HomeDesk.DebugUi;
 
 internal static class ConfigurationEditorPresentation
 {

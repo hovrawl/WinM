@@ -4,9 +4,9 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 internal sealed class CurrentWorkspaceWindow : Window
 {

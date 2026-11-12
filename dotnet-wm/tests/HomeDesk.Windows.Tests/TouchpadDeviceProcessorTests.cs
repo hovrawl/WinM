@@ -1,8 +1,7 @@
-﻿using WinManager.Windows;
-using WinManager.Contracts;
+﻿using HomeDesk.Contracts;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 public sealed class TouchpadDeviceProcessorTests
 {

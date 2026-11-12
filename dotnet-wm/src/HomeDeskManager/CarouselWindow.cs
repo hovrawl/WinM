@@ -4,12 +4,12 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
-using WinManager.Client;
-using WinManager.Contracts;
-using WinManager.Windows;
-using ContractPixelRect = WinManager.Contracts.PixelRect;
+using HomeDesk.Client;
+using HomeDesk.Contracts;
+using HomeDesk.Windows;
+using ContractPixelRect = HomeDesk.Contracts.PixelRect;
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 internal sealed class CarouselWindow : Window
 {

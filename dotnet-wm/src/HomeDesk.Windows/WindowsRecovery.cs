@@ -5,7 +5,7 @@ using System.Security.Principal;
 using System.Text.Json;
 using Windows.Win32;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 [SupportedOSPlatform("windows10.0.15063")]
 public static class WindowsRecovery
@@ -176,7 +176,7 @@ public static class WindowsRecovery
                 if (new FileInfo(path).Length > 2 * 1024 * 1024) continue;
                 var journal = JsonSerializer.Deserialize(File.ReadAllBytes(path), RecoveryJsonContext.Default.RecoveryJournal);
                 if (journal is null || journal.HostId == 0 || journal.HostId > int.MaxValue || journal.HostCreationTime == 0 || journal.Records is null ||
-                    journal.Records.Count > 4096 || journal.Records.Any(record => !ValidRecord(record)) ||
+                    journal.Records.Count > 4096 || Enumerable.Any<RecoveryRecord>(journal.Records, record => !ValidRecord(record)) ||
                     RecoveryNative.HostAlive(journal)) continue;
                 RestoreJournal(journal);
                 if (journal.Records.Count == 0)

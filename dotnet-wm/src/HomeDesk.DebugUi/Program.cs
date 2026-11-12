@@ -1,9 +1,7 @@
 ﻿using Avalonia;
-#if DEBUG
 using AvaloniaMcp.Diagnostics;
-#endif
 
-namespace WinManager.DebugUi;
+namespace HomeDesk.DebugUi;
 
 internal static class Program
 {

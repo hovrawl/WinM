@@ -4,13 +4,13 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
-using WinManager.Client;
-using WinManager.Contracts;
-using WinManager.Core;
-using WinManager.Host;
+using HomeDesk.Client;
+using HomeDesk.Contracts;
+using HomeDesk.Core;
+using HomeDeskSpace;
 using Xunit;
 
-namespace WinManager.Ipc.Tests;
+namespace HomeDesk.Ipc.Tests;
 
 public sealed class PipeServerTests
 {

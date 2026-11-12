@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text.Json;
-using WinManager.Contracts;
-using WinManager.Core;
+using HomeDesk.Contracts;
+using HomeDesk.Core;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 [Collection("Isolated interactive desktop")]
 [SupportedOSPlatform("windows10.0.15063")]

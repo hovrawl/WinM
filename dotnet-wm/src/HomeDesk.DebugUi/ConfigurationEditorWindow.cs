@@ -2,10 +2,10 @@
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
-using WinManager.Contracts;
-using WinManager.Ui;
+using HomeDesk.Contracts;
+using HomeDesk.Ui;
 
-namespace WinManager.DebugUi;
+namespace HomeDesk.DebugUi;
 
 internal sealed class ConfigurationEditorWindow : Window
 {

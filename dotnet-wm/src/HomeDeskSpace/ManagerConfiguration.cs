@@ -2,9 +2,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.Host;
+namespace HomeDeskSpace;
 
 public sealed record ManagerConfiguration
 {

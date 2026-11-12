@@ -1,11 +1,11 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using WinManager.Contracts;
 using Windows.Win32.UI.WindowsAndMessaging;
+using HomeDesk.Contracts;
 using PInvoke = global::Windows.Win32.TestPInvoke;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 internal static class NativeInspection
 {

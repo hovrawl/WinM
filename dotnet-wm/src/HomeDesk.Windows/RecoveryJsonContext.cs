@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(RecoveryCommand))]

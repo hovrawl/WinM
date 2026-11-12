@@ -1,8 +1,7 @@
 ﻿using System.Text.Json;
-using WinManager.Windows;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 public sealed class RecoveryJsonTests
 {
@@ -24,7 +23,7 @@ public sealed class RecoveryJsonTests
         Assert.NotNull(restoredJournal);
         Assert.Equal(journal.HostId, restoredJournal.HostId);
         Assert.Equal(journal.HostCreationTime, restoredJournal.HostCreationTime);
-        Assert.Equal(journal.Records, restoredJournal.Records);
+        Assert.Equal<List<RecoveryRecord>>(journal.Records, restoredJournal.Records);
         Assert.Contains("\"HostId\"", journalJson);
     }
 }

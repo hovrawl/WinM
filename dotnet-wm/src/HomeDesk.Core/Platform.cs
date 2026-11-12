@@ -1,6 +1,6 @@
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.Core;
+namespace HomeDesk.Core;
 
 public enum NativeNotificationKind { WindowChanged, FocusChanged, DisplayChanged, Reconcile, MoveStarted, MoveEnded }
 public sealed record NativeNotification(NativeNotificationKind Kind, Guid? WindowId = null, PixelRect? Bounds = null);

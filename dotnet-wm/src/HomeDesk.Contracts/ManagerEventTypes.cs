@@ -1,4 +1,4 @@
-namespace WinManager.Contracts;
+namespace HomeDesk.Contracts;
 
 public static class ManagerEventTypes
 {

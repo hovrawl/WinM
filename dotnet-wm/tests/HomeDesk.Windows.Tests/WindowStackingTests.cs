@@ -1,8 +1,7 @@
-using WinManager.Core;
-using WinManager.Windows;
+using HomeDesk.Core;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 public sealed class WindowStackingTests
 {

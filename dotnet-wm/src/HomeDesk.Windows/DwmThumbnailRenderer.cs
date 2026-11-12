@@ -1,11 +1,11 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using WinManager.Contracts;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.System.Threading;
+using HomeDesk.Contracts;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 public readonly record struct DwmThumbnailSourceSize(int Width, int Height);
 

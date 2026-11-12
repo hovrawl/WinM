@@ -1,6 +1,6 @@
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 public sealed class TouchpadGestureRecognizer
 {

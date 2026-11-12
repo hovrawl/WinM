@@ -3,16 +3,16 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Threading.Channels;
-using WinManager.Contracts;
-using WinManager.Core;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Gdi;
 using Windows.Win32.UI.Accessibility;
 using Windows.Win32.UI.HiDpi;
 using Windows.Win32.UI.WindowsAndMessaging;
+using HomeDesk.Contracts;
+using HomeDesk.Core;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 [SupportedOSPlatform("windows10.0.15063")]
 public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTargetResolver

@@ -1,8 +1,8 @@
 using System.Text;
 using System.Text.Json;
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.Cli;
+namespace HomeDesk.Cli;
 
 internal sealed class StatusDisplay(IStatusTerminal terminal)
 {

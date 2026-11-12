@@ -1,13 +1,13 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
-using WinManager.Contracts;
-using WinManager.Core;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.Input.KeyboardAndMouse;
+using HomeDesk.Contracts;
+using HomeDesk.Core;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 public sealed partial class WindowsDesktopObserver
 {

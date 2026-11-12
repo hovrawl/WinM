@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 public sealed class IsolatedInteractiveFactAttribute : FactAttribute
 {

@@ -1,7 +1,7 @@
-using WinManager.SpatialSwitcher;
+using HomeDeskManager;
 using Xunit;
 
-namespace WinManager.Ipc.Tests;
+namespace HomeDesk.Ipc.Tests;
 
 public sealed class CarouselScrollAccumulatorTests
 {

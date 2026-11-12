@@ -4,7 +4,7 @@ using System.Runtime.Versioning;
 using System.Text.Json;
 using Windows.Win32;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 [SupportedOSPlatform("windows10.0.15063")]
 internal sealed class RecoveryConnection : IDisposable

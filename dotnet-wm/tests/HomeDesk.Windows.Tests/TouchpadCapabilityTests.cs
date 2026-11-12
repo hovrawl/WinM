@@ -1,7 +1,6 @@
-using WinManager.Windows;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 public sealed class TouchpadCapabilityTests
 {

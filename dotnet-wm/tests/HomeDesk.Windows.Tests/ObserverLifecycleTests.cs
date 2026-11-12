@@ -1,7 +1,8 @@
 using System.Runtime.Versioning;
+using HomeDesk.Core;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 [SupportedOSPlatform("windows10.0.15063")]
 public sealed class ObserverLifecycleTests
@@ -10,7 +11,7 @@ public sealed class ObserverLifecycleTests
     public async Task ApplyBeforeStartAndAfterDisposalIsRejectedWithoutTouchingTheDesktop()
     {
         var observer = new WindowsDesktopObserver();
-        var plan = new WinManager.Core.LayoutPlan([]);
+        var plan = new LayoutPlan([]);
         await Assert.ThrowsAsync<InvalidOperationException>(() => observer.ApplyAsync(plan, CancellationToken.None));
         await observer.DisposeAsync();
         await Assert.ThrowsAsync<ObjectDisposedException>(() => observer.ApplyAsync(plan, CancellationToken.None));

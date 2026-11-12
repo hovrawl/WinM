@@ -1,10 +1,9 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
-using WinManager.Contracts;
-using WinManager.Core;
+using HomeDesk.Contracts;
 using Xunit;
 
-namespace WinManager.Core.Tests;
+namespace HomeDesk.Core.Tests;
 
 public sealed class ManagerTests
 {

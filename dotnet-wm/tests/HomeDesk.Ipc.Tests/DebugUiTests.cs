@@ -1,9 +1,9 @@
 using System.Text.Json;
-using WinManager.Contracts;
-using WinManager.DebugUi;
+using HomeDesk.Contracts;
+using HomeDesk.DebugUi;
 using Xunit;
 
-namespace WinManager.Ipc.Tests;
+namespace HomeDesk.Ipc.Tests;
 
 public sealed class DebugUiTests
 {

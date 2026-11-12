@@ -1,9 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 using Xunit;
 
-namespace WinManager.Ipc.Tests;
+namespace HomeDesk.Ipc.Tests;
 
 public sealed class DiagnosticContractTests
 {

@@ -1,9 +1,8 @@
 ﻿using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Layout;
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 internal sealed class WorkspaceSettingsWindow : Window
 {

@@ -1,9 +1,9 @@
 using System.Runtime.Versioning;
-using WinManager.Contracts;
-using WinManager.Core;
+using HomeDesk.Contracts;
+using HomeDesk.Core;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 [CollectionDefinition("Isolated interactive desktop", DisableParallelization = true)]
 public sealed class IsolatedInteractiveCollection;

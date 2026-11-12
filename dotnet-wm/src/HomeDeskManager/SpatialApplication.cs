@@ -4,9 +4,9 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
-using WinManager.Ui;
+using HomeDesk.Ui;
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 internal sealed class SpatialApplication : Application
 {

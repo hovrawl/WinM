@@ -3,12 +3,12 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.Versioning;
-using WinManager.Contracts;
-using WinManager.Core;
+using HomeDesk.Contracts;
+using HomeDesk.Core;
 using Xunit;
 using Xunit.Abstractions;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 [Collection("Isolated interactive desktop")]
 [SupportedOSPlatform("windows10.0.15063")]

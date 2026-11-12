@@ -1,7 +1,7 @@
 using System.Runtime.Versioning;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 [SupportedOSPlatform("windows10.0.15063")]
 public sealed class ProcessExclusionTests

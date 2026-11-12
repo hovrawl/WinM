@@ -1,9 +1,9 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.Host;
+namespace HomeDeskSpace;
 
 public sealed class ConfigurationConflictException(string message) : Exception(message);
 

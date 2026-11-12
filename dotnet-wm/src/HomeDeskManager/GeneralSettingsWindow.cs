@@ -3,10 +3,10 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
-using WinManager.Contracts;
-using WinManager.Ui;
+using HomeDesk.Contracts;
+using HomeDesk.Ui;
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 internal sealed class GeneralSettingsWindow : Window
 {

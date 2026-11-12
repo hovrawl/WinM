@@ -7,9 +7,9 @@ using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.HiDpi;
 using Windows.Win32.UI.WindowsAndMessaging;
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 [SupportedOSPlatform("windows10.0.15063")]
 public sealed class TouchpadInputSource : IAsyncDisposable

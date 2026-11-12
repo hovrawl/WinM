@@ -2,7 +2,7 @@ using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
-namespace WinManager.Client;
+namespace HomeDesk.Client;
 
 internal static class ForegroundActivation
 {

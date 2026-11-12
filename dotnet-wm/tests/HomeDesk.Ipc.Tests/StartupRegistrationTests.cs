@@ -1,8 +1,8 @@
+using HomeDesk.Cli;
 using Microsoft.Win32;
-using WinManager.Cli;
 using Xunit;
 
-namespace WinManager.Ipc.Tests;
+namespace HomeDesk.Ipc.Tests;
 
 public sealed class StartupRegistrationTests
 {
@@ -144,7 +144,7 @@ public sealed class StartupRegistrationTests
     [InlineData("uninstall-startup", "--registration-name", "Other")]
     public async Task CliRejectsInvalidStartupArgumentsWithoutConnectingOrRegistering(params string[] args)
     {
-        Assert.Equal(2, await WinManager.Cli.Program.Main(args));
+        Assert.Equal(2, await Cli.Program.Main(args));
     }
 
     private sealed class RegistrationFixture : IDisposable

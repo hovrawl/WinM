@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.Client;
+namespace HomeDesk.Client;
 
 public sealed class ManagerSubscription : IAsyncDisposable
 {

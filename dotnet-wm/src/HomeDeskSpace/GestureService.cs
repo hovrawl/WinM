@@ -1,12 +1,12 @@
-using System.Threading.Channels;
 using System.Runtime.Versioning;
+using System.Threading.Channels;
+using HomeDesk.Contracts;
+using HomeDesk.Core;
+using HomeDesk.Windows;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using WinManager.Contracts;
-using WinManager.Core;
-using WinManager.Windows;
 
-namespace WinManager.Host;
+namespace HomeDeskSpace;
 
 internal static class TouchpadGesturePolicy
 {

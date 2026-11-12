@@ -4,7 +4,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 internal enum SwitcherThemeMode
 {

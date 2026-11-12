@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
-using WinManager.Contracts;
 using Windows.Win32.Foundation;
+using HomeDesk.Contracts;
 using Xunit;
 using PInvoke = global::Windows.Win32.TestPInvoke;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 [Collection("Isolated interactive desktop")]
 [SupportedOSPlatform("windows10.0.15063")]

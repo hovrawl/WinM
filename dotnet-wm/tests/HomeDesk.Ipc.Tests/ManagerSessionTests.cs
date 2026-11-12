@@ -1,10 +1,10 @@
 using System.Threading.Channels;
-using WinManager.Contracts;
-using WinManager.SpatialSwitcher;
-using WinManager.Ui;
+using HomeDesk.Contracts;
+using HomeDesk.Ui;
+using HomeDeskManager;
 using Xunit;
 
-namespace WinManager.Ipc.Tests;
+namespace HomeDesk.Ipc.Tests;
 
 public sealed class ManagerSessionTests
 {

@@ -1,9 +1,8 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
-using WinManager.Windows;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 public sealed class TouchpadHidDecoderTests
 {

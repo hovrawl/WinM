@@ -1,9 +1,7 @@
 ﻿using Avalonia;
-#if DEBUG
 using AvaloniaMcp.Diagnostics;
-#endif
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 internal static class Program
 {

@@ -1,7 +1,7 @@
 ﻿using Avalonia;
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 public readonly record struct SwitcherContext(Guid? WorkspaceId, Guid? WindowId, Guid? MonitorId);
 

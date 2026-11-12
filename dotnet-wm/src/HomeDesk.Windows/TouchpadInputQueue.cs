@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 internal sealed class TouchpadInputQueue<T>(int capacity)
 {

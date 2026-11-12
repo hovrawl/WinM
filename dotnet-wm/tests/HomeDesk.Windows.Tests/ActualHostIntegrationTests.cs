@@ -1,10 +1,11 @@
 using System.Runtime.Versioning;
 using System.Text.Json;
-using WinManager.Contracts;
-using WinManager.Core;
+using HomeDesk.Client;
+using HomeDesk.Contracts;
+using HomeDesk.Core;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 [Collection("Isolated interactive desktop")]
 [SupportedOSPlatform("windows10.0.15063")]
@@ -148,7 +149,7 @@ public sealed class ActualHostIntegrationTests
         await using var host = await ActualHostFixture.CreateAsync(window);
         await host.StartAsync(missingHelper: true);
         await host.WaitForSnapshotAsync(snapshot => snapshot.Desktop.Windows.Count == 1);
-        var result = await Assert.ThrowsAsync<WinManager.Client.WinManagerRemoteException>(() =>
+        var result = await Assert.ThrowsAsync<WinManagerRemoteException>(() =>
             host.Client.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceName: "2"), host.Token));
         Assert.Equal("recovery_unavailable", result.ErrorCode);
         Assert.True(NativeInspection.Visible(window.Prefix + ".normal"));
@@ -170,7 +171,7 @@ public sealed class ActualHostIntegrationTests
         var second = host.Launch(secondPipe);
         await second.WaitForExitAsync(host.Token);
         Assert.Equal(5, second.ExitCode);
-        await Assert.ThrowsAsync<TimeoutException>(() => WinManager.Client.WinManagerClient.ConnectAsync(secondPipe, TimeSpan.FromMilliseconds(250), host.Token));
+        await Assert.ThrowsAsync<TimeoutException>(() => WinManagerClient.ConnectAsync(secondPipe, TimeSpan.FromMilliseconds(250), host.Token));
         var after = await host.Client.QuerySnapshotAsync(host.Token);
         Assert.Equal(before.InstanceId, after.InstanceId);
         Assert.False(after.Paused);

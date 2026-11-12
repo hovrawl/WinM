@@ -3,9 +3,9 @@ using System.IO.Pipes;
 using System.Runtime.CompilerServices;
 using System.Security.Principal;
 using System.Text.Json;
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.Client;
+namespace HomeDesk.Client;
 
 public sealed class WinManagerClient : IAsyncDisposable
 {

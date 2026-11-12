@@ -3,13 +3,13 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
-using Microsoft.Win32.SafeHandles;
 using Windows.Win32;
 using Windows.Win32.Security;
 using Windows.Win32.Storage.FileSystem;
 using Windows.Win32.System.Pipes;
+using Microsoft.Win32.SafeHandles;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 [SupportedOSPlatform("windows6.0.6000")]
 public static class LocalPipeServer

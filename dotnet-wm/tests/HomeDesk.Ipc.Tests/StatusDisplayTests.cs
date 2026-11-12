@@ -1,8 +1,8 @@
-using WinManager.Cli;
-using WinManager.Contracts;
+using HomeDesk.Cli;
+using HomeDesk.Contracts;
 using Xunit;
 
-namespace WinManager.Ipc.Tests;
+namespace HomeDesk.Ipc.Tests;
 
 public sealed class StatusDisplayTests
 {

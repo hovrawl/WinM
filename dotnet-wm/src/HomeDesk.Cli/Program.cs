@@ -1,9 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
-using WinManager.Client;
-using WinManager.Contracts;
+using HomeDesk.Client;
+using HomeDesk.Contracts;
 
-namespace WinManager.Cli;
+namespace HomeDesk.Cli;
 
 public static class Program
 {

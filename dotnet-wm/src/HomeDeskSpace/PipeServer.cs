@@ -2,11 +2,11 @@ using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Text.Json;
 using System.Threading.Channels;
-using WinManager.Contracts;
-using WinManager.Core;
-using WinManager.Windows;
+using HomeDesk.Contracts;
+using HomeDesk.Core;
+using HomeDesk.Windows;
 
-namespace WinManager.Host;
+namespace HomeDeskSpace;
 
 public sealed class PipeServer : IAsyncDisposable
 {

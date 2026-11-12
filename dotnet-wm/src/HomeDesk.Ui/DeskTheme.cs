@@ -5,7 +5,7 @@ using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
 
-namespace WinManager.Ui;
+namespace HomeDesk.Ui;
 
 public static class DeskTheme
 {

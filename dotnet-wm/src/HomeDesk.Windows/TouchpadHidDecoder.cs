@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 internal sealed record TouchpadValueRange(
     ushort UsagePage,

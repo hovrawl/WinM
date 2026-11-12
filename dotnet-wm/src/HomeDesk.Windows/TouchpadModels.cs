@@ -1,4 +1,4 @@
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 public enum TouchpadCapabilityState
 {

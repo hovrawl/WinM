@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text.Json;
-using WinManager.Client;
-using WinManager.Contracts;
+using HomeDesk.Client;
+using HomeDesk.Contracts;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 [SupportedOSPlatform("windows10.0.15063")]
 internal sealed class ActualHostFixture : IAsyncDisposable

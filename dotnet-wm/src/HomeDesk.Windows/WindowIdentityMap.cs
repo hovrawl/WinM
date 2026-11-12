@@ -1,4 +1,4 @@
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 internal readonly record struct WindowIdentity(nint Handle, uint ProcessId, ulong ProcessCreationTime);
 

@@ -1,8 +1,8 @@
 using System.Text.Json;
 using System.Threading.Channels;
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.Core;
+namespace HomeDesk.Core;
 
 public sealed class ManagerEngine
 {

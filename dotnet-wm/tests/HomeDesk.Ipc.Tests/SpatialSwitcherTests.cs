@@ -1,18 +1,18 @@
-using System.Threading.Channels;
 using System.Text.Json;
+using System.Threading.Channels;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Styling;
-using WinManager.Contracts;
-using WinManager.SpatialSwitcher;
-using WinManager.Windows;
+using HomeDesk.Contracts;
+using HomeDesk.Windows;
+using HomeDeskManager;
 using Xunit;
-using ContractPixelRect = WinManager.Contracts.PixelRect;
+using ContractPixelRect = HomeDesk.Contracts.PixelRect;
 
-namespace WinManager.Ipc.Tests;
+namespace HomeDesk.Ipc.Tests;
 
 public sealed class SpatialSwitcherTests
 {

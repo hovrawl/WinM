@@ -1,6 +1,6 @@
-﻿using WinManager.Contracts;
+﻿using HomeDesk.Contracts;
 
-namespace WinManager.DebugUi;
+namespace HomeDesk.DebugUi;
 
 internal static class DemoSnapshot
 {

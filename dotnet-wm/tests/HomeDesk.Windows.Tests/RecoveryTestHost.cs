@@ -1,7 +1,7 @@
 using System.Runtime.Versioning;
-using WinManager.Core;
+using HomeDesk.Core;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 [SupportedOSPlatform("windows10.0.15063")]
 internal static class RecoveryTestHost

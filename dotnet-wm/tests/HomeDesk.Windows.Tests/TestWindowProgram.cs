@@ -9,7 +9,7 @@ using Windows.Win32.UI.HiDpi;
 using Windows.Win32.UI.WindowsAndMessaging;
 using PInvoke = global::Windows.Win32.TestPInvoke;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 [SupportedOSPlatform("windows10.0.15063")]
 internal static class TestWindowProgram

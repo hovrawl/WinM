@@ -1,12 +1,12 @@
 using System.Text.Json;
+using HomeDesk.Contracts;
+using HomeDesk.Windows;
+using HomeDeskSpace;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using WinManager.Contracts;
-using WinManager.Host;
-using WinManager.Windows;
 using Xunit;
 
-namespace WinManager.Ipc.Tests;
+namespace HomeDesk.Ipc.Tests;
 
 public sealed class HostConfigurationTests
 {

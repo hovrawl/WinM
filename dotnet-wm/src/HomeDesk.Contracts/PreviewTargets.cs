@@ -1,4 +1,4 @@
-﻿namespace WinManager.Contracts;
+﻿namespace HomeDesk.Contracts;
 
 public sealed record PreviewTargetsRequest(IReadOnlyList<Guid>? WindowIds);
 

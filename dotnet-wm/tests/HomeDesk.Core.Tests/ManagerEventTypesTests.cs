@@ -1,9 +1,8 @@
 using System.Reflection;
-using WinManager.Contracts;
-using WinManager.Core;
+using HomeDesk.Contracts;
 using Xunit;
 
-namespace WinManager.Core.Tests;
+namespace HomeDesk.Core.Tests;
 
 public sealed class ManagerEventTypesTests
 {

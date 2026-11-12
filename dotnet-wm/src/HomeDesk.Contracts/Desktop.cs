@@ -1,4 +1,4 @@
-namespace WinManager.Contracts;
+namespace HomeDesk.Contracts;
 
 public sealed record PixelRect(int X, int Y, int Width, int Height);
 public enum WindowMode { Tiling, Floating }

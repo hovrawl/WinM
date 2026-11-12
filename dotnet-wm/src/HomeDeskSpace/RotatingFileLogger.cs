@@ -1,7 +1,7 @@
 using System.Text;
 using Microsoft.Extensions.Logging;
 
-namespace WinManager.Host;
+namespace HomeDeskSpace;
 
 public sealed class RotatingFileLoggerProvider : ILoggerProvider
 {

@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace WinManager.Cli;
+namespace HomeDesk.Cli;
 
 internal sealed record CliError(string ErrorCode, string Message);
 internal sealed record StartupRegistrationResult(bool Success, string RegistrationName, string CommandLine);

@@ -1,6 +1,6 @@
-using WinManager.Core;
+using HomeDesk.Core;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 internal interface IWindowStackingNative
 {

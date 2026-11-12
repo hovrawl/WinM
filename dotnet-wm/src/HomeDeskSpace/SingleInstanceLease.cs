@@ -1,4 +1,4 @@
-namespace WinManager.Host;
+namespace HomeDeskSpace;
 
 public sealed class SingleInstanceLease : IDisposable
 {

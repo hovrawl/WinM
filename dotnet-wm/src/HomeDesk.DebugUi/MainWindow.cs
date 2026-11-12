@@ -1,15 +1,14 @@
-﻿using System.Text.Json;
+﻿using System.Globalization;
 using Avalonia;
-using System.Globalization;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
-using WinManager.Contracts;
-using WinManager.Ui;
+using HomeDesk.Contracts;
+using HomeDesk.Ui;
 
-namespace WinManager.DebugUi;
+namespace HomeDesk.DebugUi;
 
 internal sealed class MainWindow : Window
 {

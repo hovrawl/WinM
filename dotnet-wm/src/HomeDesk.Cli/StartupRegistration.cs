@@ -1,6 +1,6 @@
 using Microsoft.Win32;
 
-namespace WinManager.Cli;
+namespace HomeDesk.Cli;
 
 public static class StartupRegistration
 {

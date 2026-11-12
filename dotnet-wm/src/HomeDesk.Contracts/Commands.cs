@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace WinManager.Contracts;
+namespace HomeDesk.Contracts;
 
 public enum Direction
 {

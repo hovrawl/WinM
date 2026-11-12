@@ -1,7 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace WinManager.Host;
+namespace HomeDeskSpace;
 
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web, GenerationMode = JsonSourceGenerationMode.Metadata,
     UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]

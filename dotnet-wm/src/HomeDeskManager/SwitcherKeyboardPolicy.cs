@@ -1,4 +1,4 @@
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 public enum SwitcherKeyboardAction
 {

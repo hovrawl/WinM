@@ -1,10 +1,10 @@
 ﻿using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
-using WinManager.Contracts;
-using ContractPixelRect = WinManager.Contracts.PixelRect;
+using HomeDesk.Contracts;
+using ContractPixelRect = HomeDesk.Contracts.PixelRect;
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 public readonly record struct PopupMonitor(Guid? MonitorId, ContractPixelRect WorkArea, uint Dpi);
 

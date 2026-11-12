@@ -1,8 +1,7 @@
-using WinManager.Contracts;
-using WinManager.Windows;
+using HomeDesk.Contracts;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 public sealed class TouchpadGestureRecognizerTests
 {

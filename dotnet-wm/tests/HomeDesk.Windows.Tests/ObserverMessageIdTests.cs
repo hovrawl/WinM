@@ -1,7 +1,7 @@
 ﻿using System.Reflection;
 using Xunit;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 public sealed class ObserverMessageIdTests
 {

@@ -4,7 +4,7 @@ using Windows.Win32.Foundation;
 using Windows.Win32.UI.WindowsAndMessaging;
 using PInvoke = global::Windows.Win32.TestPInvoke;
 
-namespace WinManager.Windows.Tests;
+namespace HomeDesk.Windows.Tests;
 
 internal sealed class OwnProcessWindow : IAsyncDisposable
 {

@@ -1,10 +1,10 @@
 using System.Diagnostics;
 using System.Text.Json;
-using WinManager.Client;
-using WinManager.Contracts;
+using HomeDesk.Client;
+using HomeDesk.Contracts;
 using Xunit;
 
-namespace WinManager.Ipc.Tests;
+namespace HomeDesk.Ipc.Tests;
 
 public sealed class CliIntegrationTests
 {

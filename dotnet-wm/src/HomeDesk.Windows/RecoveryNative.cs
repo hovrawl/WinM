@@ -3,7 +3,7 @@ using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.WindowsAndMessaging;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 internal sealed record RecoveryRecord(long Handle, uint ProcessId, ulong CreationTime, uint ShowCommand, string Property,
     bool HideConfirmed = false, bool Minimization = false);

@@ -6,11 +6,11 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
-using WinManager.Contracts;
-using WinManager.Ui;
-using WinManager.Windows;
+using HomeDesk.Contracts;
+using HomeDesk.Ui;
+using HomeDesk.Windows;
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 internal sealed class SwitcherWindow : Window
 {

@@ -8,7 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
-namespace WinManager.Contracts;
+namespace HomeDesk.Contracts;
 
 public sealed record RequestEnvelope(
     int ProtocolVersion,

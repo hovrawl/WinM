@@ -1,8 +1,8 @@
 ﻿using System.Text.Json;
-using WinManager.Client;
-using WinManager.Contracts;
+using HomeDesk.Client;
+using HomeDesk.Contracts;
 
-namespace WinManager.Ui;
+namespace HomeDesk.Ui;
 
 public sealed class ManagerSession : IAsyncDisposable
 {

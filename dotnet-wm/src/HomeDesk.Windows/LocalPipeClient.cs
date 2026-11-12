@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
-using Microsoft.Win32.SafeHandles;
 using Windows.Win32;
+using Microsoft.Win32.SafeHandles;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 [SupportedOSPlatform("windows6.0.6000")]
 public static class LocalPipeClient

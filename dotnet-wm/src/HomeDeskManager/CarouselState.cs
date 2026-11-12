@@ -1,6 +1,6 @@
-using WinManager.Contracts;
+using HomeDesk.Contracts;
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 internal enum CarouselLifecycleState
 {

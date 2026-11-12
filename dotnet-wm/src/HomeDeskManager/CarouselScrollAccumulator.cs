@@ -1,4 +1,4 @@
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 internal sealed class CarouselScrollAccumulator(Action<Action> schedule, Action<double> apply)
 {

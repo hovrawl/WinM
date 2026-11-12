@@ -1,9 +1,9 @@
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
-using WinManager.Windows;
+using HomeDesk.Windows;
 using Xunit;
 
-namespace WinManager.Ipc.Tests;
+namespace HomeDesk.Ipc.Tests;
 
 public sealed class LocalClientValidationTests
 {

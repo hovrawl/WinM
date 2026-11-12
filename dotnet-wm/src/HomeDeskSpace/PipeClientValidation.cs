@@ -1,8 +1,8 @@
 using System.IO.Pipes;
 using System.Security.Principal;
-using WinManager.Windows;
+using HomeDesk.Windows;
 
-namespace WinManager.Host;
+namespace HomeDeskSpace;
 
 internal static class PipeClientValidation
 {

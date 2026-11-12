@@ -1,4 +1,4 @@
-namespace WinManager.Client;
+namespace HomeDesk.Client;
 
 public sealed class WinManagerRemoteException(string errorCode, string message, long stateRevision) : Exception(message)
 {

@@ -1,11 +1,11 @@
+using System.Runtime.Versioning;
+using HomeDesk.Contracts;
+using HomeDesk.Core;
+using HomeDesk.Windows;
+using HomeDeskSpace;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using System.Runtime.Versioning;
-using WinManager.Contracts;
-using WinManager.Core;
-using WinManager.Host;
-using WinManager.Windows;
 
 var dataDirectory = args is ["--tray-smoke"] or ["--recovery-smoke"] or ["--recovery", "--smoke-directory", ..]
     ? AppContext.BaseDirectory
@@ -127,159 +127,162 @@ catch (Exception error)
     return 2;
 }
 
-[SupportedOSPlatform("windows10.0.15063")]
-internal static class HostComposition
+namespace HomeDeskSpace
 {
-    public static void AddNativeServices(IServiceCollection services, ManagerConfiguration configuration,
-        string? recoveryPath)
+    [SupportedOSPlatform("windows10.0.15063")]
+    internal static class HostComposition
     {
-        var recoveryLaunch = HostRecoveryLaunch.Resolve(recoveryPath, Environment.ProcessPath,
-            HostBuild.IsNativeAot);
-        services.AddSingleton(_ => new WindowsDesktopObserver(configuration.IgnoredProcessNames,
-            configuration.IgnoredClassNames, recoveryLaunch.Executable, recoveryLaunch.ArgumentPrefix));
-        services.AddSingleton<IWindowPlatform>(provider => provider.GetRequiredService<WindowsDesktopObserver>());
+        public static void AddNativeServices(IServiceCollection services, ManagerConfiguration configuration,
+            string? recoveryPath)
+        {
+            var recoveryLaunch = HostRecoveryLaunch.Resolve(recoveryPath, Environment.ProcessPath,
+                HostBuild.IsNativeAot);
+            services.AddSingleton(_ => new WindowsDesktopObserver(configuration.IgnoredProcessNames,
+                configuration.IgnoredClassNames, recoveryLaunch.Executable, recoveryLaunch.ArgumentPrefix));
+            services.AddSingleton<IWindowPlatform>(provider => provider.GetRequiredService<WindowsDesktopObserver>());
+        }
     }
-}
 
-internal static class HostBuild
-{
+    internal static class HostBuild
+    {
 #if WINMANAGER_HOST_AOT
     public const bool IsNativeAot = true;
 #else
-    public const bool IsNativeAot = false;
+        public const bool IsNativeAot = false;
 #endif
-}
-
-internal sealed record RecoveryLaunch(string Executable, IReadOnlyList<string> ArgumentPrefix);
-
-internal static class HostRecoveryLaunch
-{
-    public static RecoveryLaunch Resolve(string? configuredPath, string? processPath, bool useSelfExecutable)
-    {
-        if (configuredPath is not null) return new RecoveryLaunch(configuredPath, []);
-        if (useSelfExecutable)
-            return new RecoveryLaunch(
-                processPath ?? throw new InvalidOperationException("The host executable path is unavailable."),
-                ["--recovery"]);
-        return new RecoveryLaunch(Path.Combine(AppContext.BaseDirectory, "HomeDesk.Recovery.exe"), []);
     }
-}
 
-internal sealed class HostRuntimeState
-{
-    private int failed;
-    public bool Failed => Volatile.Read(ref failed) != 0;
-    public void MarkFailed() => Interlocked.Exchange(ref failed, 1);
-}
+    internal sealed record RecoveryLaunch(string Executable, IReadOnlyList<string> ArgumentPrefix);
 
-internal sealed class ObservationService(
-    ManagerEngine observation,
-    IHostApplicationLifetime lifetime,
-    ILogger<ObservationService> logger,
-    HostRuntimeState status) : BackgroundService
-{
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    internal static class HostRecoveryLaunch
     {
-        observation.Changed += snapshot => logger.LogInformation(
-            "Observed {WindowCount} eligible windows on {MonitorCount} monitors; focus {Focus}",
-            snapshot.Desktop.Windows.Count, snapshot.Desktop.Monitors.Count, snapshot.Desktop.FocusedWindowId);
-        observation.ActionsFailed += failures =>
+        public static RecoveryLaunch Resolve(string? configuredPath, string? processPath, bool useSelfExecutable)
         {
-            foreach (var failure in failures)
-                logger.LogWarning("Window action diagnostic: {Code} {WindowId} {Message}", failure.Code,
-                    failure.WindowId, failure.Message);
-        };
-        try
-        {
-            await observation.RunAsync(stoppingToken);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-        }
-        catch (Exception)
-        {
-            status.MarkFailed();
-            throw;
-        }
-        finally
-        {
-            lifetime.StopApplication();
-        }
-    }
-}
-
-internal sealed class PipeService(PipeServer server, ManagerEngine manager, HostRuntimeState status) : BackgroundService
-{
-    private readonly CancellationTokenSource serverStop = new();
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        try
-        {
-            await server.RunAsync(serverStop.Token);
-        }
-        catch (OperationCanceledException) when (serverStop.IsCancellationRequested)
-        {
-        }
-        catch (Exception)
-        {
-            status.MarkFailed();
-            throw;
+            if (configuredPath is not null) return new RecoveryLaunch(configuredPath, []);
+            if (useSelfExecutable)
+                return new RecoveryLaunch(
+                    processPath ?? throw new InvalidOperationException("The host executable path is unavailable."),
+                    ["--recovery"]);
+            return new RecoveryLaunch(Path.Combine(AppContext.BaseDirectory, "HomeDesk.Recovery.exe"), []);
         }
     }
 
-    public override async Task StopAsync(CancellationToken cancellationToken)
+    internal sealed class HostRuntimeState
     {
-        try
-        {
-            await manager.Stopped.WaitAsync(cancellationToken);
-        }
-        finally
-        {
-            await serverStop.CancelAsync();
-        }
-
-        await base.StopAsync(cancellationToken);
+        private int failed;
+        public bool Failed => Volatile.Read(ref failed) != 0;
+        public void MarkFailed() => Interlocked.Exchange(ref failed, 1);
     }
 
-    public override void Dispose()
+    internal sealed class ObservationService(
+        ManagerEngine observation,
+        IHostApplicationLifetime lifetime,
+        ILogger<ObservationService> logger,
+        HostRuntimeState status) : BackgroundService
     {
-        serverStop.Dispose();
-        base.Dispose();
-    }
-}
-
-[SupportedOSPlatform("windows10.0.15063")]
-internal sealed class ShortcutService(
-    WindowsDesktopObserver platform,
-    ManagerEngine manager,
-    ManagerConfiguration configuration,
-    ILogger<ShortcutService> logger,
-    HostRuntimeState status) : BackgroundService
-{
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        try
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            await platform.StartAsync(stoppingToken);
-            await manager.Ready.WaitAsync(stoppingToken);
-            var failures = await platform.RegisterShortcutsAsync(configuration.BuildShortcutBindings(), stoppingToken);
-            if (failures.Count > 0)
-                throw new InvalidOperationException(string.Join("; ", failures.Select(failure => failure.Message)));
-            await foreach (var command in platform.ShortcutCommands(stoppingToken))
+            observation.Changed += snapshot => logger.LogInformation(
+                "Observed {WindowCount} eligible windows on {MonitorCount} monitors; focus {Focus}",
+                snapshot.Desktop.Windows.Count, snapshot.Desktop.Monitors.Count, snapshot.Desktop.FocusedWindowId);
+            observation.ActionsFailed += failures =>
             {
-                var result = await manager.ExecuteAsync(command, stoppingToken);
-                if (!result.Success)
-                    logger.LogWarning("Shortcut rejected: {Code} {Message}", result.ErrorCode, result.Message);
+                foreach (var failure in failures)
+                    logger.LogWarning("Window action diagnostic: {Code} {WindowId} {Message}", failure.Code,
+                        failure.WindowId, failure.Message);
+            };
+            try
+            {
+                await observation.RunAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+            }
+            catch (Exception)
+            {
+                status.MarkFailed();
+                throw;
+            }
+            finally
+            {
+                lifetime.StopApplication();
             }
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+    }
+
+    internal sealed class PipeService(PipeServer server, ManagerEngine manager, HostRuntimeState status) : BackgroundService
+    {
+        private readonly CancellationTokenSource serverStop = new();
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
+            try
+            {
+                await server.RunAsync(serverStop.Token);
+            }
+            catch (OperationCanceledException) when (serverStop.IsCancellationRequested)
+            {
+            }
+            catch (Exception)
+            {
+                status.MarkFailed();
+                throw;
+            }
         }
-        catch (Exception)
+
+        public override async Task StopAsync(CancellationToken cancellationToken)
         {
-            status.MarkFailed();
-            throw;
+            try
+            {
+                await manager.Stopped.WaitAsync(cancellationToken);
+            }
+            finally
+            {
+                await serverStop.CancelAsync();
+            }
+
+            await base.StopAsync(cancellationToken);
+        }
+
+        public override void Dispose()
+        {
+            serverStop.Dispose();
+            base.Dispose();
+        }
+    }
+
+    [SupportedOSPlatform("windows10.0.15063")]
+    internal sealed class ShortcutService(
+        WindowsDesktopObserver platform,
+        ManagerEngine manager,
+        ManagerConfiguration configuration,
+        ILogger<ShortcutService> logger,
+        HostRuntimeState status) : BackgroundService
+    {
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            try
+            {
+                await platform.StartAsync(stoppingToken);
+                await manager.Ready.WaitAsync(stoppingToken);
+                var failures = await platform.RegisterShortcutsAsync(configuration.BuildShortcutBindings(), stoppingToken);
+                if (failures.Count > 0)
+                    throw new InvalidOperationException(string.Join("; ", failures.Select(failure => failure.Message)));
+                await foreach (var command in platform.ShortcutCommands(stoppingToken))
+                {
+                    var result = await manager.ExecuteAsync(command, stoppingToken);
+                    if (!result.Success)
+                        logger.LogWarning("Shortcut rejected: {Code} {Message}", result.ErrorCode, result.Message);
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+            }
+            catch (Exception)
+            {
+                status.MarkFailed();
+                throw;
+            }
         }
     }
 }

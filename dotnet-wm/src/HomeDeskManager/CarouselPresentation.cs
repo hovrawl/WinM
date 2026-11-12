@@ -1,9 +1,9 @@
 using Avalonia;
-using WinManager.Contracts;
-using WinManager.Windows;
-using ContractPixelRect = WinManager.Contracts.PixelRect;
+using HomeDesk.Contracts;
+using HomeDesk.Windows;
+using ContractPixelRect = HomeDesk.Contracts.PixelRect;
 
-namespace WinManager.SpatialSwitcher;
+namespace HomeDeskManager;
 
 public readonly record struct CarouselCardLayout(Guid WindowId, Rect CardBounds, Rect PreviewBounds);
 

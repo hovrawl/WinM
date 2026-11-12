@@ -1,6 +1,6 @@
-﻿using WinManager.Contracts;
+﻿using HomeDesk.Contracts;
 
-namespace WinManager.Windows;
+namespace HomeDesk.Windows;
 
 internal readonly record struct TouchpadDeviceProcessingResult(
     TouchpadContactFrame? Frame,
