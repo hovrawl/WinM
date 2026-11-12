@@ -23,8 +23,8 @@ dotnet '.\src\HomeDesk.Cli\bin\Debug\net10.0-windows\HomeDesk.Cli.dll' 'snapshot
 '{"kind":"toggleMode","windowId":"<window-guid>"}' | dotnet '.\src\HomeDesk.Cli\bin\Debug\net10.0-windows\HomeDesk.Cli.dll' 'command' '-'
 dotnet '.\src\HomeDesk.Cli\bin\Debug\net10.0-windows\HomeDesk.Cli.dll' 'watch' '--event-types' 'pause.changed' '--reconnect'
 dotnet '.\src\HomeDesk.Cli\bin\Debug\net10.0-windows\HomeDesk.Cli.dll' 'status'
-dotnet '.\src\HomeDesk.Cli\bin\Debug\net10.0-windows\HomeDesk.Cli.dll' 'snapshot' '--pipe' 'WinManager.Test.Pipe'
-'{"kind":"pause","paused":false}' | dotnet '.\src\HomeDesk.Cli\bin\Debug\net10.0-windows\HomeDesk.Cli.dll' 'command' '-' '--pipe' 'WinManager.Test.Pipe'
+dotnet '.\src\HomeDesk.Cli\bin\Debug\net10.0-windows\HomeDesk.Cli.dll' 'snapshot' '--pipe' 'HomeDesk.Test.Pipe'
+'{"kind":"pause","paused":false}' | dotnet '.\src\HomeDesk.Cli\bin\Debug\net10.0-windows\HomeDesk.Cli.dll' 'command' '-' '--pipe' 'HomeDesk.Test.Pipe'
 ```
 
 `command JSON` also accepts a single positional JSON argument when the invoking shell preserves
@@ -90,7 +90,7 @@ dotnet '.\src\HomeDesk.Cli\bin\Debug\net10.0-windows\HomeDesk.Cli.dll' 'uninstal
 ```
 
 These commands do not connect to or start the Host. Install writes a quoted executable and optional
-`--config` argument as a `REG_SZ` value named `WinManager` under
+`--config` argument as a `REG_SZ` value named `HomeDesk` under
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. It overwrites only that value;
 uninstall deletes only that value and succeeds if already absent. No administrator privileges,
 services, scheduled tasks, or shell commands are used. Quotes, control characters, wildcards,
@@ -99,7 +99,7 @@ Configuration contents are validated by the Host, not by registration. Host sing
 is owned by the Host. Registration results are JSON; validation errors exit 2 and registry errors exit 4.
 
 The public `StartupRegistration.Write(hostPath, configPath, registrationName)` and
-`Remove(registrationName)` API accepts only `WinManager` (default) or `WinManager.Test.<guid>`.
+`Remove(registrationName)` API accepts only `HomeDesk` (default) or `HomeDesk.Test.<guid>`.
 Tests must explicitly use a disposable name and remove it in `finally`; they never install or
 uninstall the production value.
 

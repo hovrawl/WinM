@@ -8,7 +8,7 @@ public sealed class RecoveryJsonTests
     [Fact]
     public void GeneratedMetadataRoundTripsRecoveryCommandAndJournal()
     {
-        var record = new RecoveryRecord(1234, 42, 5678, 3, "WinManager.Recovery.0123456789abcdef0123456789abcdef",
+        var record = new RecoveryRecord(1234, 42, 5678, 3, "HomeDesk.Recovery.0123456789abcdef0123456789abcdef",
             HideConfirmed: true, Minimization: true);
         var command = new RecoveryCommand("register", record);
         var commandJson = JsonSerializer.Serialize(command, RecoveryJsonContext.Default.RecoveryCommand);

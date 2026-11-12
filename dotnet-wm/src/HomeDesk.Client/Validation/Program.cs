@@ -1,7 +1,7 @@
 using System.IO.Pipes;
 using System.Text.Json;
-using WinManager.Client;
-using WinManager.Contracts;
+using HomeDesk.Client;
+using HomeDesk.Contracts;
 
 using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 var token = deadline.Token;
@@ -16,10 +16,10 @@ await ProtocolFailureAsync("first_event");
 await CancellationAsync();
 await ReconnectAsync();
 await CliAsync();
-await ThrowsAsync<TimeoutException>(() => WinManagerClient.ConnectAsync(Name(), TimeSpan.FromMilliseconds(50), token));
+await ThrowsAsync<TimeoutException>(() => HomeDeskClient.ConnectAsync(Name(), TimeSpan.FromMilliseconds(50), token));
 Console.WriteLine("PASS: concurrent correlation/serialized frames, early/late snapshot, unsubscribe/resubscribe, lag abort, version/kind/payload/order validation, cancellation, reconnect, CLI, timeout.");
 
-string Name() => $"WinManager.Client.Validation.{Guid.NewGuid():N}";
+string Name() => $"HomeDesk.Client.Validation.{Guid.NewGuid():N}";
 NamedPipeServerStream Server(string name) => new(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
     PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
 ManagerSnapshot Snapshot(Guid instance, long revision = 1) => new(instance, revision,
@@ -67,7 +67,7 @@ async Task CorrelationAsync()
             }
         }
     }, token);
-    await using var client = await WinManagerClient.ConnectAsync(name, cancellationToken: token);
+    await using var client = await HomeDeskClient.ConnectAsync(name, cancellationToken: token);
     var queries = Enumerable.Range(0, 12).Select(_ => client.QuerySnapshotAsync(token)).ToArray();
     var commands = Enumerable.Range(0, 12).Select(i => client.ExecuteAsync(new ManagerCommand(CommandKind.Resize, Amount: i), token)).ToArray();
     await Task.WhenAll(queries);
@@ -103,7 +103,7 @@ async Task SubscriptionOrderingAsync(bool responseFirst)
             await RespondAsync(server, unsubscribe, new { success = true }, 2);
         }
     }, token);
-    await using var client = await WinManagerClient.ConnectAsync(name, cancellationToken: token);
+    await using var client = await HomeDeskClient.ConnectAsync(name, cancellationToken: token);
     for (var round = 0; round < 2; round++)
     {
         await using var subscription = await client.SubscribeAsync(["state"], token);
@@ -136,13 +136,13 @@ async Task LagAsync()
         using var eof = await PipeFraming.ReadAsync(server, token);
         Check(eof is null, "Lag did not terminate the connection.");
     }, token);
-    await using var client = await WinManagerClient.ConnectAsync(name, cancellationToken: token, eventQueueCapacity: 1);
+    await using var client = await HomeDeskClient.ConnectAsync(name, cancellationToken: token, eventQueueCapacity: 1);
     await using var subscription = await client.SubscribeAsync(cancellationToken: token);
     publish.SetResult();
-    await ThrowsAsync<WinManagerConsumerLagException>(() => client.QuerySnapshotAsync(token));
+    await ThrowsAsync<HomeDeskConsumerLagException>(() => client.QuerySnapshotAsync(token));
     await using var events = subscription.ReadEventsAsync(token).GetAsyncEnumerator(token);
     Check(await events.MoveNextAsync() && events.Current.EventType == "snapshot", "Buffered snapshot was lost.");
-    await ThrowsAsync<WinManagerConsumerLagException>(async () => { await events.MoveNextAsync(); });
+    await ThrowsAsync<HomeDeskConsumerLagException>(async () => { await events.MoveNextAsync(); });
     Check(!client.IsConnected, "Lagging connection still connected.");
     await serverTask;
 }
@@ -160,8 +160,8 @@ async Task ProtocolFailureAsync(string failure)
             request.RequestId, true, null, null, 1, Protocol.Payload(new { bad = "payload" }),
             failure == "kind" ? "request" : "response"), token);
     }, token);
-    await using var client = await WinManagerClient.ConnectAsync(name, cancellationToken: token);
-    await ThrowsAsync<WinManagerProtocolException>(async () =>
+    await using var client = await HomeDeskClient.ConnectAsync(name, cancellationToken: token);
+    await ThrowsAsync<HomeDeskProtocolException>(async () =>
     {
         if (failure == "first_event") await client.SubscribeAsync(cancellationToken: token);
         else await client.QuerySnapshotAsync(token);
@@ -183,7 +183,7 @@ async Task CancellationAsync()
         using var eof = await PipeFraming.ReadAsync(server, token);
         Check(eof is null, "Cancelled request did not close connection.");
     }, token);
-    await using var client = await WinManagerClient.ConnectAsync(name, cancellationToken: token);
+    await using var client = await HomeDeskClient.ConnectAsync(name, cancellationToken: token);
     await ThrowsAsync<OperationCanceledException>(() => client.QuerySnapshotAsync(cancellation.Token));
     await serverTask;
 }
@@ -208,7 +208,7 @@ async Task ReconnectAsync()
         using var eof = await PipeFraming.ReadAsync(second, token);
         Check(eof is null, "Watch disposal did not close connection.");
     }, token);
-    await using (var events = WinManagerClient.WatchAsync(pipeName: name, reconnect: true,
+    await using (var events = HomeDeskClient.WatchAsync(pipeName: name, reconnect: true,
         reconnectDelay: TimeSpan.FromMilliseconds(10), cancellationToken: token).GetAsyncEnumerator(token))
     {
         for (var i = 0; i < 2; i++)
@@ -228,10 +228,10 @@ async Task CliAsync()
     Console.SetError(errors);
     try
     {
-        Check(await WinManager.Cli.Program.Main(["--help"]) == 0, "Help failed.");
-        Check(await WinManager.Cli.Program.Main(["command", "{} "]) == 2, "Missing command kind accepted.");
-        Check(await WinManager.Cli.Program.Main(["command", "{\"kind\":\"redraw\",\"shell\":\"bad\"}"]) == 2, "Unknown JSON member accepted.");
-        Check(await WinManager.Cli.Program.Main(["watch", "--event-types", "state,,snapshot"]) == 2, "Invalid event filter accepted.");
+        Check(await HomeDesk.Cli.Program.Main(["--help"]) == 0, "Help failed.");
+        Check(await HomeDesk.Cli.Program.Main(["command", "{} "]) == 2, "Missing command kind accepted.");
+        Check(await HomeDesk.Cli.Program.Main(["command", "{\"kind\":\"redraw\",\"shell\":\"bad\"}"]) == 2, "Unknown JSON member accepted.");
+        Check(await HomeDesk.Cli.Program.Main(["watch", "--event-types", "state,,snapshot"]) == 2, "Invalid event filter accepted.");
         var name = Name();
         using var server = Server(name);
         var serverTask = Task.Run(async () =>
@@ -242,7 +242,7 @@ async Task CliAsync()
             Check(command.Kind == CommandKind.Pause && command.Paused == true, "CLI JSON command was corrupted.");
             await RespondAsync(server, request, new CommandResult(false, "invalid_argument", "test", 1));
         }, token);
-        Check(await WinManager.Cli.Program.Main(["command", "{\"kind\":\"pause\",\"paused\":true}", "--pipe", name]) == 3, "CLI rejection exit code wrong.");
+        Check(await HomeDesk.Cli.Program.Main(["command", "{\"kind\":\"pause\",\"paused\":true}", "--pipe", name]) == 3, "CLI rejection exit code wrong.");
         await serverTask;
     }
     finally { Console.SetOut(originalOut); Console.SetError(originalError); }

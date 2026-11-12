@@ -10,7 +10,7 @@ public sealed class LocalClientValidationTests
     [Fact]
     public async Task SameProcessSameSessionClientIsAcceptedByNativeValidation()
     {
-        var name = "WinManager.SecurityTest." + Guid.NewGuid().ToString("N");
+        var name = "HomeDesk.SecurityTest." + Guid.NewGuid().ToString("N");
         using var server = new NamedPipeServerStream(name, PipeDirection.InOut, 1,
             PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         using var client = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);

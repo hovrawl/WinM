@@ -67,7 +67,7 @@ internal sealed class MainWindow : Window
     {
         this.demoMode = demoMode;
         this.pipeName = pipeName;
-        Title = "WinManager — Debug console";
+        Title = "HomeDesk — Debug console";
         Width = 1240;
         Height = 812;
         MinWidth = 980;

@@ -32,7 +32,7 @@ public sealed class ManagerSessionTests
     [Fact]
     public async Task ManagerStartedBeforeHostConnectsWhenHostStartsLater()
     {
-        var pipeName = "WinManager.test." + Guid.NewGuid().ToString("N");
+        var pipeName = "HomeDesk.test." + Guid.NewGuid().ToString("N");
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         var delays = Channel.CreateUnbounded<TaskCompletionSource<bool>>();
         var initialFailure = new TaskCompletionSource<Exception>(TaskCreationOptions.RunContinuationsAsynchronously);

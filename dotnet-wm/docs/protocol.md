@@ -8,7 +8,7 @@ See [the project goal](project-goal.md) and
 [the migration plan](desk-model-plan.md).
 
 The Windows host exposes a duplex byte-mode named pipe. The default name is
-`WinManager.v1.<first 24 hex digits of SHA-256(user SID)>.<session ID>` as returned
+`HomeDesk.v1.<first 24 hex digits of SHA-256(user SID)>.<session ID>` as returned
 by `Protocol.DefaultPipeName()`. Use local machine `.`. Connections require
 an explicit protected current-user SID-only DACL on native `CreateNamedPipe`,
 with kernel-enforced `PIPE_REJECT_REMOTE_CLIENTS`, rather than the managed
@@ -59,7 +59,7 @@ and do not fail the whole query. Hosts without this operation return
 raw handles. The existing same-user/session pipe protections still apply.
 
 Configuration operations are restricted to the path selected by the host's
-`--config` option or its default `%LOCALAPPDATA%\WinManager\config.json`;
+`--config` option or its default `%LOCALAPPDATA%\HomeDesk\config.json`;
 clients cannot provide paths. The host validates the complete replacement and
 atomically replaces the file only when the submitted revision still matches.
 External edits can race the final replace because ordinary editors do not share
@@ -200,7 +200,7 @@ Event names:
 - `layout.changed`, `pause.changed`, `application.exiting`
 
 .NET callers can use the public `ManagerEventTypes` string constants from
-`WinManager.Contracts` in SDK filters and event comparisons instead of handwritten
+`HomeDesk.Contracts` in SDK filters and event comparisons instead of handwritten
 names. See the [constant mapping and SDK examples](external-api.md).
 The version 1 wire format remains string-based and unchanged.
 

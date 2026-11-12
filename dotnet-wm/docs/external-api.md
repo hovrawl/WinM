@@ -1,6 +1,6 @@
 # External commands API
 
-WinManager exposes its running manager through a local Windows named pipe.
+HomeDesk exposes its running manager through a local Windows named pipe.
 Third-party applications can use the CLI, the .NET client SDK, or implement
 the version 1 pipe protocol directly. There is no HTTP endpoint or browser bridge.
 
@@ -34,7 +34,7 @@ SDK/IPC contract for their display and explicit controls. Neither creates desks
 or owns manager state.
 
 The Debug console can edit the host-selected configuration file through the SDK.
-`WinManagerClient.ReadConfigurationAsync()` returns the absolute path, raw file
+`HomeDeskClient.ReadConfigurationAsync()` returns the absolute path, raw file
 content, SHA-256 revision, and validation status; `SaveConfigurationAsync()`
 validates and atomically replaces that same file only when the revision matches.
 The editor can explicitly merge the current snapshot's workspace names, layouts,
@@ -176,7 +176,7 @@ Argument details:
   movement target.
 
 There is no command for arbitrary pixel bounds, launching applications, closing
-an individual window, or changing configuration. `exit` stops **WinManager**, not
+an individual window, or changing configuration. `exit` stops **HomeDesk**, not
 the managed applications.
 
 ### Filtered focus cycling
@@ -323,7 +323,7 @@ connection. Add `--pipe NAME` if the Host was started with a custom pipe name.
 | `help`, `--help`, `-h` | None | Human-readable usage |
 
 Startup verbs are local CLI operations, **not pipe commands**. They modify only
-the per-user `WinManager` logon registry value and do not start the Host. Details
+the per-user `HomeDesk` logon registry value and do not start the Host. Details
 and path restrictions are in the [CLI README](../src/HomeDesk.Cli/README.md).
 
 For an interactive overview, use `HomeDesk.Cli.exe status`. It subscribes to all
@@ -376,8 +376,8 @@ seconds by default. A subprocess timeout does not prove a command never ran.
 
 Reference `src\HomeDesk.Client\HomeDesk.Client.csproj` from your application
 (or distribute its built assembly and dependencies). The SDK targets `net10.0`
-and references the `HomeDesk.Contracts` project while retaining the `WinManager.Contracts`
-namespace; pipe connection requires Windows. No
+and references the `HomeDesk.Contracts` project and namespace;
+pipe connection requires Windows. No
 published NuGet package is assumed here.
 
 ```powershell
@@ -388,13 +388,13 @@ The following can be used in a .NET 10 console application's `Program.cs`:
 
 ```csharp
 using System.Text.Json;
-using WinManager.Client;
-using WinManager.Contracts;
+using HomeDesk.Client;
+using HomeDesk.Contracts;
 
 using var stop = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Cancel(); };
 
-await using var client = await WinManagerClient.ConnectAsync(
+await using var client = await HomeDeskClient.ConnectAsync(
     cancellationToken: stop.Token);
 var snapshot = await client.QuerySnapshotAsync(stop.Token);
 
@@ -419,19 +419,19 @@ try
 catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
 ```
 
-Envelope failures throw `WinManagerRemoteException` (with `ErrorCode` and
+Envelope failures throw `HomeDeskRemoteException` (with `ErrorCode` and
 `StateRevision`); also check returned `CommandResult.Success`. Transport and
 connection failures require a fresh client. Dispose the subscription/client to
 release resources. There is one active subscription and one event consumer per
 connection; requests can run concurrently.
 
-For a reconnecting read-only feed use `WinManagerClient.WatchAsync(eventTypes:
+For a reconnecting read-only feed use `HomeDeskClient.WatchAsync(eventTypes:
 [ManagerEventTypes.LayoutChanged], reconnect: true, cancellationToken: stop.Token)`. It reconnects
 on transport errors/connect timeouts, not protocol, permission, remote, or
 consumer-lag errors. See the [SDK README](../src/HomeDesk.Client/README.md) for
 timeouts, cancellation, queue capacity, and reconnection details.
 
-Use `ManagerEventTypes` from `WinManager.Contracts` instead of handwritten event
+Use `ManagerEventTypes` from `HomeDesk.Contracts` instead of handwritten event
 names. Its public `const string` members work with `SubscribeAsync`, `WatchAsync`,
 and `SubscribeRequest`, and can be used to compare `EventEnvelope.EventType` or in
 `switch` case labels:
@@ -455,7 +455,7 @@ names are rejected with `invalid_argument`. The complete constant mapping is bel
 ## Direct pipe protocol (non-.NET persistent clients)
 
 Use a local duplex byte-mode named pipe at `\\.\pipe\NAME`. The default `NAME` is
-`WinManager.v1.<SIDHASH>.<SESSION>`, where `SIDHASH` is the first 24 **uppercase**
+`HomeDesk.v1.<SIDHASH>.<SESSION>`, where `SIDHASH` is the first 24 **uppercase**
 hex characters of SHA-256 over the UTF-8 current user SID string, and `SESSION`
 is the client's Windows session ID. .NET callers can use
 `Protocol.DefaultPipeName()`. A configured `--pipe` override replaces the name,
@@ -497,7 +497,7 @@ queued events. The full wire specification is in [protocol.md](protocol.md).
 
 ## Events, consistency, and failure handling
 
-Available event types (the .NET constants are in `WinManager.Contracts`):
+Available event types (the .NET constants are in `HomeDesk.Contracts`):
 
 | .NET constant | Wire/CLI name |
 | --- | --- |

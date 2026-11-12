@@ -90,7 +90,7 @@ internal sealed class WindowsHostTray : IHostTray
         private readonly Action requestShutdown;
         private readonly HostTrayVisibility visibility;
         private readonly WNDPROC windowProcedure;
-        private readonly string className = "WinManager.Tray." + Guid.NewGuid().ToString("N");
+        private readonly string className = "HomeDesk.Tray." + Guid.NewGuid().ToString("N");
         private readonly uint nativeThreadId = PInvoke.GetCurrentThreadId();
         private FreeLibrarySafeHandle? instance;
         private HWND window;

@@ -578,7 +578,7 @@ public sealed class HostConfigurationTests
     [Fact]
     public async Task SingleInstanceLeaseSurvivesCrossThreadDisposalAndCanBeReacquired()
     {
-        var name = "Local\\WinManager.LeaseTest." + Guid.NewGuid().ToString("N");
+        var name = "Local\\HomeDesk.LeaseTest." + Guid.NewGuid().ToString("N");
         var first = new SingleInstanceLease(name);
         Assert.True(first.Acquired);
         using (var second = new SingleInstanceLease(name)) Assert.False(second.Acquired);

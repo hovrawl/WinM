@@ -1,6 +1,6 @@
-# WinManager pipe SDK
+# HomeDesk pipe SDK
 
-`WinManager.Client` targets the inherited `net10.0` and references **only** `WinManager.Contracts`.
+`HomeDesk.Client` targets the inherited `net10.0` and references **only** `HomeDesk.Contracts`.
 Connection is Windows-only: local server `.`; `PipeOptions.CurrentUserOnly` verifies same-user ownership;
 `TokenImpersonationLevel.Identification` prevents the server impersonating the client to perform actions.
 The default name is `Protocol.DefaultPipeName()` (current user/session); explicit names remain local and same-user.
@@ -8,10 +8,10 @@ This is not authentication against another malicious process running as the same
 
 ```csharp
 using System.Text.Json;
-using WinManager.Client;
-using WinManager.Contracts;
+using HomeDesk.Client;
+using HomeDesk.Contracts;
 
-await using var client = await WinManagerClient.ConnectAsync(cancellationToken: token);
+await using var client = await HomeDeskClient.ConnectAsync(cancellationToken: token);
 ManagerSnapshot snapshot = await client.QuerySnapshotAsync(token);
 CommandResult result = await client.ExecuteAsync(new ManagerCommand(CommandKind.Pause, Paused: true), token);
 await using var subscription = await client.SubscribeAsync([ManagerEventTypes.PauseChanged], token);
@@ -22,7 +22,7 @@ await foreach (EventEnvelope envelope in subscription.ReadEventsAsync(token))
 }
 ```
 
-Use the public `ManagerEventTypes` string constants in `WinManager.Contracts` for
+Use the public `ManagerEventTypes` string constants in `HomeDesk.Contracts` for
 subscription filters and event comparisons (including `switch` case labels), e.g.
 `envelope.EventType == ManagerEventTypes.PauseChanged`. They also work with
 `WatchAsync` and `SubscribeRequest`. All 14 constants and their wire names are listed
@@ -44,7 +44,7 @@ Overrides last until the window disappears or the host restarts. See
 Requests can run concurrently; frames are written serially and responses correlate by request ID.
 Operations are `query.snapshot` (`{}`), `command` (`ManagerCommand`), `subscribe` (`SubscribeRequest`),
 and `unsubscribe` (`{ subscriptionId: Guid }`). Subscribe consumes a `SubscriptionResult` response.
-Envelope failures throw `WinManagerRemoteException` with error code and revision; a successful command
+Envelope failures throw `HomeDeskRemoteException` with error code and revision; a successful command
 envelope returns the typed `CommandResult`, whose `Success` must also be checked.
 
 One active subscription and one event consumer are allowed per connection because events carry no
@@ -57,9 +57,9 @@ terminating server-side resources and all pending requests without waiting for a
 
 The SDK event queue defaults to 256 envelopes (`ConnectAsync(eventQueueCapacity: ...)`). The protocol
 reader uses nonblocking `TryWrite`: overflow **closes the entire connection**, fails pending requests,
-and terminates the event stream with `WinManagerConsumerLagException` after buffered events drain.
+and terminates the event stream with `HomeDeskConsumerLagException` after buffered events drain.
 No drop mode is used. Bad frames, versions, kinds, payloads, instance changes, or event ordering are
-fatal `WinManagerProtocolException`s. Sequence gaps are permitted because event filters can skip types.
+fatal `HomeDeskProtocolException`s. Sequence gaps are permitted because event filters can skip types.
 
 Connect defaults to a five-second timeout; `Timeout.InfiniteTimeSpan` is supported. All operations
 accept cancellation tokens. Canceling a request after registration conservatively closes the
@@ -72,7 +72,7 @@ Clients are reusable for concurrent requests and subscribe/unsubscribe cycles, n
 Use a fresh `ConnectAsync`, or use the static watch generator:
 
 ```csharp
-await foreach (var envelope in WinManagerClient.WatchAsync(
+await foreach (var envelope in HomeDeskClient.WatchAsync(
     eventTypes: [ManagerEventTypes.PauseChanged], reconnect: true, cancellationToken: token))
 {
     // After every reconnection the first event is a fresh snapshot with the server's InstanceId.

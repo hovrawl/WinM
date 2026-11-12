@@ -8,7 +8,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <CsWin32PlatformTarget Condition="'$(RuntimeIdentifier)' == ''">x64</CsWin32PlatformTarget>
-    <DefineConstants Condition="'$(PublishAot)' == 'true'">$(DefineConstants);WINMANAGER_HOST_AOT</DefineConstants>
+    <DefineConstants Condition="'$(PublishAot)' == 'true'">$(DefineConstants);HOMEDESK_HOST_AOT</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\HomeDesk.Windows\HomeDesk.Windows.csproj" />

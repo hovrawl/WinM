@@ -215,7 +215,7 @@ public sealed class WindowsManagerIntegrationTests(ITestOutputHelper output)
     private async Task HoldAsync(string phase, DesktopSnapshot desktop, CancellationToken token)
     {
         output.WriteLine($"{phase}: {string.Join("; ", desktop.Windows.Select(window => $"{window.Title}: {window.Bounds}"))}");
-        if (double.TryParse(Environment.GetEnvironmentVariable("WINMANAGER_TEST_LAYOUT_HOLD_SECONDS"),
+        if (double.TryParse(Environment.GetEnvironmentVariable("HOMEDESK_TEST_LAYOUT_HOLD_SECONDS"),
             NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds) && double.IsFinite(seconds) && seconds > 0)
             await Task.Delay(TimeSpan.FromSeconds(Math.Min(seconds, 15) / 4), token);
     }

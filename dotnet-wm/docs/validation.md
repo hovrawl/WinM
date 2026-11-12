@@ -1,12 +1,12 @@
 # MVP validation
 
 Validated on 2026-10-09 in the user-confirmed isolated interactive Windows
-session, with `WINMANAGER_ISOLATED_INTERACTIVE=1`.
+session, with `HOMEDESK_ISOLATED_INTERACTIVE=1`.
 
 ```powershell
-$env:WINMANAGER_ISOLATED_INTERACTIVE = '1'
+$env:HOMEDESK_ISOLATED_INTERACTIVE = '1'
 dotnet test HomeDesk.sln --verbosity minimal
-Remove-Item Env:\WINMANAGER_ISOLATED_INTERACTIVE
+Remove-Item Env:\HOMEDESK_ISOLATED_INTERACTIVE
 dotnet restore HomeDesk.sln --locked-mode
 ```
 
@@ -39,11 +39,11 @@ resized, and swapped split plans. No unrelated window is admitted by its adapter
 In an isolated interactive session, retain the layouts briefly for inspection:
 
 ```powershell
-$env:WINMANAGER_ISOLATED_INTERACTIVE = '1'
-$env:WINMANAGER_TEST_LAYOUT_HOLD_SECONDS = '12'
+$env:HOMEDESK_ISOLATED_INTERACTIVE = '1'
+$env:HOMEDESK_TEST_LAYOUT_HOLD_SECONDS = '12'
 dotnet test tests\HomeDesk.Windows.Tests\HomeDesk.Windows.Tests.csproj --filter 'FullyQualifiedName~EngineTilesTwoNativeProcessesHorizontallyThenVerticallyResizesAndSwaps' --logger 'console;verbosity=detailed'
-Remove-Item Env:\WINMANAGER_TEST_LAYOUT_HOLD_SECONDS
-Remove-Item Env:\WINMANAGER_ISOLATED_INTERACTIVE
+Remove-Item Env:\HOMEDESK_TEST_LAYOUT_HOLD_SECONDS
+Remove-Item Env:\HOMEDESK_ISOLATED_INTERACTIVE
 ```
 
 The optional hold defaults to zero, caps at 15 seconds total, and is split among
@@ -82,9 +82,9 @@ DWM thumbnail, and confirms the source rectangle is unchanged across close/reope
 Run it only in an explicitly isolated interactive desktop:
 
 ```powershell
-$env:WINMANAGER_ISOLATED_INTERACTIVE = '1'
+$env:HOMEDESK_ISOLATED_INTERACTIVE = '1'
 dotnet test tests\HomeDesk.Windows.Tests\HomeDesk.Windows.Tests.csproj --filter 'FullyQualifiedName~PreviewTargetResolutionAndDwmBindingPreserveSourceWindowGeometry'
-Remove-Item Env:\WINMANAGER_ISOLATED_INTERACTIVE
+Remove-Item Env:\HOMEDESK_ISOLATED_INTERACTIVE
 ```
 
 The initial carousel implementation run passed 241 IPC tests and 86 Windows tests,
@@ -170,9 +170,9 @@ physical three-finger contact frame. Run the latter only on an isolated interact
 desktop while making a three-finger contact gesture:
 
 ```powershell
-$env:WINMANAGER_ISOLATED_INTERACTIVE = '1'
+$env:HOMEDESK_ISOLATED_INTERACTIVE = '1'
 dotnet test tests\HomeDesk.Windows.Tests\HomeDesk.Windows.Tests.csproj --filter 'FullyQualifiedName~RawTouchpadProbeCanObserveThreeFingerContactFrames'
-Remove-Item Env:\WINMANAGER_ISOLATED_INTERACTIVE
+Remove-Item Env:\HOMEDESK_ISOLATED_INTERACTIVE
 ```
 
 That probe can verify contact-report availability on the tested device, but it does

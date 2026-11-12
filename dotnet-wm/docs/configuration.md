@@ -2,7 +2,7 @@
 
 The host runs on the logged-in user's Windows desktop, not as a Session-0
 service. It requests normal privilege and per-monitor-v2 DPI awareness.
-Default configuration is created at `%LOCALAPPDATA%\WinManager\config.json`.
+Default configuration is created at `%LOCALAPPDATA%\HomeDesk\config.json`.
 Use `--config ABSOLUTE_PATH` for an existing alternate JSON file. The Debug
 console's **Edit config** action reads and saves this same host-selected file;
 clients cannot choose a different path. Saving validates the complete JSON
@@ -120,7 +120,7 @@ are replaced by custom bindings rather than registered twice.
   and `cycleDirection: "next"` or `"previous"` navigates the layered page stack.
 - Gaps are DIPs in `[0,256]`, converted per-monitor to physical pixels.
 - Process/class ignores are case-insensitive exact names, not regex rules.
-  The `WinManager.DebugUi` and `WinManager.SpatialSwitcher` companion processes
+  The `HomeDesk.DebugUi` and `HomeDeskManager` companion processes
   are always excluded, even when `ignoredProcessNames` is empty. They are never
   tiled, workspace-hidden, or minimized by the manager; their read-only
   process-exclusion diagnostics cannot be opted into management by editing the
@@ -235,7 +235,7 @@ minimize remains explicit and retryable. Focus an overflow window in its active
 workspace to promote it and replace the focused tile when possible; the displaced
 tile can become overflow. The native taskbar keeps minimized windows discoverable,
 and the CLI status view lists overflow titles. Startup and subsequent action
-failures are logged under `%LOCALAPPDATA%\WinManager\Logs`; unchanged diagnostics
+failures are logged under `%LOCALAPPDATA%\HomeDesk\Logs`; unchanged diagnostics
 are deduplicated until the diagnostic state changes.
 Ordinary floating windows are kept inside destination work areas during monitor
 transfers. Default-ignored overlays and fullscreen windows are left untouched,

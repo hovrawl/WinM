@@ -14,15 +14,15 @@ public static class WindowsRecovery
 
     public static async Task<int> RunAsync(string[] args, string? journalDirectory)
     {
-        if (args.Length != 3 || args[0].Length != "WinManager.Recovery.".Length + 32 ||
-            !args[0].StartsWith("WinManager.Recovery.", StringComparison.Ordinal) ||
-            !Guid.TryParseExact(args[0]["WinManager.Recovery.".Length..], "N", out _) ||
+        if (args.Length != 3 || args[0].Length != "HomeDesk.Recovery.".Length + 32 ||
+            !args[0].StartsWith("HomeDesk.Recovery.", StringComparison.Ordinal) ||
+            !Guid.TryParseExact(args[0]["HomeDesk.Recovery.".Length..], "N", out _) ||
             !uint.TryParse(args[1], out var pid) || pid == 0 || pid > int.MaxValue ||
             !ulong.TryParse(args[2], out var time)) return 2;
         var journal = new RecoveryJournal(pid, time, []);
         if (!RecoveryNative.HostAlive(journal)) return 2;
         var directory = journalDirectory ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinManager", "Recovery");
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HomeDesk", "Recovery");
         PrepareJournalDirectory(directory);
         RecoverStale(directory);
         var path = Path.Combine(directory, args[0] + ".json");
@@ -163,12 +163,13 @@ public static class WindowsRecovery
 
     private static bool ValidRecord(RecoveryRecord? record) => record is not null && record.ProcessId != 0 && record.ProcessId <= int.MaxValue &&
         record.Handle != 0 && record.CreationTime != 0 && record.ShowCommand is 3 or 4 or 7 &&
-        record.Property is { Length: 52 } && record.Property.StartsWith("WinManager.Recovery.", StringComparison.Ordinal) &&
-        Guid.TryParseExact(record.Property["WinManager.Recovery.".Length..], "N", out _);
+        record.Property is not null && record.Property.Length == "HomeDesk.Recovery.".Length + 32 &&
+        record.Property.StartsWith("HomeDesk.Recovery.", StringComparison.Ordinal) &&
+        Guid.TryParseExact(record.Property["HomeDesk.Recovery.".Length..], "N", out _);
 
     private static void RecoverStale(string directory)
     {
-        foreach (var path in Directory.EnumerateFiles(directory, "WinManager.Recovery.*.json").Take(1024))
+        foreach (var path in Directory.EnumerateFiles(directory, "HomeDesk.Recovery.*.json").Take(1024))
         {
             try
             {

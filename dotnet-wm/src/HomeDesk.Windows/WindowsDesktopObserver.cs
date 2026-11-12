@@ -69,7 +69,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTa
     private readonly List<UnhookWinEventSafeHandle> hooks = [];
     private readonly WNDPROC windowProcedure;
     private readonly WINEVENTPROC eventProcedure;
-    private readonly string windowClass = $"WinManager.Observer.{Guid.NewGuid():N}";
+    private readonly string windowClass = $"HomeDesk.Observer.{Guid.NewGuid():N}";
     private Thread? thread;
     private HWND notificationWindow;
     private uint nativeThreadId;
@@ -83,8 +83,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTa
         IEnumerable<string>? recoveryArguments = null)
     {
         ignoredProcesses = new HashSet<string>((ignoredProcessNames ?? [])
-            .Append("WinManager.DebugUi").Append("HomeDesk.DebugUi").Append("WinManager.SpatialSwitcher")
-            .Append("HomeDeskManager")
+            .Append("HomeDesk.DebugUi").Append("HomeDeskManager")
             .Select(NormalizeProcessName), StringComparer.OrdinalIgnoreCase);
         ignoredClasses = new HashSet<string>(ignoredClassNames ?? [], StringComparer.OrdinalIgnoreCase);
         this.recoveryExecutablePath =
@@ -104,7 +103,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTa
             ObjectDisposedException.ThrowIf(disposing, this);
             if (thread is null)
             {
-                thread = new Thread(ThreadMain) { IsBackground = true, Name = "WinManager desktop observer" };
+                thread = new Thread(ThreadMain) { IsBackground = true, Name = "HomeDesk desktop observer" };
                 try
                 {
                     thread.SetApartmentState(ApartmentState.STA);
@@ -1066,7 +1065,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTa
             ? SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED
             : SHOW_WINDOW_CMD.SW_SHOWNOACTIVATE;
         var record = new RecoveryRecord((long)(nint)window.Value, identity.ProcessId, identity.ProcessCreationTime,
-            (uint)command, "WinManager.Recovery." + Guid.NewGuid().ToString("N"), Minimization: true);
+            (uint)command, "HomeDesk.Recovery." + Guid.NewGuid().ToString("N"), Minimization: true);
         try
         {
             recovery.Start(recoveryExecutablePath, recoveryArguments);
@@ -1201,7 +1200,7 @@ public sealed partial class WindowsDesktopObserver : IWindowPlatform, IPreviewTa
             ? SHOW_WINDOW_CMD.SW_SHOWMAXIMIZED
             : SHOW_WINDOW_CMD.SW_SHOWNOACTIVATE;
         var record = new RecoveryRecord((long)(nint)window.Value, identity.ProcessId, identity.ProcessCreationTime,
-            (uint)command, "WinManager.Recovery." + Guid.NewGuid().ToString("N"));
+            (uint)command, "HomeDesk.Recovery." + Guid.NewGuid().ToString("N"));
         try
         {
             recovery.Start(recoveryExecutablePath, recoveryArguments);

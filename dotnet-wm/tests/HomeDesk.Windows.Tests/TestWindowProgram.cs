@@ -28,15 +28,15 @@ internal static class TestWindowProgram
     [STAThread]
     public static unsafe int Main(string[] args)
     {
-        if (args.Length == 3 && args[0].StartsWith("WinManager.Recovery.", StringComparison.Ordinal) &&
-            Environment.GetEnvironmentVariable("WINMANAGER_TEST_RECOVERY_NO_ACK") == "1" &&
-            Environment.GetEnvironmentVariable("WINMANAGER_ISOLATED_INTERACTIVE") == "1")
+        if (args.Length == 3 && args[0].StartsWith("HomeDesk.Recovery.", StringComparison.Ordinal) &&
+            Environment.GetEnvironmentVariable("HOMEDESK_TEST_RECOVERY_NO_ACK") == "1" &&
+            Environment.GetEnvironmentVariable("HOMEDESK_ISOLATED_INTERACTIVE") == "1")
             return RecoveryTestHost.RefuseAcknowledgmentAsync(args[0]).GetAwaiter().GetResult();
         if (args.Length == 3 && args[0] == "--recovery-test-host" &&
-            Environment.GetEnvironmentVariable("WINMANAGER_ISOLATED_INTERACTIVE") == "1" && Environment.UserInteractive)
+            Environment.GetEnvironmentVariable("HOMEDESK_ISOLATED_INTERACTIVE") == "1" && Environment.UserInteractive)
             return RecoveryTestHost.RunAsync(args[1], args[2]).GetAwaiter().GetResult();
         if (args.Length != 2 || args[0] is not ("--native-window-fixture" or "--native-layout-fixture") ||
-            Environment.GetEnvironmentVariable("WINMANAGER_ISOLATED_INTERACTIVE") != "1" || !Environment.UserInteractive)
+            Environment.GetEnvironmentVariable("HOMEDESK_ISOLATED_INTERACTIVE") != "1" || !Environment.UserInteractive)
             return 2;
         prefix = args[1];
         windowClass = prefix + ".Window";
@@ -105,7 +105,7 @@ internal static class TestWindowProgram
         }
         finally
         {
-            if (uint.TryParse(Environment.GetEnvironmentVariable("WINMANAGER_TEST_FOREGROUND_PARENT"), out var parentPid))
+            if (uint.TryParse(Environment.GetEnvironmentVariable("HOMEDESK_TEST_FOREGROUND_PARENT"), out var parentPid))
                 PInvoke.AllowSetForegroundWindow(parentPid);
             foreach (var window in windows.Values.Reverse()) PInvoke.DestroyWindow(window);
             windows.Clear();

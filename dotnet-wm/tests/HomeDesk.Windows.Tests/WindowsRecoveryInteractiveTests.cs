@@ -119,15 +119,15 @@ public sealed class WindowsRecoveryInteractiveTests
     {
         await using var fixture = await NativeWindowFixture.StartAsync();
         var handle = NativeInspection.FindHandle(fixture.Prefix + ".normal");
-        var record = new RecoveryRecord(handle, 0, 0, 4, "WinManager.Recovery." + Guid.NewGuid().ToString("N"));
+        var record = new RecoveryRecord(handle, 0, 0, 4, "HomeDesk.Recovery." + Guid.NewGuid().ToString("N"));
         Assert.True(RecoveryNative.Mark(record));
         await fixture.CommandAsync("hide");
         Assert.True(RecoveryNative.Restore(record));
         Assert.False(NativeInspection.Visible(fixture.Prefix + ".normal"));
         // The journal scanner must also leave records belonging to a live identity-matched host alone.
-        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinManager", "Recovery");
+        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HomeDesk", "Recovery");
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, "WinManager.Recovery." + Guid.NewGuid().ToString("N") + ".json");
+        var path = Path.Combine(directory, "HomeDesk.Recovery." + Guid.NewGuid().ToString("N") + ".json");
         Assert.True(RecoveryNative.TryProcessTime((uint)Environment.ProcessId, out var time));
         var targetPid = NativeInspection.ProcessId(fixture.Prefix + ".normal");
         Assert.True(RecoveryNative.TryProcessTime(targetPid, out var targetTime));
@@ -183,9 +183,9 @@ public sealed class WindowsRecoveryInteractiveTests
     public async Task RegistrationWithoutAcknowledgmentNeverHidesWindow()
     {
         await using var fixture = await NativeWindowFixture.StartAsync();
-        await using var observer = new WindowsDesktopObserver(recoveryExecutablePath: Path.Combine(AppContext.BaseDirectory, "WinManager.Windows.Tests.exe"));
-        var previous = Environment.GetEnvironmentVariable("WINMANAGER_TEST_RECOVERY_NO_ACK");
-        Environment.SetEnvironmentVariable("WINMANAGER_TEST_RECOVERY_NO_ACK", "1");
+        await using var observer = new WindowsDesktopObserver(recoveryExecutablePath: Path.Combine(AppContext.BaseDirectory, "HomeDesk.Windows.Tests.exe"));
+        var previous = Environment.GetEnvironmentVariable("HOMEDESK_TEST_RECOVERY_NO_ACK");
+        Environment.SetEnvironmentVariable("HOMEDESK_TEST_RECOVERY_NO_ACK", "1");
         try
         {
             await observer.StartAsync(CancellationToken.None);
@@ -195,7 +195,7 @@ public sealed class WindowsRecoveryInteractiveTests
             Assert.True(NativeInspection.Visible(window.Title));
             Assert.False(Find(await observer.CaptureAsync(CancellationToken.None), fixture).ManagerHidden);
         }
-        finally { Environment.SetEnvironmentVariable("WINMANAGER_TEST_RECOVERY_NO_ACK", previous); }
+        finally { Environment.SetEnvironmentVariable("HOMEDESK_TEST_RECOVERY_NO_ACK", previous); }
     }
 
     [IsolatedInteractiveFact]
@@ -208,12 +208,12 @@ public sealed class WindowsRecoveryInteractiveTests
         Assert.True(RecoveryNative.TryProcessTime(pid, out var time));
         Assert.True(RecoveryNative.TryProcessTime((uint)Environment.ProcessId, out var hostTime));
         var record = new RecoveryRecord(NativeInspection.FindHandle(title), pid, time, 4,
-            "WinManager.Recovery." + Guid.NewGuid().ToString("N"), true);
+            "HomeDesk.Recovery." + Guid.NewGuid().ToString("N"), true);
         Assert.True(RecoveryNative.Mark(record));
         await fixture.CommandAsync("hide");
-        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinManager", "Recovery");
+        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HomeDesk", "Recovery");
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, "WinManager.Recovery." + Guid.NewGuid().ToString("N") + ".json");
+        var path = Path.Combine(directory, "HomeDesk.Recovery." + Guid.NewGuid().ToString("N") + ".json");
         // Same PID but a different launch identity is dead ownership, not a live host.
         File.WriteAllText(path, JsonSerializer.Serialize(new RecoveryJournal((uint)Environment.ProcessId, hostTime + 1, [record])));
         try

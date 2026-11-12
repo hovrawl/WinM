@@ -29,7 +29,7 @@ internal sealed class ConfigurationEditorWindow : Window
         this.session = session;
         this.document = document;
         this.currentSnapshot = currentSnapshot;
-        Title = "WinManager — Configuration";
+        Title = "HomeDesk — Configuration";
         Width = 980;
         Height = 760;
         MinWidth = 720;

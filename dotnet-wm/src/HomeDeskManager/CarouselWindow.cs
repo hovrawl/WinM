@@ -277,7 +277,7 @@ internal sealed class CarouselWindow : Window
                 foreach (var failure in result.Failures) failed.Add(failure.WindowId);
             }
             catch (Exception error) when (error is IOException or InvalidOperationException or
-                                              WinManagerRemoteException or WinManagerProtocolException)
+                                              HomeDeskRemoteException or HomeDeskProtocolException)
             {
                 status.Text = $"Live preview lookup failed · {error.Message}";
                 return;
@@ -446,7 +446,7 @@ internal sealed class CarouselWindow : Window
             }
         }
         catch (Exception error) when (error is IOException or InvalidOperationException or
-                                          WinManagerRemoteException or WinManagerProtocolException)
+                                          HomeDeskRemoteException or HomeDeskProtocolException)
         {
             state.AcceptanceFailed();
             status.Text = $"Focus failed · {error.Message}";
@@ -466,7 +466,7 @@ internal sealed class CarouselWindow : Window
                 await focusWindow(original);
             }
             catch (Exception error) when (error is IOException or InvalidOperationException or
-                                              WinManagerRemoteException or WinManagerProtocolException)
+                                              HomeDeskRemoteException or HomeDeskProtocolException)
             {
             }
         }

@@ -77,10 +77,10 @@ between horizontal, vertical, resized, and swapped layouts. Run from `dotnet-wm`
 only in the isolated interactive session:
 
 ```powershell
-$env:WINMANAGER_ISOLATED_INTERACTIVE = '1'
-$env:WINMANAGER_TEST_LAYOUT_HOLD_SECONDS = '12'
+$env:HOMEDESK_ISOLATED_INTERACTIVE = '1'
+$env:HOMEDESK_TEST_LAYOUT_HOLD_SECONDS = '12'
 dotnet test tests\HomeDesk.Windows.Tests\HomeDesk.Windows.Tests.csproj --filter 'FullyQualifiedName~WindowsManagerIntegrationTests' --logger 'console;verbosity=detailed'
-Remove-Item Env:\WINMANAGER_TEST_LAYOUT_HOLD_SECONDS
+Remove-Item Env:\HOMEDESK_TEST_LAYOUT_HOLD_SECONDS
 ```
 
 `WindowsDesktopObserver` implements `IWindowPlatform`. After startup and capture,
@@ -113,7 +113,7 @@ copy `HomeDesk.Recovery.exe`, `.dll`, `.deps.json`, `.runtimeconfig.json`, and i
 dependencies into one directory. By default the executable is a sibling of the Host;
 alternatively pass `recoveryExecutablePath` to `WindowsDesktopObserver`.
 The helper requires the .NET 10 runtime. Journals reside in the user's private
-`%LOCALAPPDATA%\WinManager\Recovery` directory. Uncertain or failed restoration
+`%LOCALAPPDATA%\HomeDesk\Recovery` directory. Uncertain or failed restoration
 retains records for a later helper launch; inaccessible identities fail closed.
 
 Cancellation is cooperative between actions; already-issued actions are not rolled
@@ -123,9 +123,9 @@ the foreground window immediately after the request.
 From `dotnet-wm` in that isolated session:
 
 ```powershell
-$env:WINMANAGER_ISOLATED_INTERACTIVE = '1'
+$env:HOMEDESK_ISOLATED_INTERACTIVE = '1'
 dotnet test tests\HomeDesk.Windows.Tests\HomeDesk.Windows.Tests.csproj --filter 'Category=IsolatedInteractive'
-Remove-Item Env:\WINMANAGER_ISOLATED_INTERACTIVE
+Remove-Item Env:\HOMEDESK_ISOLATED_INTERACTIVE
 ```
 
 The opt-in variable is a safety assertion, not a way to provision isolation.

@@ -39,7 +39,7 @@ public sealed class HomeDeskClient : IAsyncDisposable
     public static async Task<HomeDeskClient> ConnectAsync(string? pipeName = null, TimeSpan? timeout = null,
         CancellationToken cancellationToken = default, int eventQueueCapacity = 256)
     {
-        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("WinManager IPC requires Windows.");
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("HomeDesk IPC requires Windows.");
         if (eventQueueCapacity < 1) throw new ArgumentOutOfRangeException(nameof(eventQueueCapacity));
         var connectTimeout = timeout ?? TimeSpan.FromSeconds(5);
         if (connectTimeout <= TimeSpan.Zero && connectTimeout != Timeout.InfiniteTimeSpan)
@@ -75,7 +75,7 @@ public sealed class HomeDeskClient : IAsyncDisposable
             snapshot.Desktop is null || snapshot.Trees is null || snapshot.Desktop.Monitors is null ||
             snapshot.Desktop.Windows is null)
         {
-            var error = new WinManagerProtocolException(
+            var error = new HomeDeskProtocolException(
                 "Snapshot response is incomplete or has a mismatched state revision.");
             Abort(error);
             throw error;
@@ -126,7 +126,7 @@ public sealed class HomeDeskClient : IAsyncDisposable
         }
 
         if (valid && returned.SetEquals(requested)) return result;
-        var error = new WinManagerProtocolException("Preview-target response is incomplete or invalid.");
+        var error = new HomeDeskProtocolException("Preview-target response is incomplete or invalid.");
         Abort(error);
         throw error;
     }
@@ -140,7 +140,7 @@ public sealed class HomeDeskClient : IAsyncDisposable
         var result = ReadPayload<CommandResult>(response);
         if (result.StateRevision != response.StateRevision)
         {
-            var error = new WinManagerProtocolException("Command result has a mismatched state revision.");
+            var error = new HomeDeskProtocolException("Command result has a mismatched state revision.");
             Abort(error);
             throw error;
         }
@@ -193,10 +193,10 @@ public sealed class HomeDeskClient : IAsyncDisposable
                 cancellationToken);
             var result = ReadPayload<SubscriptionResult>(response);
             if (!result.Success)
-                throw new WinManagerRemoteException(result.ErrorCode ?? "subscription_failed",
+                throw new HomeDeskRemoteException(result.ErrorCode ?? "subscription_failed",
                     "Subscription was rejected.", result.StateRevision);
             if (result.SubscriptionId is not { } id || id == Guid.Empty)
-                throw new WinManagerProtocolException("Subscription response has no subscription ID.");
+                throw new HomeDeskProtocolException("Subscription response has no subscription ID.");
             created.SubscriptionId = id;
             await created.InitialSnapshot.WaitAsync(cancellationToken);
             return created;
@@ -291,7 +291,7 @@ public sealed class HomeDeskClient : IAsyncDisposable
 
         var response = await completion.Task;
         if (!response.Success)
-            throw new WinManagerRemoteException(response.ErrorCode ?? "server_error",
+            throw new HomeDeskRemoteException(response.ErrorCode ?? "server_error",
                 response.Message ?? "Request failed.", response.StateRevision);
         return response;
     }
@@ -303,54 +303,54 @@ public sealed class HomeDeskClient : IAsyncDisposable
             while (true)
             {
                 using var document = await PipeFraming.ReadAsync(pipe, lifetimeToken)
-                                     ?? throw new IOException("The WinManager server disconnected.");
+                                     ?? throw new IOException("The HomeDesk server disconnected.");
                 var root = document.RootElement;
                 if (root.ValueKind != JsonValueKind.Object)
-                    throw new WinManagerProtocolException("Server envelope must be an object.");
+                    throw new HomeDeskProtocolException("Server envelope must be an object.");
                 if (!root.TryGetProperty("protocolVersion", out var version) ||
                     version.ValueKind != JsonValueKind.Number ||
                     !version.TryGetInt32(out var number) || number != Protocol.Version)
-                    throw new WinManagerProtocolException("Unsupported or missing protocol version.");
+                    throw new HomeDeskProtocolException("Unsupported or missing protocol version.");
                 if (!root.TryGetProperty("kind", out var kind) || kind.ValueKind != JsonValueKind.String)
-                    throw new WinManagerProtocolException("Missing envelope kind.");
+                    throw new HomeDeskProtocolException("Missing envelope kind.");
                 if (!root.TryGetProperty("stateRevision", out var revision) ||
                     revision.ValueKind != JsonValueKind.Number ||
                     !revision.TryGetInt64(out var stateRevision) || stateRevision < 0)
-                    throw new WinManagerProtocolException("Missing or invalid state revision.");
+                    throw new HomeDeskProtocolException("Missing or invalid state revision.");
                 switch (kind.GetString())
                 {
                     case "response":
                         if (!root.TryGetProperty("success", out var success) ||
                             success.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
-                            throw new WinManagerProtocolException("Response has no success flag.");
+                            throw new HomeDeskProtocolException("Response has no success flag.");
                         var response = Deserialize<ResponseEnvelope>(root);
                         if (response.RequestId == Guid.Empty ||
                             !pending.TryRemove(response.RequestId, out var completion))
-                            throw new WinManagerProtocolException("Response has an unknown request ID.");
+                            throw new HomeDeskProtocolException("Response has an unknown request ID.");
                         completion.TrySetResult(response);
                         break;
                     case "event":
                         var envelope = Deserialize<EventEnvelope>(root);
                         if (string.IsNullOrWhiteSpace(envelope.EventType))
-                            throw new WinManagerProtocolException("Missing event type.");
+                            throw new HomeDeskProtocolException("Missing event type.");
                         lock (sync)
                         {
                             if (subscription is null)
-                                throw new WinManagerProtocolException(
+                                throw new HomeDeskProtocolException(
                                     "Received an event without an active subscription.");
                             if (!subscription.TryPublish(envelope))
-                                throw new WinManagerConsumerLagException(eventQueueCapacity);
+                                throw new HomeDeskConsumerLagException(eventQueueCapacity);
                         }
 
                         break;
-                    default: throw new WinManagerProtocolException("Unknown server envelope kind.");
+                    default: throw new HomeDeskProtocolException("Unknown server envelope kind.");
                 }
             }
         }
         catch (Exception error)
         {
             Abort(error is JsonException or InvalidDataException or EndOfStreamException or InvalidOperationException
-                ? new WinManagerProtocolException("Invalid server frame.", error)
+                ? new HomeDeskProtocolException("Invalid server frame.", error)
                 : error);
         }
     }
@@ -358,12 +358,12 @@ public sealed class HomeDeskClient : IAsyncDisposable
     internal static T Deserialize<T>(JsonElement payload)
     {
         if (payload.ValueKind != JsonValueKind.Object)
-            throw new WinManagerProtocolException($"{typeof(T).Name} payload must be an object.");
+            throw new HomeDeskProtocolException($"{typeof(T).Name} payload must be an object.");
         if (typeof(T) == typeof(CommandResult) || typeof(T) == typeof(SubscriptionResult))
         {
             if (!payload.TryGetProperty("success", out var success) ||
                 success.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
-                throw new WinManagerProtocolException($"{typeof(T).Name} has no success flag.");
+                throw new HomeDeskProtocolException($"{typeof(T).Name} has no success flag.");
         }
 
         if (typeof(T) == typeof(ManagerSnapshot))
@@ -372,25 +372,25 @@ public sealed class HomeDeskClient : IAsyncDisposable
                 paused.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
                 !payload.TryGetProperty("stateRevision", out var revision) ||
                 revision.ValueKind != JsonValueKind.Number)
-                throw new WinManagerProtocolException("Snapshot is incomplete.");
+                throw new HomeDeskProtocolException("Snapshot is incomplete.");
         }
 
         return payload.Deserialize(Protocol.TypeInfo<T>())
-               ?? throw new WinManagerProtocolException($"Missing {typeof(T).Name} payload.");
+               ?? throw new HomeDeskProtocolException($"Missing {typeof(T).Name} payload.");
     }
 
     private T ReadPayload<T>(ResponseEnvelope response)
     {
         try
         {
-            var payload = response.Payload ?? throw new WinManagerProtocolException("Response has no payload.");
+            var payload = response.Payload ?? throw new HomeDeskProtocolException("Response has no payload.");
             return Deserialize<T>(payload);
         }
         catch (Exception error) when
-            (error is JsonException or InvalidOperationException or WinManagerProtocolException)
+            (error is JsonException or InvalidOperationException or HomeDeskProtocolException)
         {
-            var protocolError = error as WinManagerProtocolException
-                                ?? new WinManagerProtocolException($"Invalid {typeof(T).Name} response payload.",
+            var protocolError = error as HomeDeskProtocolException
+                                ?? new HomeDeskProtocolException($"Invalid {typeof(T).Name} response payload.",
                                     error);
             Abort(protocolError);
             throw protocolError;

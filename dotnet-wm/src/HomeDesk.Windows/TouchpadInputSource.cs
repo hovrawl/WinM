@@ -35,7 +35,7 @@ public sealed class TouchpadInputSource : IAsyncDisposable
     private readonly TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly WNDPROC windowProcedure;
-    private readonly string windowClass = $"WinManager.Touchpad.{Guid.NewGuid():N}";
+    private readonly string windowClass = $"HomeDesk.Touchpad.{Guid.NewGuid():N}";
     private readonly Dictionary<nint, TouchpadDeviceProcessor> processors = [];
     private readonly TouchpadOptions options;
     private Thread? thread;
@@ -67,7 +67,7 @@ public sealed class TouchpadInputSource : IAsyncDisposable
             thread = new Thread(RunNativeLoop)
             {
                 IsBackground = true,
-                Name = "WinManager raw touchpad input"
+                Name = "HomeDesk raw touchpad input"
             };
             processor = ProcessInputAsync();
             thread.Start();

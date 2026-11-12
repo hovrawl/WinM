@@ -1,7 +1,7 @@
 # HomeDesk debug console
 
 `HomeDesk.DebugUi` is a separate, code-only Avalonia management application.
-It inspects and controls **one shared desk** through `WinManager.Client`. It does
+It inspects and controls **one shared desk** through `HomeDesk.Client`. It does
 not create desks or own a second copy of manager state. Named entries such as
 `Code` and `Chat` are workspaces (window groups), not separate desks. Monitors
 only show exclusive workspace views onto that same desk.

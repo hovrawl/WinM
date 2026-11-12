@@ -64,7 +64,7 @@ public sealed class ClientIntegrationTests
         Assert.Equal(ManagerEventTypes.FocusChanged, events.Current.EventType);
         Assert.Equal(result.StateRevision, events.Current.StateRevision);
         Assert.Equal(windowId, events.Current.Payload.Deserialize<ManagerSnapshot>(Protocol.JsonOptions)!.Desktop.FocusedWindowId);
-        var emptyFilter = await Assert.ThrowsAsync<WinManagerRemoteException>(() =>
+        var emptyFilter = await Assert.ThrowsAsync<HomeDeskRemoteException>(() =>
             client.ExecuteAsync(new(CommandKind.FocusCycle, Mode: WindowMode.Floating), host.Token));
         Assert.Equal("not_found", emptyFilter.ErrorCode);
         Assert.Equal(result.StateRevision, (await client.QuerySnapshotAsync(host.Token)).StateRevision);
@@ -93,7 +93,7 @@ public sealed class ClientIntegrationTests
         Assert.Equal(Assert.Single(initial.Trees).Key, selected.Selection.WorkspaceId);
         Assert.Equal(result.StateRevision, selected.StateRevision);
         Assert.Equal(selected.Selection, (await client.QuerySnapshotAsync(host.Token)).Selection);
-        var boundary = await Assert.ThrowsAsync<WinManagerRemoteException>(() =>
+        var boundary = await Assert.ThrowsAsync<HomeDeskRemoteException>(() =>
             client.ExecuteAsync(new(CommandKind.SelectContainer, Navigation: ContainerNavigation.Parent), host.Token));
         Assert.Equal("not_found", boundary.ErrorCode);
         await client.ExecuteAsync(new(CommandKind.ClearSelection), host.Token);
@@ -177,10 +177,10 @@ public sealed class ClientIntegrationTests
     {
         await using var host = await PipeHost.StartAsync();
         await using var client = await HomeDeskClient.ConnectAsync(host.Name, cancellationToken: host.Token);
-        var invalid = await Assert.ThrowsAsync<WinManagerRemoteException>(() =>
+        var invalid = await Assert.ThrowsAsync<HomeDeskRemoteException>(() =>
             client.ExecuteAsync(new(CommandKind.Pause), host.Token));
         Assert.Equal("invalid_argument", invalid.ErrorCode);
-        var notFound = await Assert.ThrowsAsync<WinManagerRemoteException>(() =>
+        var notFound = await Assert.ThrowsAsync<HomeDeskRemoteException>(() =>
             client.ExecuteAsync(new(CommandKind.Focus, Guid.NewGuid()), host.Token));
         Assert.Equal("not_found", notFound.ErrorCode);
         Assert.Equal(host.Engine.Current!.StateRevision, (await client.QuerySnapshotAsync(host.Token)).StateRevision);
@@ -222,7 +222,7 @@ public sealed class ClientIntegrationTests
     [Fact]
     public async Task SdkFreshConnectionAfterRestartUsesNewInstance()
     {
-        var name = "WinManager.test." + Guid.NewGuid().ToString("N");
+        var name = "HomeDesk.test." + Guid.NewGuid().ToString("N");
         Guid instance;
         await using (var host = await PipeHost.StartAsync(name))
         {

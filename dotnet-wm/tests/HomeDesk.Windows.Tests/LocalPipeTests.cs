@@ -10,7 +10,7 @@ public sealed class LocalPipeTests
     [Fact]
     public async Task NativeServerAcceptsVerifiedLocalClientAndTransfersBytes()
     {
-        var name = "WinManager.NativePipeTest." + Guid.NewGuid().ToString("N");
+        var name = "HomeDesk.NativePipeTest." + Guid.NewGuid().ToString("N");
         using var server = LocalPipeServer.Create(name, 1);
         using var client = new NamedPipeClientStream(".", name, PipeDirection.InOut, PipeOptions.Asynchronous);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -43,7 +43,7 @@ public sealed class LocalPipeTests
     [Fact]
     public void NativeServerHasProtectedCurrentUserOnlyDacl()
     {
-        using var server = LocalPipeServer.Create("WinManager.NativePipeTest." + Guid.NewGuid().ToString("N"), 1);
+        using var server = LocalPipeServer.Create("HomeDesk.NativePipeTest." + Guid.NewGuid().ToString("N"), 1);
         using var current = WindowsIdentity.GetCurrent();
         var security = server.GetAccessControl();
         Assert.True(security.AreAccessRulesProtected);
@@ -57,7 +57,7 @@ public sealed class LocalPipeTests
     [Fact]
     public async Task UnconnectedPipeFailsClientValidationAndWaitCanBeCancelled()
     {
-        using var server = LocalPipeServer.Create("WinManager.NativePipeTest." + Guid.NewGuid().ToString("N"), 1);
+        using var server = LocalPipeServer.Create("HomeDesk.NativePipeTest." + Guid.NewGuid().ToString("N"), 1);
         Assert.False(LocalPipeClient.IsCurrentSession(server.SafePipeHandle));
         using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => server.WaitForConnectionAsync(timeout.Token));
@@ -66,7 +66,7 @@ public sealed class LocalPipeTests
     [Fact]
     public void NativeServerEnforcesInstanceLimitAndDisposalReleasesName()
     {
-        var name = "WinManager.NativePipeTest." + Guid.NewGuid().ToString("N");
+        var name = "HomeDesk.NativePipeTest." + Guid.NewGuid().ToString("N");
         var server = LocalPipeServer.Create(name, 1);
         var handle = server.SafePipeHandle;
         try { Assert.Throws<IOException>(() => LocalPipeServer.Create(name, 1)); }
@@ -81,7 +81,7 @@ public sealed class LocalPipeTests
     [InlineData(254)]
     public void NativeServerAllowsMultipleBoundedInstances(int maximumClients)
     {
-        var name = "WinManager.NativePipeTest." + Guid.NewGuid().ToString("N");
+        var name = "HomeDesk.NativePipeTest." + Guid.NewGuid().ToString("N");
         using var first = LocalPipeServer.Create(name, maximumClients);
         using var second = LocalPipeServer.Create(name, maximumClients);
         Assert.False(second.SafePipeHandle.IsInvalid);
@@ -101,13 +101,13 @@ public sealed class LocalPipeTests
     [InlineData(-1)]
     [InlineData(255)]
     public void RejectsUnboundedOrInvalidInstanceCounts(int maximumClients) =>
-        Assert.Throws<ArgumentOutOfRangeException>(() => LocalPipeServer.Create("WinManager.Test", maximumClients));
+        Assert.Throws<ArgumentOutOfRangeException>(() => LocalPipeServer.Create("HomeDesk.Test", maximumClients));
 
     [Fact]
     public void RejectsNullOversizedNamesAndInvalidBuffers()
     {
         Assert.Throws<ArgumentNullException>(() => LocalPipeServer.Create(null!, 1));
         Assert.Throws<ArgumentException>(() => LocalPipeServer.Create(new string('a', 248), 1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => LocalPipeServer.Create("WinManager.Test", 1, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => LocalPipeServer.Create("HomeDesk.Test", 1, 0));
     }
 }

@@ -27,7 +27,7 @@ public static class Program
         while (true)
         {
             cancellation.Token.ThrowIfCancellationRequested();
-            Console.WriteLine("WinManager CLI");
+            Console.WriteLine("HomeDesk CLI");
             Console.WriteLine("1. Status observer");
             Console.WriteLine("2. Send commands");
             Console.WriteLine("3. Help");
@@ -132,7 +132,7 @@ public static class Program
             PrintError("usage", error.Message);
             return 2;
         }
-        catch (WinManagerRemoteException error)
+        catch (HomeDeskRemoteException error)
         {
             PrintError(error.ErrorCode, error.Message);
             return 3;
@@ -145,10 +145,10 @@ public static class Program
             return 4;
         }
         catch (Exception error) when (error is IOException or TimeoutException or UnauthorizedAccessException or
-            WinManagerProtocolException or WinManagerConsumerLagException or PlatformNotSupportedException)
+            HomeDeskProtocolException or HomeDeskConsumerLagException or PlatformNotSupportedException)
         {
-            PrintError(error is WinManagerConsumerLagException ? "consumer_lag" :
-                error is WinManagerProtocolException ? "protocol_error" : "connection_error", error.Message);
+            PrintError(error is HomeDeskConsumerLagException ? "consumer_lag" :
+                error is HomeDeskProtocolException ? "protocol_error" : "connection_error", error.Message);
             return 4;
         }
     }
@@ -239,7 +239,7 @@ public static class Program
     }
 
     private const string Help = """
-        WinManager CLI
+        HomeDesk CLI
           snapshot [--pipe NAME]
           command JSON [--pipe NAME]
           watch [--event-types TYPE,TYPE] [--reconnect] [--pipe NAME]
@@ -257,7 +257,7 @@ public static class Program
         JSON commands use the ManagerCommand schema, e.g. {"kind":"pause","paused":true}.
         Use command - to read JSON from stdin (portable across PowerShell versions):
           '{"kind":"pause","paused":true}' | dotnet .\src\HomeDesk.Cli\bin\Debug\net10.0-windows\HomeDesk.Cli.dll command -
-        Startup is opt-in: writes only HKCU Software\Microsoft\Windows\CurrentVersion\Run\WinManager.
+        Startup is opt-in: writes only HKCU Software\Microsoft\Windows\CurrentVersion\Run\HomeDesk.
         Host and optional config must be existing absolute .exe/.json paths; no shell commands.
         No elevation, service, scheduled task, or automatic registration. Uninstall is idempotent.
         Example watch filter: --event-types pause.changed

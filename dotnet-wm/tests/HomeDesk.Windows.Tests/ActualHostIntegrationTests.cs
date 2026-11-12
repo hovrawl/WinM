@@ -87,7 +87,7 @@ public sealed class ActualHostIntegrationTests
     public async Task ProductionHostWorkspaceHideAndNormalExitRestoreWithoutTouchingUnrelatedWindow()
     {
         await using var managed = await NativeWindowFixture.StartAsync(layoutOnly: true);
-        var unrelatedTitle = "WinManager.ActualHost.Unrelated." + Guid.NewGuid().ToString("N");
+        var unrelatedTitle = "HomeDesk.ActualHost.Unrelated." + Guid.NewGuid().ToString("N");
         await using var unrelated = await OwnProcessWindow.CreateAsync(unrelatedTitle);
         var unrelatedHandle = NativeInspection.FindHandle(unrelatedTitle);
         var unrelatedShow = NativeInspection.ShowCommand(unrelatedTitle);
@@ -149,7 +149,7 @@ public sealed class ActualHostIntegrationTests
         await using var host = await ActualHostFixture.CreateAsync(window);
         await host.StartAsync(missingHelper: true);
         await host.WaitForSnapshotAsync(snapshot => snapshot.Desktop.Windows.Count == 1);
-        var result = await Assert.ThrowsAsync<WinManagerRemoteException>(() =>
+        var result = await Assert.ThrowsAsync<HomeDeskRemoteException>(() =>
             host.Client.ExecuteAsync(new(CommandKind.ActivateWorkspace, WorkspaceName: "2"), host.Token));
         Assert.Equal("recovery_unavailable", result.ErrorCode);
         Assert.True(NativeInspection.Visible(window.Prefix + ".normal"));

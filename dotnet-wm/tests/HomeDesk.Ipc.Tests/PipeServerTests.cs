@@ -73,7 +73,7 @@ public sealed class PipeServerTests
             Assert.NotEqual(document.Revision, saved.Revision);
             Assert.Equal(replacement, File.ReadAllText(path));
             Assert.Equal(29, ManagerConfiguration.Load(path, createDefault: false).OuterGap);
-            var conflict = await Assert.ThrowsAsync<WinManagerRemoteException>(async () =>
+            var conflict = await Assert.ThrowsAsync<HomeDeskRemoteException>(async () =>
                 await client.SaveConfigurationAsync(document.Revision, replacement, host.Token));
             Assert.Equal("configuration_conflict", conflict.ErrorCode);
         }
@@ -90,7 +90,7 @@ public sealed class PipeServerTests
         await using var platform = new TestWindowPlatform(8);
         var engine = new ManagerEngine(platform, capacity: 1);
         var admitted = engine.ExecuteAsync(new(CommandKind.Redraw), timeout.Token);
-        var name = "WinManager.test." + Guid.NewGuid().ToString("N");
+        var name = "HomeDesk.test." + Guid.NewGuid().ToString("N");
         await using var server = new PipeServer(engine, name);
         var serverRun = server.RunAsync(timeout.Token);
         await using var client = PipeHost.CreateClient(name);
@@ -544,7 +544,7 @@ public sealed class PipeServerTests
     [Fact]
     public async Task ReconnectAfterRestartGetsNewInstanceWithoutReplay()
     {
-        var name = "WinManager.test." + Guid.NewGuid().ToString("N");
+        var name = "HomeDesk.test." + Guid.NewGuid().ToString("N");
         Guid previousInstance;
         await using (var host = await PipeHost.StartAsync(name: name))
         {
@@ -639,7 +639,7 @@ internal sealed class PipeHost : IAsyncDisposable
     private PipeHost(string? name, int maximumClients, int outputCapacity, int titleLength, bool popup,
         IEnumerable<WorkspaceDefinition>? workspaceDefinitions, ConfigurationStore? configurationStore)
     {
-        Name = name ?? "WinManager.test." + Guid.NewGuid().ToString("N");
+        Name = name ?? "HomeDesk.test." + Guid.NewGuid().ToString("N");
         platform = new TestWindowPlatform(titleLength, popup);
         Engine = new(platform, workspaceDefinitions: workspaceDefinitions);
         TrayVisibility = new HostTrayVisibility();

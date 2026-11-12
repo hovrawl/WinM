@@ -24,7 +24,7 @@ public sealed class SingleInstanceLease : IDisposable
                 finally { mutex.ReleaseMutex(); }
             }
             catch (Exception error) { ready.TrySetException(error); }
-        }) { IsBackground = true, Name = "WinManager single-instance owner" };
+        }) { IsBackground = true, Name = "HomeDesk single-instance owner" };
         owner.Start();
         Acquired = ready.Task.GetAwaiter().GetResult();
     }

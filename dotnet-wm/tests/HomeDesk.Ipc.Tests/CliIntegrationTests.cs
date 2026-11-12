@@ -91,7 +91,7 @@ public sealed class CliIntegrationTests
 
     private static async Task ReadMenuAsync(CliProcess cli, CancellationToken token)
     {
-        Assert.Equal("WinManager CLI", await cli.ReadLineAsync(token));
+        Assert.Equal("HomeDesk CLI", await cli.ReadLineAsync(token));
         Assert.Equal("1. Status observer", await cli.ReadLineAsync(token));
         Assert.Equal("2. Send commands", await cli.ReadLineAsync(token));
         Assert.Equal("3. Help", await cli.ReadLineAsync(token));

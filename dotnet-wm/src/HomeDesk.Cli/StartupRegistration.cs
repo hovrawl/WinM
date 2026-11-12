@@ -5,7 +5,7 @@ namespace HomeDesk.Cli;
 public static class StartupRegistration
 {
     public const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    public const string DefaultRegistrationName = "WinManager";
+    public const string DefaultRegistrationName = "HomeDesk";
 
     public static string Write(string hostPath, string? configPath = null,
         string registrationName = DefaultRegistrationName)
@@ -45,11 +45,11 @@ public static class StartupRegistration
     private static void ValidateRegistrationName(string registrationName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(registrationName);
-        const string prefix = "WinManager.Test.";
+        const string prefix = "HomeDesk.Test.";
         if (registrationName != DefaultRegistrationName &&
             !(registrationName.StartsWith(prefix, StringComparison.Ordinal) &&
               registrationName.Length == prefix.Length + 36 &&
               Guid.TryParseExact(registrationName[prefix.Length..], "D", out _)))
-            throw new ArgumentException("Registration name must be WinManager or WinManager.Test.<guid>.", nameof(registrationName));
+            throw new ArgumentException("Registration name must be HomeDesk or HomeDesk.Test.<guid>.", nameof(registrationName));
     }
 }

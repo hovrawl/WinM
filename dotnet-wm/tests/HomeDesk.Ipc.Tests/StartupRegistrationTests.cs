@@ -10,7 +10,7 @@ public sealed class StartupRegistrationTests
     public void InstallUpdateAndIdempotentUninstallAffectOnlyDisposableValue()
     {
         using var fixture = new RegistrationFixture();
-        var otherName = $"WinManager.Test.{Guid.NewGuid():D}";
+        var otherName = $"HomeDesk.Test.{Guid.NewGuid():D}";
         try
         {
             using (var key = Registry.CurrentUser.CreateSubKey(StartupRegistration.RunKeyPath))
@@ -115,9 +115,9 @@ public sealed class StartupRegistrationTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("OtherApplication")]
-    [InlineData(@"WinManager\Other")]
-    [InlineData("WinManager.Test.not-a-guid")]
-    [InlineData("WinManager.Test.00000000-0000-0000-0000-000000000000.extra")]
+    [InlineData(@"HomeDesk\Other")]
+    [InlineData("HomeDesk.Test.not-a-guid")]
+    [InlineData("HomeDesk.Test.00000000-0000-0000-0000-000000000000.extra")]
     public void RegistrationNamesAreBounded(string? name)
     {
         using var fixture = new RegistrationFixture();
@@ -129,10 +129,10 @@ public sealed class StartupRegistrationTests
     [Fact]
     public void DefaultsAreNormalPerUserRegistration()
     {
-        Assert.Equal("WinManager", StartupRegistration.DefaultRegistrationName);
+        Assert.Equal("HomeDesk", StartupRegistration.DefaultRegistrationName);
         Assert.Equal(@"Software\Microsoft\Windows\CurrentVersion\Run", StartupRegistration.RunKeyPath);
-        Assert.Equal("WinManager", typeof(StartupRegistration).GetMethod("Write")!.GetParameters()[2].DefaultValue);
-        Assert.Equal("WinManager", typeof(StartupRegistration).GetMethod("Remove")!.GetParameters()[0].DefaultValue);
+        Assert.Equal("HomeDesk", typeof(StartupRegistration).GetMethod("Write")!.GetParameters()[2].DefaultValue);
+        Assert.Equal("HomeDesk", typeof(StartupRegistration).GetMethod("Remove")!.GetParameters()[0].DefaultValue);
     }
 
     [Theory]
@@ -150,7 +150,7 @@ public sealed class StartupRegistrationTests
     private sealed class RegistrationFixture : IDisposable
     {
         private readonly string directory = CreateDirectoryPath();
-        public string Name { get; } = $"WinManager.Test.{Guid.NewGuid():D}";
+        public string Name { get; } = $"HomeDesk.Test.{Guid.NewGuid():D}";
         public string Host => Path.Combine(directory, "host app.exe");
         public string Config => Path.Combine(directory, "config file.json");
 
@@ -159,7 +159,7 @@ public sealed class StartupRegistrationTests
             var root = new DirectoryInfo(AppContext.BaseDirectory);
             while (!File.Exists(Path.Combine(root.FullName, "Directory.Build.props")))
                 root = root.Parent ?? throw new InvalidOperationException("Project root was not found.");
-            return Path.Combine(root.FullName, "src", "WinManager.Cli", $"startup {Guid.NewGuid():N}");
+            return Path.Combine(root.FullName, "src", "HomeDesk.Cli", $"startup {Guid.NewGuid():N}");
         }
 
         public RegistrationFixture()

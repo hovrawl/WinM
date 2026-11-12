@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 
 var dataDirectory = args is ["--tray-smoke"] or ["--recovery-smoke"] or ["--recovery", "--smoke-directory", ..]
     ? AppContext.BaseDirectory
-    : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WinManager");
+    : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "HomeDesk");
 try
 {
     if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063))
@@ -145,7 +145,7 @@ namespace HomeDeskSpace
 
     internal static class HostBuild
     {
-#if WINMANAGER_HOST_AOT
+#if HOMEDESK_HOST_AOT
     public const bool IsNativeAot = true;
 #else
         public const bool IsNativeAot = false;

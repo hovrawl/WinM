@@ -2,7 +2,7 @@
 
 ## Purpose
 
-WinManager manages exactly one logical desk. There is no desk list, desk switching, or separate desk per monitor. Each monitor shows one workspace view onto that same desk. A workspace belongs to the desk, not to a monitor.
+HomeDesk manages exactly one logical desk. There is no desk list, desk switching, or separate desk per monitor. Each monitor shows one workspace view onto that same desk. A workspace belongs to the desk, not to a monitor.
 
 This document defines the target model. The system keeps workspace identity independent from monitor views, supports exclusive view transfer, manager-owned logical workspace positions, and per-workspace split and layered layouts. Current tiling keeps every eligible window managed when minimum sizes exceed available space. Workspace bounds, additional layout rules, persistent runtime desk state, and the full desk overview remain future work. The separate debug console and spatial switcher are available; see [the migration plan](desk-model-plan.md) for status and next phases.
 
@@ -16,7 +16,7 @@ This document defines the target model. The system keeps workspace identity inde
 - A view transfer does not move windows between workspaces or change the workspace's desk position.
 - Each workspace selects its own layout rule. The current choices are split and layered; columns, rows, and Fibonacci tiles remain possible later rules. A rule change recalculates the window layout to fit the workspace view.
 - When not all windows fit at their reported minimum sizes, the system stages a deterministic fitting subset and keeps every other window managed as layout overflow. Overflow windows are minimized rather than squeezed below minimum size; focusing an overflow window in the active workspace can replace the focused tile.
-- WinManager owns the state and operations. General window-manager compatibility is not a goal.
+- HomeDesk owns the state and operations. General window-manager compatibility is not a goal.
 - The first implementation stage focuses on the data model, rules, commands, and state changes. A full visual desk is a separate stage.
 
 ## Space model

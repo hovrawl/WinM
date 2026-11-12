@@ -66,7 +66,7 @@ public sealed class WindowsDesktopObserverInteractiveTests
             Assert.Equal(NativeInspection.WindowDpi(window.Title),
                 Assert.Single(first.Monitors, monitor => monitor.Id == window.MonitorId).Dpi);
             Assert.DoesNotContain(first.Windows,
-                candidate => candidate.ClassName.StartsWith("WinManager.Observer.", StringComparison.Ordinal));
+                candidate => candidate.ClassName.StartsWith("HomeDesk.Observer.", StringComparison.Ordinal));
             var second = await observer.CaptureAsync(timeout.Token);
             Assert.All(candidates, candidate =>
                 Assert.Equal(candidate.Id, Assert.Single(second.Windows, entry => entry.Title == candidate.Title).Id));

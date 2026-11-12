@@ -22,7 +22,7 @@ internal sealed class RecoveryConnection : IDisposable
         try
         {
             if (helper is not null) throw new IOException("Recovery helper exited.");
-            var name = "WinManager.Recovery." + Guid.NewGuid().ToString("N");
+            var name = "HomeDesk.Recovery." + Guid.NewGuid().ToString("N");
             pipe = new NamedPipeServerStream(name, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
                 PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly, 65536, 65536);
             if (!RecoveryNative.TryProcessTime((uint)Environment.ProcessId, out var time)) throw new IOException("Cannot identify recovery host.");

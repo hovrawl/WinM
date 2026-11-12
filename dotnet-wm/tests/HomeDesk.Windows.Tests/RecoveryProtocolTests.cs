@@ -7,10 +7,10 @@ namespace HomeDesk.Windows.Tests;
 public sealed class RecoveryProtocolTests
 {
     [Theory]
-    [InlineData("WinManager.Recovery...\\outside", "1", "1")]
-    [InlineData("WinManager.Recovery.00000000000000000000000000000000", "0", "1")]
-    [InlineData("WinManager.Recovery.00000000000000000000000000000000", "4294967295", "1")]
-    [InlineData("WinManager.Recovery.00000000000000000000000000000000", "1", "invalid")]
+    [InlineData("HomeDesk.Recovery...\\outside", "1", "1")]
+    [InlineData("HomeDesk.Recovery.00000000000000000000000000000000", "0", "1")]
+    [InlineData("HomeDesk.Recovery.00000000000000000000000000000000", "4294967295", "1")]
+    [InlineData("HomeDesk.Recovery.00000000000000000000000000000000", "1", "invalid")]
     public async Task RejectsInvalidHelperArgumentsBeforeTouchingDesktop(string pipe, string pid, string creationTime) =>
         Assert.Equal(2, await WindowsRecovery.RunAsync([pipe, pid, creationTime]));
 
@@ -39,11 +39,11 @@ public sealed class RecoveryProtocolTests
     public void RecoveryStartArgumentsKeepProtocolArgumentsAfterOptionalPrefix()
     {
         var startInfo = RecoveryConnection.CreateStartInfo("HomeDeskSpace.exe", ["--recovery"],
-            "WinManager.Recovery.00000000000000000000000000000000", 123, 456);
+            "HomeDesk.Recovery.00000000000000000000000000000000", 123, 456);
 
         Assert.False(startInfo.UseShellExecute);
         Assert.True(startInfo.CreateNoWindow);
-        Assert.Equal(["--recovery", "WinManager.Recovery.00000000000000000000000000000000", "123", "456"],
+        Assert.Equal(["--recovery", "HomeDesk.Recovery.00000000000000000000000000000000", "123", "456"],
             startInfo.ArgumentList);
     }
 }

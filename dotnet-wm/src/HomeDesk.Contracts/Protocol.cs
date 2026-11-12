@@ -107,7 +107,7 @@ public static class Protocol
         var sid = identity.User?.Value ?? throw new InvalidOperationException("Current user has no SID.");
         using var process = Process.GetCurrentProcess();
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sid)))[..24];
-        return $"WinManager.v{Version}.{hash}.{process.SessionId}";
+        return $"HomeDesk.v{Version}.{hash}.{process.SessionId}";
     }
 }
 

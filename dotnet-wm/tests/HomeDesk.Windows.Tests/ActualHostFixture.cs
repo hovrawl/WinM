@@ -21,7 +21,7 @@ internal sealed class ActualHostFixture : IAsyncDisposable
     public string DirectoryPath { get; } =
         Path.Combine(AppContext.BaseDirectory, "ActualHostArtifacts", Guid.NewGuid().ToString("N"));
 
-    public string PipeName { get; } = "WinManager.ActualHost.Tests." + Guid.NewGuid().ToString("N");
+    public string PipeName { get; } = "HomeDesk.ActualHost.Tests." + Guid.NewGuid().ToString("N");
     public string ConfigPath => Path.Combine(DirectoryPath, "config.json");
     public string HelperPath => Path.Combine(DirectoryPath, "Host", "HomeDesk.Recovery.exe");
     public Process HostProcess { get; private set; } = null!;
@@ -37,7 +37,7 @@ internal sealed class ActualHostFixture : IAsyncDisposable
 
     public static async Task<ActualHostFixture> CreateAsync(params NativeWindowFixture[] windows)
     {
-        if (Environment.GetEnvironmentVariable("WINMANAGER_ISOLATED_INTERACTIVE") != "1")
+        if (Environment.GetEnvironmentVariable("HOMEDESK_ISOLATED_INTERACTIVE") != "1")
             throw new InvalidOperationException("Actual Host tests require an isolated interactive desktop.");
         var fixture = new ActualHostFixture(windows);
         try
@@ -163,7 +163,7 @@ internal sealed class ActualHostFixture : IAsyncDisposable
             {
                 await Task.Delay(30, Token);
             }
-            catch (WinManagerRemoteException error) when (error.ErrorCode == "not_ready")
+            catch (HomeDeskRemoteException error) when (error.ErrorCode == "not_ready")
             {
                 await Task.Delay(30, Token);
             }
@@ -197,9 +197,9 @@ internal sealed class ActualHostFixture : IAsyncDisposable
     {
         Assert.True(RecoveryNative.TryProcessTime((uint)HostProcess.Id, out var hostTime));
         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "WinManager", "Recovery");
+            "HomeDesk", "Recovery");
         var owned = new List<string>();
-        foreach (var path in Directory.EnumerateFiles(directory, "WinManager.Recovery.*.json"))
+        foreach (var path in Directory.EnumerateFiles(directory, "HomeDesk.Recovery.*.json"))
         {
             try
             {
@@ -267,12 +267,12 @@ internal sealed class ActualHostFixture : IAsyncDisposable
         Assert.True(RecoveryNative.TryProcessTime(pid, out var time));
         Assert.True(RecoveryNative.TryProcessTime((uint)Environment.ProcessId, out var hostTime));
         var record = new RecoveryRecord(NativeInspection.FindHandle(title), pid, time + 1, 4,
-            "WinManager.Recovery." + Guid.NewGuid().ToString("N"), true);
+            "HomeDesk.Recovery." + Guid.NewGuid().ToString("N"), true);
         Assert.True(RecoveryNative.Mark(record));
         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "WinManager", "Recovery");
+            "HomeDesk", "Recovery");
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, "WinManager.Recovery." + Guid.NewGuid().ToString("N") + ".json");
+        var path = Path.Combine(directory, "HomeDesk.Recovery." + Guid.NewGuid().ToString("N") + ".json");
         journalPaths.Add(path);
         File.WriteAllText(path,
             JsonSerializer.Serialize(new RecoveryJournal((uint)Environment.ProcessId, hostTime + 1, [record])));

@@ -88,7 +88,7 @@ internal static class NativeInspection
             {
                 var length = PInvoke.GetClassName(window, buffer, name.Length);
                 if (pid == (uint)Environment.ProcessId && name[..Math.Max(0, length)]
-                        .StartsWith("WinManager.Observer.", StringComparison.Ordinal))
+                        .StartsWith("HomeDesk.Observer.", StringComparison.Ordinal))
                     count++;
             }
 

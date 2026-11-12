@@ -37,14 +37,14 @@ public sealed class ManagerSubscription : IAsyncDisposable
             envelope.Sequence < 0 || envelope.StateRevision < 0 ||
             snapshot.StateRevision != envelope.StateRevision || snapshot.Desktop is null || snapshot.Trees is null ||
             snapshot.Desktop.Monitors is null || snapshot.Desktop.Windows is null)
-            throw new WinManagerProtocolException("Event payload must be a full snapshot matching its envelope.");
+            throw new HomeDeskProtocolException("Event payload must be a full snapshot matching its envelope.");
         if (instanceId is null)
         {
             if (envelope.EventType != ManagerEventTypes.Snapshot)
-                throw new WinManagerProtocolException("The first subscription event must be a snapshot.");
+                throw new HomeDeskProtocolException("The first subscription event must be a snapshot.");
         }
         else if (envelope.InstanceId != instanceId || envelope.Sequence <= lastSequence || envelope.StateRevision < lastRevision)
-            throw new WinManagerProtocolException("Subscription instance, sequence, or state revision changed out of order.");
+            throw new HomeDeskProtocolException("Subscription instance, sequence, or state revision changed out of order.");
         if (!events.Writer.TryWrite(envelope)) return false;
         instanceId = envelope.InstanceId;
         lastSequence = envelope.Sequence;

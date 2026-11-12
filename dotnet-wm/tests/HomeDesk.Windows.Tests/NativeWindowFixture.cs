@@ -11,14 +11,14 @@ internal sealed class NativeWindowFixture : IAsyncDisposable
     private Task<string> errors = Task.FromResult("");
     private bool hasStarted;
     private bool disposed;
-    public string Prefix { get; } = $"WinManager.Test.{Guid.NewGuid():N}";
+    public string Prefix { get; } = $"HomeDesk.Test.{Guid.NewGuid():N}";
     public string WindowClass => Prefix + ".Window";
     public string IgnoredClass => Prefix + ".Ignored";
     public int ProcessId => process.Id;
 
     public static async Task<NativeWindowFixture> StartAsync(bool layoutOnly = false)
     {
-        if (Environment.GetEnvironmentVariable("WINMANAGER_ISOLATED_INTERACTIVE") != "1")
+        if (Environment.GetEnvironmentVariable("HOMEDESK_ISOLATED_INTERACTIVE") != "1")
             throw new InvalidOperationException("Native fixtures require explicit isolated-desktop opt-in.");
         var info = new ProcessStartInfo("dotnet")
         {
@@ -29,7 +29,7 @@ internal sealed class NativeWindowFixture : IAsyncDisposable
             CreateNoWindow = true
         };
         var process = new Process { StartInfo = info };
-        info.Environment["WINMANAGER_TEST_FOREGROUND_PARENT"] = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        info.Environment["HOMEDESK_TEST_FOREGROUND_PARENT"] = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var fixture = new NativeWindowFixture(process, info);
         if (layoutOnly) info.ArgumentList[1] = "--native-layout-fixture";
         try

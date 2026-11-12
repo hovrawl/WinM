@@ -112,9 +112,9 @@ See the [publishing guide](docs/publishing.md) for
 prerequisites, smoke checks and output details. Startup registration is opt-in;
 see `src\HomeDesk.Cli\README.md`.
 
-Default configuration: `%LOCALAPPDATA%\WinManager\config.json`, created on first
-launch. This legacy data location is retained for existing installations. Logs: `%LOCALAPPDATA%\WinManager\Logs`. Recovery journals:
-`%LOCALAPPDATA%\WinManager\Recovery`. Host supports explicit `--config`,
+Default configuration: `%LOCALAPPDATA%\HomeDesk\config.json`, created on first
+launch. Logs: `%LOCALAPPDATA%\HomeDesk\Logs`. Recovery journals:
+`%LOCALAPPDATA%\HomeDesk\Recovery`. Host supports explicit `--config`,
 `--data-dir`, `--pipe`, and `--recovery-executable` overrides. Only one host can
 run for the same user/session, even with pipe overrides. Exit code `5` means
 another instance owns the session; `2` indicates startup/lifetime failure and
