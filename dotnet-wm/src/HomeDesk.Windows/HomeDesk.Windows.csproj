@@ -2,7 +2,6 @@
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <RootNamespace>WinManager.Windows</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\HomeDesk.Core\HomeDesk.Core.csproj" />

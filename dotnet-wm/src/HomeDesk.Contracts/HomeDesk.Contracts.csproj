@@ -1,5 +1,1 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <RootNamespace>WinManager.Contracts</RootNamespace>
-  </PropertyGroup>
-</Project>
+<Project Sdk="Microsoft.NET.Sdk" />

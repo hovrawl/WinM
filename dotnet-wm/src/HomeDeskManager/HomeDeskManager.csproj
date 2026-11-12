@@ -4,7 +4,6 @@
     <AssemblyName>HomeDeskManager</AssemblyName>
     <AssemblyTitle>HomeDeskManager</AssemblyTitle>
     <Product>HomeDeskManager</Product>
-    <RootNamespace>WinManager.SpatialSwitcher</RootNamespace>
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

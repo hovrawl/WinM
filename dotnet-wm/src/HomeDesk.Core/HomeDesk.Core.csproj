@@ -1,6 +1,3 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <RootNamespace>WinManager.Core</RootNamespace>
-  </PropertyGroup>
   <ItemGroup><ProjectReference Include="..\HomeDesk.Contracts\HomeDesk.Contracts.csproj" /></ItemGroup>
 </Project>
