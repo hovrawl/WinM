@@ -36,3 +36,34 @@ internal sealed class CarouselScrollAccumulator(Action<Action> schedule, Action<
         if (delta != 0) apply(delta);
     }
 }
+
+internal sealed class CarouselScrollMotion
+{
+    private const double InputAcceleration = 3.2;
+    private const double Friction = 5.5;
+    private const double MaximumVelocity = 2800;
+    private const double MinimumVelocity = 5;
+    private double velocity;
+
+    public double Velocity => velocity;
+    public bool IsActive => velocity != 0;
+
+    public void AddInput(double delta)
+    {
+        if (!double.IsFinite(delta) || delta == 0) return;
+        velocity = Math.Clamp(velocity + delta * InputAcceleration, -MaximumVelocity, MaximumVelocity);
+    }
+
+    public double Advance(double elapsedSeconds)
+    {
+        if (!double.IsFinite(elapsedSeconds) || elapsedSeconds <= 0 || !IsActive) return 0;
+        elapsedSeconds = Math.Min(elapsedSeconds, 0.1);
+        var decay = Math.Exp(-Friction * elapsedSeconds);
+        var displacement = velocity * (1 - decay) / Friction;
+        velocity *= decay;
+        if (Math.Abs(velocity) < MinimumVelocity) velocity = 0;
+        return displacement;
+    }
+
+    public void Stop() => velocity = 0;
+}

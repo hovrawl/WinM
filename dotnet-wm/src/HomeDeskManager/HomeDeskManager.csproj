@@ -4,7 +4,7 @@
     <AssemblyName>HomeDeskManager</AssemblyName>
     <AssemblyTitle>HomeDeskManager</AssemblyTitle>
     <Product>HomeDeskManager</Product>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -22,6 +22,8 @@
     <PackageReference Include="Avalonia.Desktop" Version="12.1.5" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.5" />
     <PackageReference Include="AvaloniaMcp.Diagnostics" Version="0.4.0" PrivateAssets="all" />
+    <PackageReference Include="System.Drawing.Common" Version="9.0.5" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.1" />
   </ItemGroup>
   <Import Project="..\..\scripts\AvaloniaSingleFile.targets" />
 </Project>

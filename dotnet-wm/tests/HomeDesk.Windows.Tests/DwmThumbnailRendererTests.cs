@@ -6,6 +6,16 @@ namespace HomeDesk.Windows.Tests;
 public sealed class DwmThumbnailRendererTests
 {
     [Fact]
+    public void NativeUpdateFlagsEnableSourceCroppingWithoutClientAreaOnlyMode()
+    {
+        var croppedFlags = DwmThumbnailNativeApi.UpdateFlags(new PixelRect(100, 50, 1200, 675));
+        var fullSourceFlags = DwmThumbnailNativeApi.UpdateFlags(null);
+
+        Assert.Equal(0x0000000Fu, croppedFlags);
+        Assert.Equal(0x0000000Du, fullSourceFlags);
+    }
+
+    [Fact]
     public void BindingUpdatingAndDisposalKeepThumbnailResourcesBalanced()
     {
         var native = new FakeDwmThumbnailNativeApi();

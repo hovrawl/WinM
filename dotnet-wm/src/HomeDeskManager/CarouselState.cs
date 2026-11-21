@@ -91,7 +91,8 @@ internal sealed class CarouselState
         var nextOffset = Math.Clamp(HorizontalOffset + delta, 0, Math.Max(0, maximumOffset));
         if (Math.Abs(nextOffset - HorizontalOffset) < 0.001) return false;
         HorizontalOffset = nextOffset;
-        var selectionAnchor = nextOffset + viewportWidth / 2;
+        var leadingInset = Math.Max(0, (viewportWidth - cardWidth) / 2);
+        var selectionAnchor = nextOffset + viewportWidth / 2 - leadingInset;
         var nearest = (int)Math.Round((selectionAnchor - cardWidth / 2) / cardStride,
             MidpointRounding.AwayFromZero);
         nearest = Math.Clamp(nearest, 0, candidateOrder.Count - 1);

@@ -142,7 +142,7 @@ internal sealed class DwmThumbnailNativeApi : IDwmThumbnailNativeApi
     private const uint SetDestinationRectangle = 0x00000001;
     private const uint SetOpacity = 0x00000004;
     private const uint SetVisible = 0x00000008;
-    private const uint SetSourceRectangle = 0x00000010;
+    private const uint SetSourceRectangle = 0x00000002;
 
     public bool IsValidSource(WindowPreviewTarget target)
     {
@@ -172,8 +172,7 @@ internal sealed class DwmThumbnailNativeApi : IDwmThumbnailNativeApi
     {
         var properties = new DwmThumbnailProperties
         {
-            Flags = SetDestinationRectangle | SetOpacity | SetVisible |
-                    (source is null ? 0u : SetSourceRectangle),
+            Flags = UpdateFlags(source),
             Destination = new NativeRect
             {
                 Left = destination.X,
@@ -195,6 +194,9 @@ internal sealed class DwmThumbnailNativeApi : IDwmThumbnailNativeApi
         };
         return DwmUpdateThumbnailProperties(thumbnail, ref properties) >= 0;
     }
+
+    internal static uint UpdateFlags(PixelRect? source) =>
+        SetDestinationRectangle | SetOpacity | SetVisible | (source is null ? 0u : SetSourceRectangle);
 
     public void Unregister(nint thumbnail) => DwmUnregisterThumbnail(thumbnail);
 

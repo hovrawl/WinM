@@ -5,7 +5,7 @@ namespace HomeDeskManager;
 internal enum CarouselGestureAction
 {
     Open,
-    Cancel
+    Accept
 }
 
 internal static class SwitcherTouchpadPolicy
@@ -27,7 +27,7 @@ internal static class SwitcherTouchpadPolicy
         return gesture.Direction switch
         {
             TouchpadSwipeDirection.Up => CarouselGestureAction.Open,
-            TouchpadSwipeDirection.Down => CarouselGestureAction.Cancel,
+            TouchpadSwipeDirection.Down => CarouselGestureAction.Accept,
             _ => null
         };
     }

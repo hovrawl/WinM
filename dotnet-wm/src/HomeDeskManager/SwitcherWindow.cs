@@ -946,7 +946,8 @@ internal sealed class SwitcherWindow : Window
             {
                 if (!carouselWindow.IsVisible) _ = ShowCarouselExperimentAsync();
             }
-            else if (carouselWindow.IsVisible) carouselWindow.CancelSelection();
+            else if (action == CarouselGestureAction.Accept && carouselWindow.IsVisible)
+                carouselWindow.AcceptSelection();
         });
     }
 

@@ -449,7 +449,7 @@ public sealed class SpatialSwitcherTests
 
     [Theory]
     [InlineData(TouchpadSwipeDirection.Up, "Open")]
-    [InlineData(TouchpadSwipeDirection.Down, "Cancel")]
+    [InlineData(TouchpadSwipeDirection.Down, "Accept")]
     public void SwitcherRoutesVerticalThreeFingerSwipesWhenContactsAreObserved(
         TouchpadSwipeDirection direction, string expected)
     {
@@ -805,11 +805,41 @@ public sealed class SpatialSwitcherTests
     }
 
     [Fact]
+    public void CarouselLayoutCentersFirstAndLastCardsAtScrollLimits()
+    {
+        var windows = new[] { Window("A"), Window("B"), Window("C"), Window("D") };
+        var viewportWidth = 1800d;
+        var workAreaWidth = 1920d;
+        var maximumOffset = CarouselPresentation.MaximumScrollOffset(windows.Length, workAreaWidth, viewportWidth);
+
+        var first = CarouselPresentation.Layout(windows, new Dictionary<Guid, PreviewImageSize>(), workAreaWidth,
+            1080, viewportWidth, 680, 0)[0];
+        var last = CarouselPresentation.Layout(windows, new Dictionary<Guid, PreviewImageSize>(), workAreaWidth,
+            1080, viewportWidth, 680, maximumOffset)[^1];
+
+        Assert.Equal(viewportWidth / 2, first.CardBounds.Center.X, 6);
+        Assert.Equal(viewportWidth / 2, last.CardBounds.Center.X, 6);
+    }
+
+    [Fact]
+    public void CarouselLayoutEmphasizesTheCenteredSelection()
+    {
+        var windows = new[] { Window("Selected"), Window("Neighbor") };
+        var selected = CarouselPresentation.Layout(windows, new Dictionary<Guid, PreviewImageSize>(), 1920,
+            1080, 1800, 680, selectedWindowId: windows[0].Id);
+
+        Assert.Equal(900, selected[0].CardBounds.Center.X, 6);
+        Assert.True(selected[0].CardBounds.Width > selected[1].CardBounds.Width);
+        Assert.True(selected[0].PreviewBounds.Width > selected[1].PreviewBounds.Width);
+        Assert.True(selected[0].CardBounds.Right < selected[1].CardBounds.Left);
+    }
+
+    [Fact]
     public void CarouselCardsFitAspectRatioAndStayNonOverlappingWithSourceAwareClipping()
     {
         var wide = Window("Wide") with { Bounds = new ContractPixelRect(0, 0, 3200, 1800) };
         var tall = Window("Tall") with { Bounds = new ContractPixelRect(0, 0, 600, 1200) };
-        var sourceSizes = new Dictionary<Guid, DwmThumbnailSourceSize>
+        var sourceSizes = new Dictionary<Guid, PreviewImageSize>
         {
             [wide.Id] = new(1600, 900),
             [tall.Id] = new(600, 1200)
@@ -832,11 +862,55 @@ public sealed class SpatialSwitcherTests
     }
 
     [Fact]
+    public void CarouselPreviewCardBoundsMatchDwmBoundsForWideAndTallSources()
+    {
+        var wide = Window("Wide");
+        var tall = Window("Tall");
+        var sourceSizes = new Dictionary<Guid, PreviewImageSize>
+        {
+            [wide.Id] = new(1600, 900),
+            [tall.Id] = new(600, 1200)
+        };
+
+        var cards = CarouselPresentation.Layout([wide, tall], sourceSizes, 1920, 1080, 1800, 680, 72,
+            selectedWindowId: tall.Id);
+
+        foreach (var card in cards)
+        {
+            var cardRelativeBounds = card.PreviewCardBounds;
+            Assert.Equal(card.PreviewBounds.X, card.CardBounds.X + cardRelativeBounds.X, 6);
+            Assert.Equal(card.PreviewBounds.Y, card.CardBounds.Y + cardRelativeBounds.Y, 6);
+            Assert.Equal(card.PreviewBounds.Width, cardRelativeBounds.Width, 6);
+            Assert.Equal(card.PreviewBounds.Height, cardRelativeBounds.Height, 6);
+            var sourceSize = sourceSizes[card.WindowId];
+            Assert.Equal((double)sourceSize.Width / sourceSize.Height,
+                cardRelativeBounds.Width / cardRelativeBounds.Height, 6);
+        }
+    }
+
+    [Fact]
     public void PopupCenteringUsesMonitorDpiAndKeepsNegativeCoordinates()
     {
         var position = PopupPlacement.Center(new(-1920, -120, 1920, 1080), 400, 200, 144);
 
         Assert.Equal(new PixelPoint(-1260, 270), position);
+    }
+
+    [Fact]
+    public void PopupMonitorRetainsFullBoundsAndConvertsOverlaySizeAtMonitorDpi()
+    {
+        var monitorBounds = new ContractPixelRect(-2560, -200, 2560, 1440);
+        var workArea = new ContractPixelRect(-2560, -160, 2560, 1400);
+        var monitor = new MonitorInfo(Guid.NewGuid(), "High DPI", monitorBounds, workArea, 144);
+
+        var popupMonitor = PopupPlacement.FromSnapshot([monitor], monitor.Id);
+
+        Assert.NotNull(popupMonitor);
+        Assert.Equal(monitorBounds, popupMonitor.Value.MonitorBounds);
+        Assert.Equal(workArea, popupMonitor.Value.WorkArea);
+        var size = PopupPlacement.MonitorSize(popupMonitor.Value);
+        Assert.Equal(2560d / 1.5, size.Width, 6);
+        Assert.Equal(1440d / 1.5, size.Height, 6);
     }
 
     [Fact]

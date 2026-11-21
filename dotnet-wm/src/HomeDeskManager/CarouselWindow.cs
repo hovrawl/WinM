@@ -1,29 +1,44 @@
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
+using Avalonia.Threading;
 using HomeDesk.Client;
 using HomeDesk.Contracts;
-using HomeDesk.Windows;
+using System.Runtime.InteropServices;
 using ContractPixelRect = HomeDesk.Contracts.PixelRect;
 
 namespace HomeDeskManager;
 
 internal sealed class CarouselWindow : Window
 {
+    private static readonly SolidColorBrush OverlayShade = new(Color.FromArgb(128, 0, 0, 0));
+    private static readonly SolidColorBrush OverlayText = new(Color.Parse("#F7F7F7"));
+    private static readonly SolidColorBrush OverlayMutedText = new(Color.Parse("#D6D6D6"));
+
     private readonly Func<IReadOnlyList<Guid>, CancellationToken, Task<PreviewTargetsResult>> queryPreviewTargets;
     private readonly Func<Guid, Task<CommandResult>> focusWindow;
     private readonly Canvas root = new() { ClipToBounds = true };
     private readonly Canvas cardsHost = new() { ClipToBounds = true };
+    private readonly Border shade = new() { Background = OverlayShade, IsHitTestVisible = false };
     private readonly TextBlock status = new();
-    private readonly Dictionary<Guid, DwmThumbnailSourceSize> sourceSizes = [];
+    private readonly Dictionary<Guid, PreviewImageSize> sourceSizes = [];
+    private readonly Dictionary<Guid, OwnedPreviewFrame> previewFrames = [];
+    private readonly Dictionary<Guid, string> previewFailures = [];
+    private readonly Dictionary<Guid, WindowPreviewTarget> previewTargets = [];
+    private readonly Dictionary<Guid, CardVisual> cardVisuals = [];
     private readonly CarouselState state = new();
+    private readonly CarouselScrollMotion scrollMotion = new();
+    private readonly DispatcherTimer scrollAnimationTimer = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private IReadOnlyList<WindowInfo> candidates = [];
     private ManagerSnapshot? snapshot;
     private PopupMonitor? placement;
-    private DwmThumbnailRenderer? renderer;
+    private WindowPreviewCapture? previewCapture;
     private double workAreaWidth;
     private double workAreaHeight;
     private double viewportLeft;
@@ -31,30 +46,40 @@ internal sealed class CarouselWindow : Window
     private double viewportWidth;
     private double viewportHeight;
     private bool managerConnected;
+    private bool previewLookupPending;
     private CancellationTokenSource? openCancellation;
+    private long lastScrollTick;
 
     public CarouselWindow(Func<IReadOnlyList<Guid>, CancellationToken, Task<PreviewTargetsResult>> queryPreviewTargets,
         Func<Guid, Task<CommandResult>> focusWindow)
     {
         this.queryPreviewTargets = queryPreviewTargets;
         this.focusWindow = focusWindow;
-        Title = "Live preview carousel experiment";
+        Title = "Window preview carousel";
         WindowStartupLocation = WindowStartupLocation.Manual;
         WindowDecorations = WindowDecorations.None;
         ShowInTaskbar = false;
         CanResize = false;
-        Background = SwitcherTheme.Canvas;
+        TransparencyLevelHint = [WindowTransparencyLevel.Transparent];
+        Background = Brushes.Transparent;
         Content = root;
+        Canvas.SetLeft(status, 28);
+        status.Foreground = OverlayMutedText;
+        status.TextWrapping = TextWrapping.NoWrap;
+        root.Children.Add(shade);
+        root.Children.Add(cardsHost);
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
+        scrollAnimationTimer.Tick += OnScrollAnimationTick;
         Deactivated += (_, _) =>
         {
             if (IsVisible) HideCarousel();
         };
         Closed += (_, _) =>
         {
+            StopScrollMotion();
             state.CloseExternally();
             CancelPreviewLookup();
-            ReleaseThumbnails();
+            ReleasePreviewCapture();
         };
     }
 
@@ -67,8 +92,9 @@ internal sealed class CarouselWindow : Window
             return;
         }
 
+        StopScrollMotion();
         CancelPreviewLookup();
-        ReleaseThumbnails();
+        StartPreviewCapture();
         state.CloseExternally();
         var cancellation = new CancellationTokenSource();
         openCancellation = cancellation;
@@ -78,7 +104,7 @@ internal sealed class CarouselWindow : Window
         var workspace = snapshot.Workspaces?.FirstOrDefault(candidate => candidate.Id == workspaceId);
         candidates = SpatialSwitcherPresentation.WindowsForWorkspace(workspace, snapshot.Desktop.Windows);
         state.BeginOpen(context, candidates);
-        sourceSizes.Clear();
+        previewLookupPending = managerConnected && candidates.Any(window => window.Visible && !window.Minimized);
         ConfigurePlacement();
         var selectedIndex = state.SelectedWindowId is { } selected
             ? Array.FindIndex(candidates.ToArray(), window => window.Id == selected)
@@ -92,18 +118,9 @@ internal sealed class CarouselWindow : Window
         Activate();
         if (!state.MarkOpen()) return;
 
-        var platformHandle = TryGetPlatformHandle()?.Handle ?? 0;
-        if (platformHandle == 0)
-        {
-            status.Text = "The preview destination window handle is unavailable.";
-            CancelPreviewLookup();
-            return;
-        }
-
-        renderer = new DwmThumbnailRenderer(platformHandle);
         try
         {
-            await BindPreviewsAsync(cancellation.Token);
+            await BindPreviewsAsync(cancellation.Token, beginSnapshotBatch: true);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -150,6 +167,7 @@ internal sealed class CarouselWindow : Window
 
         var nextCandidates = SpatialSwitcherPresentation.WindowsForWorkspace(workspace, nextSnapshot.Desktop.Windows);
         var candidatesChanged = !candidates.SequenceEqual(nextCandidates);
+        if (candidatesChanged) StopScrollMotion();
         var previousSelection = state.SelectedWindowId;
         snapshot = nextSnapshot;
         managerConnected = connected;
@@ -164,7 +182,12 @@ internal sealed class CarouselWindow : Window
 
         var placementChanged = placement != nextPlacement;
         placement = nextPlacement;
-        if (placementChanged) ConfigurePlacement();
+        if (placementChanged)
+        {
+            StopScrollMotion();
+            ConfigurePlacement();
+        }
+
         var maximumOffset = CarouselPresentation.MaximumScrollOffset(candidates.Count, workAreaWidth, viewportWidth);
         state.ClampOffset(maximumOffset);
         if (candidatesChanged || previousSelection != state.SelectedWindowId)
@@ -173,13 +196,11 @@ internal sealed class CarouselWindow : Window
         if (candidatesChanged)
         {
             CancelPreviewLookup();
-            foreach (var windowId in sourceSizes.Keys.ToArray()) renderer?.Release(windowId);
-            sourceSizes.Clear();
             using var cancellation = new CancellationTokenSource();
             openCancellation = cancellation;
             try
             {
-                await BindPreviewsAsync(cancellation.Token);
+                await BindPreviewsAsync(cancellation.Token, beginSnapshotBatch: false);
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
             {
@@ -211,57 +232,74 @@ internal sealed class CarouselWindow : Window
 
     public void PrepareForShutdown()
     {
+        StopScrollMotion();
         CancelPreviewLookup();
-        ReleaseThumbnails();
+        ReleasePreviewCapture();
         state.CloseExternally();
         if (IsVisible) Close();
     }
 
     public void Dismiss() => HideCarousel();
 
+    public void AcceptSelection() => _ = AcceptSelectionAsync();
+
     public void CancelSelection() => _ = CancelAsync();
 
     public void ScrollBy(double horizontalDelta)
     {
         if (!double.IsFinite(horizontalDelta) || horizontalDelta == 0) return;
-        var maximumOffset = CarouselPresentation.MaximumScrollOffset(candidates.Count, workAreaWidth, viewportWidth);
-        var pixels = horizontalDelta * workAreaWidth * 1.8;
-        if (state.ScrollBy(pixels, maximumOffset, CarouselPresentation.CardStride(workAreaWidth),
-                CarouselPresentation.CardWidth(workAreaWidth), viewportWidth))
-            RenderCards();
+        scrollMotion.AddInput(horizontalDelta * workAreaWidth * 1.8);
+        if (scrollAnimationTimer.IsEnabled) return;
+        lastScrollTick = Stopwatch.GetTimestamp();
+        scrollAnimationTimer.Start();
     }
 
     private void ConfigurePlacement()
     {
         var target = placement ?? PopupPlacement.FromSnapshot(snapshot!.Desktop.Monitors,
-            SpatialSwitcherPresentation.CaptureContext(snapshot).MonitorId);
+                SpatialSwitcherPresentation.CaptureContext(snapshot).MonitorId) ??
+            new PopupMonitor(null, new ContractPixelRect(0, 0, 1280, 800), 96,
+                new ContractPixelRect(0, 0, 1280, 800));
         placement = target;
-        var scale = (target?.Dpi ?? 96u) / 96d;
-        var workArea = target?.WorkArea ?? snapshot!.Desktop.Monitors.FirstOrDefault()?.WorkArea ??
-            new ContractPixelRect(0, 0, 1280, 800);
-        workAreaWidth = Math.Max(1, workArea.Width / scale);
-        workAreaHeight = Math.Max(1, workArea.Height / scale);
-        Width = Math.Min(workAreaWidth, Math.Max(480, workAreaWidth * 0.96));
-        var previewHeight = workAreaHeight / 2;
-        Height = Math.Min(workAreaHeight * 0.92, previewHeight + 196);
+        var scale = target.Dpi / 96d;
+        workAreaWidth = Math.Max(1, target.MonitorBounds.Width / scale);
+        workAreaHeight = Math.Max(1, target.MonitorBounds.Height / scale);
+        Width = workAreaWidth;
+        Height = workAreaHeight;
         MinWidth = Math.Min(480, Width);
         MinHeight = Math.Min(420, Height);
         viewportLeft = 28;
         viewportTop = 90;
         viewportWidth = Math.Max(0, Width - viewportLeft * 2);
         viewportHeight = Math.Max(0, Height - viewportTop - 78);
-        PopupPlacement.Place(this, target);
+        root.Width = Width;
+        root.Height = Height;
+        shade.Width = Width;
+        shade.Height = Height;
+        cardsHost.Width = viewportWidth;
+        cardsHost.Height = viewportHeight;
+        Canvas.SetLeft(cardsHost, viewportLeft);
+        Canvas.SetTop(cardsHost, viewportTop);
+        Canvas.SetTop(status, Height - 48);
+        PopupPlacement.CoverMonitor(this, target);
     }
 
-    private async Task BindPreviewsAsync(CancellationToken cancellationToken)
+    private async Task BindPreviewsAsync(CancellationToken cancellationToken, bool beginSnapshotBatch)
     {
         var ids = candidates.Where(window => window.Visible && !window.Minimized)
             .Select(window => window.Id).ToArray();
-        if (!managerConnected || ids.Length == 0 || renderer is null)
+        previewLookupPending = true;
+        if (!managerConnected || ids.Length == 0 || previewCapture is null)
         {
+            previewLookupPending = false;
+            previewTargets.Clear();
+            previewCapture?.SetTargets([]);
+            SyncPreviewCache();
+            if (beginSnapshotBatch) previewCapture?.BeginSnapshotBatch([]);
+            else previewCapture?.UpdateSnapshotOrder([]);
             status.Text = candidates.Count == 0
                 ? "The captured workspace has no eligible windows."
-                : "No live preview targets are available.";
+                : "No snapshot targets are available.";
             return;
         }
 
@@ -279,89 +317,129 @@ internal sealed class CarouselWindow : Window
             catch (Exception error) when (error is IOException or InvalidOperationException or
                                               HomeDeskRemoteException or HomeDeskProtocolException)
             {
-                status.Text = $"Live preview lookup failed · {error.Message}";
+                var candidateIds = ids.ToHashSet();
+                foreach (var staleId in previewTargets.Keys.Where(id => !candidateIds.Contains(id)).ToArray())
+                    previewTargets.Remove(staleId);
+                SyncPreviewCache();
+                previewLookupPending = false;
+                status.Text = $"Snapshot target lookup failed · {error.Message}";
+                if (IsVisible) RenderCards();
                 return;
             }
         }
 
-        foreach (var target in liveTargets)
-        {
-            if (renderer.TryBind(target, out var size, out _)) sourceSizes[target.WindowId] = size;
-            else failed.Add(target.WindowId);
-        }
+        previewTargets.Clear();
+        foreach (var target in liveTargets) previewTargets[target.WindowId] = target;
+        previewCapture.SetTargets(liveTargets);
+        SyncPreviewCache();
+        previewLookupPending = false;
+        var captureOrder = GetSnapshotCaptureOrder();
+        if (beginSnapshotBatch) previewCapture.BeginSnapshotBatch(captureOrder);
+        else previewCapture.UpdateSnapshotOrder(captureOrder);
 
         status.Text = failed.Count == 0
-            ? $"DWM preview experiment · {sourceSizes.Count} live previews · Esc cancels"
-            : $"DWM preview experiment · {sourceSizes.Count} live previews · {failed.Count} placeholders";
+            ? $"Window snapshots · {previewTargets.Count} targets · Esc cancels"
+            : $"Window snapshots · {previewTargets.Count} targets · {failed.Count} unavailable";
+        if (IsVisible) RenderCards();
+    }
+
+    private void SyncPreviewCache()
+    {
+        var targetIds = previewTargets.Keys.ToHashSet();
+        foreach (var id in previewFrames.Keys.Where(id => !targetIds.Contains(id)).ToArray())
+            previewFrames.Remove(id);
+        foreach (var id in previewFailures.Keys.Where(id => !targetIds.Contains(id)).ToArray())
+            previewFailures.Remove(id);
+        sourceSizes.Clear();
+
+        if (previewCapture is null) return;
+        foreach (var pair in previewCapture.LatestFrames)
+        {
+            if (!targetIds.Contains(pair.Key)) continue;
+            previewFrames[pair.Key] = pair.Value;
+            sourceSizes[pair.Key] = new PreviewImageSize(pair.Value.Width, pair.Value.Height);
+        }
+
+        foreach (var pair in previewCapture.LatestFailures)
+        {
+            if (targetIds.Contains(pair.Key)) previewFailures[pair.Key] = pair.Value;
+        }
     }
 
     private void RenderCards()
     {
-        root.Children.Clear();
         root.Width = Width;
         root.Height = Height;
-        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        header.Children.Add(SwitcherTheme.Heading("Live preview carousel", 20));
-        header.Children.Add(SwitcherTheme.Caption("DWM experiment · applications remain in their normal positions"));
-        Canvas.SetLeft(header, 28);
-        Canvas.SetTop(header, 26);
-        root.Children.Add(header);
-
-        cardsHost.Children.Clear();
+        shade.Width = Width;
+        shade.Height = Height;
         cardsHost.Width = viewportWidth;
         cardsHost.Height = viewportHeight;
         var layouts = CarouselPresentation.Layout(candidates, sourceSizes, workAreaWidth, workAreaHeight,
-            viewportWidth, viewportHeight, state.HorizontalOffset);
+            viewportWidth, viewportHeight, state.HorizontalOffset, selectedWindowId: state.SelectedWindowId);
+        var activeWindowIds = layouts.Select(layout => layout.WindowId).ToHashSet();
+        foreach (var staleWindowId in cardVisuals.Keys.Where(windowId => !activeWindowIds.Contains(windowId)).ToArray())
+        {
+            var staleVisual = cardVisuals[staleWindowId];
+            cardsHost.Children.Remove(staleVisual.Button);
+            cardVisuals.Remove(staleWindowId);
+            staleVisual.Dispose();
+        }
+
         foreach (var layout in layouts)
         {
             var window = candidates.First(candidate => candidate.Id == layout.WindowId);
             var isSelected = layout.WindowId == state.SelectedWindowId;
-            var card = CreateCard(window, layout, isSelected);
-            Canvas.SetLeft(card, layout.CardBounds.X);
-            Canvas.SetTop(card, layout.CardBounds.Y);
-            cardsHost.Children.Add(card);
-            if (!sourceSizes.ContainsKey(layout.WindowId)) continue;
-            var sourceSize = sourceSizes[layout.WindowId];
-            if (!CarouselPresentation.TryClipPreview(layout.PreviewBounds,
-                    new Rect(0, 0, viewportWidth, viewportHeight), sourceSize, out var clip))
+            previewFrames.TryGetValue(layout.WindowId, out var frame);
+            var hasLivePreview = frame is not null;
+            var previewMessage = frame is not null ? null : GetPreviewMessage(window, layout.WindowId);
+            var title = string.IsNullOrWhiteSpace(window.Title) ? window.ProcessName : window.Title;
+            var key = new CardPresentationKey(title, window.ProcessName, window.Minimized, isSelected,
+                hasLivePreview, previewMessage, layout.CardBounds.Width, layout.CardBounds.Height);
+            if (!cardVisuals.TryGetValue(layout.WindowId, out var visual) || visual.Key != key)
             {
-                renderer?.TryUpdate(layout.WindowId, new ContractPixelRect(0, 0, 1, 1), visible: false);
-                continue;
+                if (visual is not null)
+                {
+                    cardsHost.Children.Remove(visual.Button);
+                    visual.Dispose();
+                }
+
+                visual = CreateCard(window, layout, isSelected, frame, previewMessage, key);
+                cardVisuals[layout.WindowId] = visual;
+                cardsHost.Children.Add(visual.Button);
+            }
+            else
+            {
+                visual.UpdateFrame(frame);
             }
 
-            var scaling = RenderScaling;
-            var destination = new ContractPixelRect(
-                (int)Math.Round((viewportLeft + clip.DestinationBounds.X) * scaling),
-                (int)Math.Round((viewportTop + clip.DestinationBounds.Y) * scaling),
-                Math.Max(1, (int)Math.Round(clip.DestinationBounds.Width * scaling)),
-                Math.Max(1, (int)Math.Round(clip.DestinationBounds.Height * scaling)));
-            renderer?.TryUpdate(layout.WindowId, destination, sourceRectangle: clip.SourceBounds);
+            var previewBounds = layout.PreviewCardBounds;
+            var borderSize = isSelected ? 2 : 0;
+            visual.Preview.Width = previewBounds.Width;
+            visual.Preview.Height = previewBounds.Height;
+            Canvas.SetLeft(visual.Preview, previewBounds.X - borderSize);
+            Canvas.SetTop(visual.Preview, previewBounds.Y - borderSize);
+            Canvas.SetLeft(visual.Button, layout.CardBounds.X);
+            Canvas.SetTop(visual.Button, layout.CardBounds.Y);
         }
-
-        Canvas.SetLeft(cardsHost, viewportLeft);
-        Canvas.SetTop(cardsHost, viewportTop);
-        root.Children.Add(cardsHost);
-        status.Foreground = SwitcherTheme.MutedText;
-        status.TextWrapping = TextWrapping.NoWrap;
-        Canvas.SetLeft(status, 28);
-        Canvas.SetTop(status, Height - 48);
-        root.Children.Add(status);
     }
 
-    private Button CreateCard(WindowInfo window, CarouselCardLayout layout, bool selected)
+    private CardVisual CreateCard(WindowInfo window, CarouselCardLayout layout, bool selected,
+        OwnedPreviewFrame? frame, string? previewMessage, CardPresentationKey key)
     {
+        var content = BuildCardContent(window, layout, selected, frame, previewMessage, out var preview,
+            out var previewBitmap);
         var card = new Button
         {
             Width = layout.CardBounds.Width,
             Height = layout.CardBounds.Height,
-            Padding = new Thickness(12),
-            Background = selected ? SwitcherTheme.AccentSoft : SwitcherTheme.Surface,
-            BorderBrush = selected ? SwitcherTheme.Accent : SwitcherTheme.Border,
-            BorderThickness = new Thickness(selected ? 2 : 1),
+            Padding = new Thickness(0),
+            Background = Brushes.Transparent,
+            BorderBrush = selected ? SwitcherTheme.Accent : Brushes.Transparent,
+            BorderThickness = new Thickness(selected ? 2 : 0),
             CornerRadius = new CornerRadius(10),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch,
-            Content = BuildCardContent(window, layout)
+            Content = content
         };
         card.Click += async (_, _) =>
         {
@@ -369,38 +447,141 @@ internal sealed class CarouselWindow : Window
             RenderCards();
             await AcceptSelectionAsync();
         };
-        return card;
+        return new CardVisual(window.Id, card, preview, previewBitmap, frame, key);
     }
 
-    private Control BuildCardContent(WindowInfo window, CarouselCardLayout layout)
+    private Control BuildCardContent(WindowInfo window, CarouselCardLayout layout, bool selected,
+        OwnedPreviewFrame? frame, string? previewMessage, out Border preview, out Bitmap? previewBitmap)
     {
-        var panel = new StackPanel { Spacing = 5 };
+        var borderSize = selected ? 2 : 0;
+        var contentWidth = Math.Max(1, layout.CardBounds.Width - borderSize * 2);
+        var contentHeight = Math.Max(1, layout.CardBounds.Height - borderSize * 2);
+        var panel = new Canvas { Width = contentWidth, Height = contentHeight };
         var title = new TextBlock
         {
             Text = string.IsNullOrWhiteSpace(window.Title) ? window.ProcessName : window.Title,
-            Foreground = SwitcherTheme.Text,
+            Foreground = OverlayText,
             FontWeight = FontWeight.SemiBold,
             TextTrimming = TextTrimming.CharacterEllipsis,
-            MaxWidth = layout.CardBounds.Width - 24
+            MaxWidth = Math.Max(1, contentWidth - 24)
         };
+        Canvas.SetLeft(title, 12);
+        Canvas.SetTop(title, 8);
         panel.Children.Add(title);
-        panel.Children.Add(SwitcherTheme.Caption(window.ProcessName));
-        var preview = new Border
+        var processName = OverlayCaption(window.ProcessName);
+        Canvas.SetLeft(processName, 12);
+        Canvas.SetTop(processName, 30);
+        panel.Children.Add(processName);
+        var previewBounds = layout.PreviewCardBounds;
+        if (frame is not null)
         {
-            Width = Math.Max(1, layout.CardBounds.Width - 24),
-            Height = Math.Max(1, layout.CardBounds.Height - 82),
-            Background = SwitcherTheme.ShapeCanvas,
-            BorderBrush = SwitcherTheme.ShapeBorder,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(5),
-            Child = SwitcherTheme.Caption(sourceSizes.ContainsKey(window.Id)
-                ? "DWM thumbnail"
-                : window.Minimized
-                    ? "Live preview unavailable · Minimized"
-                    : "Live preview unavailable")
-        };
+            previewBitmap = CreateAvaloniaBitmap(frame, window.Id);
+            preview = CreatePreviewSurface(bitmap: previewBitmap);
+        }
+        else
+        {
+            previewBitmap = null;
+            var previewCaption = OverlayCaption(previewMessage ?? "Live preview unavailable");
+            preview = CreatePreviewSurface(previewCaption);
+        }
+
+        preview.Width = previewBounds.Width;
+        preview.Height = previewBounds.Height;
+        Canvas.SetLeft(preview, previewBounds.X - borderSize);
+        Canvas.SetTop(preview, previewBounds.Y - borderSize);
         panel.Children.Add(preview);
         return panel;
+    }
+
+    internal static Border CreatePreviewSurface(Control? content = null, Bitmap? bitmap = null) => new()
+    {
+        Background = bitmap is null ? Brushes.Transparent : new ImageBrush(bitmap) { Stretch = Stretch.Uniform },
+        BorderBrush = Brushes.Transparent,
+        BorderThickness = new Thickness(0),
+        CornerRadius = new CornerRadius(10),
+        ClipToBounds = true,
+        Child = content
+    };
+
+    private static WriteableBitmap CreateAvaloniaBitmap(OwnedPreviewFrame frame, Guid windowId)
+    {
+        var timer = Stopwatch.StartNew();
+        var bitmap = new WriteableBitmap(new PixelSize(frame.Width, frame.Height), new Vector(96, 96),
+            PixelFormat.Bgra8888, AlphaFormat.Premul);
+        var pixels = frame.PixelBytes.ToArray();
+        var rowLength = checked(frame.Width * 4);
+        using var framebuffer = bitmap.Lock();
+        for (var row = 0; row < frame.Height; row++)
+            Marshal.Copy(pixels, row * rowLength, IntPtr.Add(framebuffer.Address, row * framebuffer.RowBytes),
+                rowLength);
+
+        timer.Stop();
+        PreviewCaptureDiagnostics.Default.RecordUiHandoff(windowId, timer.Elapsed.TotalMilliseconds);
+        return bitmap;
+    }
+
+    private string GetPreviewMessage(WindowInfo window, Guid windowId)
+    {
+        if (window.Minimized) return "Snapshot unavailable · Minimized";
+        if (!previewTargets.ContainsKey(windowId))
+            return previewLookupPending ? "Finding snapshot target…" : "Snapshot unavailable";
+        return previewFailures.TryGetValue(windowId, out var failure)
+            ? $"Snapshot unavailable · {failure}"
+            : "Loading window snapshot…";
+    }
+
+    private static TextBlock OverlayCaption(string text)
+    {
+        var caption = SwitcherTheme.Caption(text);
+        caption.Foreground = OverlayMutedText;
+        return caption;
+    }
+
+    private IReadOnlyList<Guid> GetSnapshotCaptureOrder()
+    {
+        var layouts = CarouselPresentation.Layout(candidates, sourceSizes, workAreaWidth, workAreaHeight,
+            viewportWidth, viewportHeight, state.HorizontalOffset, selectedWindowId: state.SelectedWindowId);
+        var visibleTargets = layouts.Where(layout => layout.PreviewBounds.Right > 0 &&
+                                                     layout.PreviewBounds.Bottom > 0 &&
+                                                     layout.PreviewBounds.Left < viewportWidth &&
+                                                     layout.PreviewBounds.Top < viewportHeight)
+            .OrderBy(layout => Math.Abs(layout.PreviewBounds.Center.X - viewportWidth / 2))
+            .Select(layout => layout.WindowId);
+        var selectedIndex = state.SelectedWindowId is { } selected
+            ? candidates.ToList().FindIndex(window => window.Id == selected)
+            : 0;
+        var remainingTargets = candidates.Select((window, index) => (window, index))
+            .OrderBy(item => Math.Abs(item.index - selectedIndex))
+            .Select(item => item.window.Id);
+        return visibleTargets.Concat(remainingTargets).Where(previewTargets.ContainsKey).Distinct().ToArray();
+    }
+
+    private void OnPreviewFrameChanged(object? sender, PreviewFrameChangedEventArgs args)
+    {
+        if (sender is not WindowPreviewCapture capture) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!IsVisible || !ReferenceEquals(previewCapture, capture)) return;
+            if (args.Frame is null)
+            {
+                if (args.Failure is null)
+                {
+                    previewFrames.Remove(args.WindowId);
+                    sourceSizes.Remove(args.WindowId);
+                    previewFailures.Remove(args.WindowId);
+                }
+            }
+            else
+            {
+                previewFrames[args.WindowId] = args.Frame;
+                sourceSizes[args.WindowId] = new PreviewImageSize(args.Frame.Width, args.Frame.Height);
+            }
+
+            if (args.Failure is null) previewFailures.Remove(args.WindowId);
+            else previewFailures[args.WindowId] = args.Failure;
+
+            RenderCards();
+        }, DispatcherPriority.Render);
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs args)
@@ -420,6 +601,7 @@ internal sealed class CarouselWindow : Window
         }
 
         if (args.Key is not (Key.Left or Key.Right) || candidates.Count == 0) return;
+        StopScrollMotion();
         var current = state.SelectedWindowId is { } id
             ? Array.FindIndex(candidates.ToArray(), window => window.Id == id)
             : -1;
@@ -433,6 +615,7 @@ internal sealed class CarouselWindow : Window
 
     private async Task AcceptSelectionAsync()
     {
+        StopScrollMotion();
         var command = state.Accept();
         if (command?.WindowId is not { } id || !candidates.Any(window => window.Id == id)) return;
         try
@@ -458,6 +641,7 @@ internal sealed class CarouselWindow : Window
 
     private async Task CancelAsync()
     {
+        StopScrollMotion();
         if (state.Cancel() is { } original && managerConnected &&
             snapshot?.Desktop.Windows.Any(window => window.Id == original) == true)
         {
@@ -476,10 +660,48 @@ internal sealed class CarouselWindow : Window
 
     private void HideCarousel()
     {
+        StopScrollMotion();
         state.CloseExternally();
         CancelPreviewLookup();
-        ReleaseThumbnails();
+        previewCapture?.Pause();
+        ClearPreviewPresentation();
         if (IsVisible) Hide();
+    }
+
+    private void OnScrollAnimationTick(object? sender, EventArgs args)
+    {
+        if (!IsVisible || state.Lifecycle != CarouselLifecycleState.Open)
+        {
+            StopScrollMotion();
+            return;
+        }
+
+        var now = Stopwatch.GetTimestamp();
+        var elapsed = Stopwatch.GetElapsedTime(lastScrollTick, now).TotalSeconds;
+        lastScrollTick = now;
+        var delta = scrollMotion.Advance(elapsed);
+        if (delta != 0)
+        {
+            var maximumOffset = CarouselPresentation.MaximumScrollOffset(candidates.Count, workAreaWidth,
+                viewportWidth);
+            if (!state.ScrollBy(delta, maximumOffset, CarouselPresentation.CardStride(workAreaWidth),
+                    CarouselPresentation.CardWidth(workAreaWidth), viewportWidth))
+            {
+                StopScrollMotion();
+                return;
+            }
+
+            RenderCards();
+        }
+
+        if (!scrollMotion.IsActive) scrollAnimationTimer.Stop();
+    }
+
+    private void StopScrollMotion()
+    {
+        scrollAnimationTimer.Stop();
+        scrollMotion.Stop();
+        lastScrollTick = 0;
     }
 
     private void CancelPreviewLookup()
@@ -490,9 +712,88 @@ internal sealed class CarouselWindow : Window
         cancellation.Dispose();
     }
 
-    private void ReleaseThumbnails()
+    private void StartPreviewCapture()
     {
-        renderer?.Dispose();
-        renderer = null;
+        if (previewCapture is null)
+        {
+            previewCapture = new WindowPreviewCapture();
+            previewCapture.FrameChanged += OnPreviewFrameChanged;
+        }
+
+        previewCapture.Pause();
+        ClearPreviewPresentation();
+    }
+
+    private void ReleasePreviewCapture()
+    {
+        if (previewCapture is { } capture)
+        {
+            previewCapture = null;
+            capture.FrameChanged -= OnPreviewFrameChanged;
+            capture.Dispose();
+        }
+
+        ClearPreviewPresentation();
+    }
+
+    private void ClearPreviewPresentation()
+    {
+        foreach (var visual in cardVisuals.Values)
+        {
+            cardsHost.Children.Remove(visual.Button);
+            visual.Dispose();
+        }
+
+        cardVisuals.Clear();
+        previewTargets.Clear();
+        previewFrames.Clear();
+        previewFailures.Clear();
+        sourceSizes.Clear();
+        previewLookupPending = false;
+    }
+
+    private readonly record struct CardPresentationKey(
+        string Title,
+        string ProcessName,
+        bool Minimized,
+        bool Selected,
+        bool HasLivePreview,
+        string? PreviewMessage,
+        double Width,
+        double Height);
+
+    private sealed class CardVisual(
+        Guid windowId,
+        Button button,
+        Border preview,
+        Bitmap? previewBitmap,
+        OwnedPreviewFrame? frame,
+        CardPresentationKey key) : IDisposable
+    {
+        public Button Button { get; } = button;
+        public Border Preview { get; } = preview;
+        public CardPresentationKey Key { get; } = key;
+        private OwnedPreviewFrame? CurrentFrame { get; set; } = frame;
+        private Bitmap? PreviewBitmap { get; set; } = previewBitmap;
+
+        public void UpdateFrame(OwnedPreviewFrame? nextFrame)
+        {
+            if (ReferenceEquals(CurrentFrame, nextFrame)) return;
+            var previous = PreviewBitmap;
+            PreviewBitmap = nextFrame is null ? null : CreateAvaloniaBitmap(nextFrame, windowId);
+            Preview.Background = PreviewBitmap is null
+                ? Brushes.Transparent
+                : new ImageBrush(PreviewBitmap) { Stretch = Stretch.Uniform };
+            CurrentFrame = nextFrame;
+            previous?.Dispose();
+        }
+
+        public void Dispose()
+        {
+            var bitmap = PreviewBitmap;
+            PreviewBitmap = null;
+            Preview.Background = Brushes.Transparent;
+            bitmap?.Dispose();
+        }
     }
 }

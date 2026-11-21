@@ -1,13 +1,17 @@
 using Avalonia;
 using HomeDesk.Contracts;
-using HomeDesk.Windows;
 using ContractPixelRect = HomeDesk.Contracts.PixelRect;
 
 namespace HomeDeskManager;
 
-public readonly record struct CarouselCardLayout(Guid WindowId, Rect CardBounds, Rect PreviewBounds);
+public readonly record struct CarouselCardLayout(Guid WindowId, Rect CardBounds, Rect PreviewBounds)
+{
+    public Rect PreviewCardBounds => new(PreviewBounds.X - CardBounds.X, PreviewBounds.Y - CardBounds.Y,
+        PreviewBounds.Width, PreviewBounds.Height);
+}
 
 public readonly record struct CarouselPreviewClip(Rect DestinationBounds, ContractPixelRect SourceBounds);
+public readonly record struct PreviewImageSize(int Width, int Height);
 
 public static class CarouselPresentation
 {
@@ -29,13 +33,16 @@ public static class CarouselPresentation
         if (cardCount < 0 || !double.IsFinite(viewportWidth) || viewportWidth < 0)
             throw new ArgumentOutOfRangeException(nameof(cardCount));
         if (cardCount == 0) return 0;
-        var contentWidth = (cardCount - 1) * CardStride(workAreaWidth, spacing) + CardWidth(workAreaWidth);
+        var cardWidth = CardWidth(workAreaWidth);
+        var leadingInset = Math.Max(0, (viewportWidth - cardWidth) / 2);
+        var contentWidth = (cardCount - 1) * CardStride(workAreaWidth, spacing) + cardWidth + leadingInset * 2;
         return Math.Max(0, contentWidth - viewportWidth);
     }
 
     public static IReadOnlyList<CarouselCardLayout> Layout(IReadOnlyList<WindowInfo> windows,
-        IReadOnlyDictionary<Guid, DwmThumbnailSourceSize> sourceSizes, double workAreaWidth, double workAreaHeight,
-        double viewportWidth, double viewportHeight, double horizontalOffset = 0, double spacing = 24)
+        IReadOnlyDictionary<Guid, PreviewImageSize> sourceSizes, double workAreaWidth, double workAreaHeight,
+        double viewportWidth, double viewportHeight, double horizontalOffset = 0, double spacing = 24,
+        Guid? selectedWindowId = null)
     {
         ArgumentNullException.ThrowIfNull(windows);
         ArgumentNullException.ThrowIfNull(sourceSizes);
@@ -49,29 +56,41 @@ public static class CarouselPresentation
         var cardWidth = maximumPreviewWidth + 32;
         var cardHeight = maximumPreviewHeight + 88;
         var top = Math.Max(0, (viewportHeight - cardHeight) / 2);
+        var leadingInset = Math.Max(0, (viewportWidth - cardWidth) / 2);
+        var hasSelection = selectedWindowId is { } selectedId && windows.Any(window => window.Id == selectedId);
         var layouts = new CarouselCardLayout[windows.Count];
         for (var index = 0; index < windows.Count; index++)
         {
             var window = windows[index];
             var sourceSize = sourceSizes.TryGetValue(window.Id, out var liveSize)
                 ? liveSize
-                : new DwmThumbnailSourceSize(window.Bounds.Width, window.Bounds.Height);
+                : new PreviewImageSize(window.Bounds.Width, window.Bounds.Height);
             var sourceWidth = Math.Max(1, sourceSize.Width);
             var sourceHeight = Math.Max(1, sourceSize.Height);
             var scale = Math.Min(maximumPreviewWidth / sourceWidth, maximumPreviewHeight / sourceHeight);
             var previewWidth = sourceWidth * scale;
             var previewHeight = sourceHeight * scale;
-            var x = index * (cardWidth + spacing) - horizontalOffset;
-            var card = new Rect(x, top, cardWidth, cardHeight);
-            var preview = new Rect(x + (cardWidth - previewWidth) / 2,
-                top + 48 + (maximumPreviewHeight - previewHeight) / 2, previewWidth, previewHeight);
+            var x = leadingInset + index * (cardWidth + spacing) - horizontalOffset;
+            var cardCenterX = x + cardWidth / 2;
+            var cardCenterY = top + cardHeight / 2;
+            var cardScale = hasSelection ? window.Id == selectedWindowId ? 1.08 : 0.96 : 1;
+            var scaledCardWidth = cardWidth * cardScale;
+            var scaledCardHeight = cardHeight * cardScale;
+            var card = new Rect(cardCenterX - scaledCardWidth / 2, cardCenterY - scaledCardHeight / 2,
+                scaledCardWidth, scaledCardHeight);
+            var previewTop = top + 48 + (maximumPreviewHeight - previewHeight) / 2;
+            var previewCenterY = previewTop + previewHeight / 2;
+            var scaledPreviewWidth = previewWidth * cardScale;
+            var scaledPreviewHeight = previewHeight * cardScale;
+            var preview = new Rect(cardCenterX - scaledPreviewWidth / 2,
+                previewCenterY - scaledPreviewHeight / 2, scaledPreviewWidth, scaledPreviewHeight);
             layouts[index] = new CarouselCardLayout(window.Id, card, preview);
         }
 
         return layouts;
     }
 
-    public static bool TryClipPreview(Rect preview, Rect viewport, DwmThumbnailSourceSize sourceSize,
+    public static bool TryClipPreview(Rect preview, Rect viewport, PreviewImageSize sourceSize,
         out CarouselPreviewClip clip)
     {
         clip = default;

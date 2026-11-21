@@ -6,7 +6,8 @@ using ContractPixelRect = HomeDesk.Contracts.PixelRect;
 
 namespace HomeDeskManager;
 
-public readonly record struct PopupMonitor(Guid? MonitorId, ContractPixelRect WorkArea, uint Dpi);
+public readonly record struct PopupMonitor(Guid? MonitorId, ContractPixelRect WorkArea, uint Dpi,
+    ContractPixelRect MonitorBounds);
 
 public static class PopupPlacement
 {
@@ -26,6 +27,8 @@ public static class PopupPlacement
 
         var workArea = new ContractPixelRect(native.WorkArea.Left, native.WorkArea.Top,
             native.WorkArea.Right - native.WorkArea.Left, native.WorkArea.Bottom - native.WorkArea.Top);
+        var monitorBounds = new ContractPixelRect(native.Monitor.Left, native.Monitor.Top,
+            native.Monitor.Right - native.Monitor.Left, native.Monitor.Bottom - native.Monitor.Top);
         var matchingMonitor = monitors.FirstOrDefault(monitor =>
                                   string.Equals(monitor.DeviceName, native.DeviceName,
                                       StringComparison.OrdinalIgnoreCase)) ??
@@ -34,7 +37,7 @@ public static class PopupPlacement
                                   monitor.Bounds.Width == native.Monitor.Right - native.Monitor.Left &&
                                   monitor.Bounds.Height == native.Monitor.Bottom - native.Monitor.Top);
         var dpi = GetEffectiveDpi(handle);
-        return new PopupMonitor(matchingMonitor?.Id, workArea, dpi);
+        return new PopupMonitor(matchingMonitor?.Id, workArea, dpi, monitorBounds);
     }
 
     public static PopupMonitor? FromSnapshot(IReadOnlyList<MonitorInfo> monitors, Guid? preferredMonitorId = null)
@@ -47,7 +50,8 @@ public static class PopupPlacement
             .ThenBy(candidate => candidate.Id).FirstOrDefault();
         return monitor is null
             ? null
-            : new PopupMonitor(monitor.Id, monitor.WorkArea, monitor.Dpi == 0 ? 96u : monitor.Dpi);
+            : new PopupMonitor(monitor.Id, monitor.WorkArea, monitor.Dpi == 0 ? 96u : monitor.Dpi,
+                monitor.Bounds);
     }
 
     public static PixelPoint Center(ContractPixelRect workArea, double windowWidth, double windowHeight, uint dpi)
@@ -59,11 +63,28 @@ public static class PopupPlacement
             workArea.Y + (workArea.Height - height) / 2);
     }
 
+    public static Size MonitorSize(PopupMonitor monitor)
+    {
+        var scale = (monitor.Dpi == 0 ? 96u : monitor.Dpi) / 96d;
+        return new Size(Math.Max(0, monitor.MonitorBounds.Width) / scale,
+            Math.Max(0, monitor.MonitorBounds.Height) / scale);
+    }
+
     public static void Place(Window window, PopupMonitor? monitor)
     {
         if (monitor is not { } target) return;
         window.WindowStartupLocation = WindowStartupLocation.Manual;
         window.Position = Center(target.WorkArea, window.Width, window.Height, target.Dpi);
+    }
+
+    public static void CoverMonitor(Window window, PopupMonitor? monitor)
+    {
+        if (monitor is not { } target) return;
+        var size = MonitorSize(target);
+        window.WindowStartupLocation = WindowStartupLocation.Manual;
+        window.Width = size.Width;
+        window.Height = size.Height;
+        window.Position = new PixelPoint(target.MonitorBounds.X, target.MonitorBounds.Y);
     }
 
     private static uint GetEffectiveDpi(nint monitor)
