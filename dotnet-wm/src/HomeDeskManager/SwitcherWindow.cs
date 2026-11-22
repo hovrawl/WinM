@@ -67,7 +67,8 @@ internal sealed class SwitcherWindow : Window
         this.pipeName = pipeName;
         this.trayStatusChanged = trayStatusChanged;
         currentWorkspaceWindow = new CurrentWorkspaceWindow(FocusWindowAsync, QueryPreviewTargetsAsync);
-        carouselWindow = new CarouselWindow(QueryPreviewTargetsAsync, FocusWindowAsync);
+        carouselWindow = new CarouselWindow(QueryPreviewTargetsAsync, FocusWindowAsync, MinimizeWindowAsync,
+            RestoreWindowAsync);
         scrollAccumulator = new CarouselScrollAccumulator(action => Dispatcher.UIThread.Post(action), delta =>
         {
             if (carouselWindow.IsVisible) carouselWindow.ScrollBy(delta);
@@ -939,7 +940,8 @@ internal sealed class SwitcherWindow : Window
                 return;
             }
 
-            var action = SwitcherTouchpadPolicy.Route(gesture, input.Capability);
+            var action = SwitcherTouchpadPolicy.Route(gesture, input.Capability,
+                carouselWindow.IsPointerOverMinimizedRail);
             if (action is null) return;
             if (!connected || snapshot is null) return;
             if (action == CarouselGestureAction.Open)
@@ -948,6 +950,10 @@ internal sealed class SwitcherWindow : Window
             }
             else if (action == CarouselGestureAction.Accept && carouselWindow.IsVisible)
                 carouselWindow.AcceptSelection();
+            else if (action == CarouselGestureAction.MinimizeSelected && carouselWindow.IsVisible)
+                carouselWindow.MinimizeSelectedWindow();
+            else if (action == CarouselGestureAction.RestoreSelected && carouselWindow.IsVisible)
+                carouselWindow.RestoreSelectedWindow();
         });
     }
 
@@ -956,6 +962,23 @@ internal sealed class SwitcherWindow : Window
         if (!connected || session is not { } activeSession)
             throw new InvalidOperationException("The manager is disconnected. Reconnect before focusing a window.");
         return activeSession.ExecuteAsync(SpatialSwitcherPresentation.FocusCommand(windowId), lifetime.Token);
+    }
+
+    private Task<CommandResult> MinimizeWindowAsync(Guid windowId)
+    {
+        if (!connected || session is not { IsConnected: true } activeSession)
+            throw new InvalidOperationException("The manager is disconnected. Reconnect before minimizing a window.");
+        return activeSession.ExecuteAsync(new ManagerCommand(CommandKind.MinimizeWindow, WindowId: windowId),
+            lifetime.Token);
+    }
+
+    private Task<CommandResult> RestoreWindowAsync(Guid windowId, int restoreIndex)
+    {
+        if (!connected || session is not { IsConnected: true } activeSession)
+            throw new InvalidOperationException("The manager is disconnected. Reconnect before restoring a window.");
+        return activeSession.ExecuteAsync(
+            new ManagerCommand(CommandKind.RestoreWindow, WindowId: windowId, RestoreIndex: restoreIndex),
+            lifetime.Token);
     }
 
     private Task<PreviewTargetsResult> QueryPreviewTargetsAsync(IReadOnlyList<Guid> windowIds,

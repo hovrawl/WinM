@@ -357,6 +357,34 @@ public sealed class SpatialSwitcherTests
     }
 
     [Fact]
+    public void CarouselRestoreIndexTracksFirstMiddleAndLastSelectedMainWindow()
+    {
+        var workspaceId = Guid.NewGuid();
+        var first = Window("First");
+        var middle = Window("Middle");
+        var last = Window("Last");
+        var state = new CarouselState();
+        state.BeginOpen(new SwitcherContext(workspaceId, first.Id, first.MonitorId), [first, middle, last]);
+        state.MarkOpen();
+
+        Assert.Equal(0, state.SelectedIndex);
+        Assert.True(state.Select(middle.Id));
+        Assert.Equal(1, state.SelectedIndex);
+        Assert.True(state.Select(last.Id));
+        Assert.Equal(2, state.SelectedIndex);
+
+        state.CloseExternally();
+        state.BeginOpen(new SwitcherContext(workspaceId, Guid.NewGuid(), first.MonitorId), [first, middle, last]);
+        state.MarkOpen();
+        Assert.Equal(0, state.SelectedIndex);
+
+        state.CloseExternally();
+        state.BeginOpen(new SwitcherContext(workspaceId, null, first.MonitorId), []);
+        state.MarkOpen();
+        Assert.Equal(0, state.SelectedIndex);
+    }
+
+    [Fact]
     public void CarouselCancelAndExternalActivationNeverCreateAnAcceptanceCommand()
     {
         var original = Window("Original");
@@ -467,6 +495,119 @@ public sealed class SpatialSwitcherTests
 
         Assert.Null(SwitcherTouchpadPolicy.Route(
             new TouchpadGesture(TouchpadGestureKind.Swipe, 3, TouchpadSwipeDirection.Left, 0, 100), available));
+    }
+
+    [Theory]
+    [InlineData(TouchpadSwipeDirection.Down, false, "MinimizeSelected")]
+    [InlineData(TouchpadSwipeDirection.Up, true, "RestoreSelected")]
+    [InlineData(TouchpadSwipeDirection.Down, true, null)]
+    [InlineData(TouchpadSwipeDirection.Up, false, null)]
+    public void TwoFingerVerticalSwipesTargetTheFocusedRail(TouchpadSwipeDirection direction,
+        bool minimizedRailFocused, string? expected)
+    {
+        var capability = new TouchpadCapabilityResult(TouchpadCapabilityState.Available, 1, true, true, null);
+        var gesture = new TouchpadGesture(TouchpadGestureKind.Swipe, 2, direction, 0, 100);
+
+        var action = SwitcherTouchpadPolicy.Route(gesture, capability, minimizedRailFocused);
+
+        Assert.Equal(expected is null ? null : Enum.Parse<CarouselGestureAction>(expected), action);
+    }
+
+    [Fact]
+    public void CarouselSeparatesMinimizedWindowsAndUsesPointerRailBounds()
+    {
+        var visible = Window("Visible");
+        var minimized = Window("Minimized", minimized: true) with { MonitorId = visible.MonitorId };
+        var workspace = Workspace("Current", null) with
+        {
+            Active = true,
+            MonitorId = visible.MonitorId,
+            WindowIds = [visible.Id, minimized.Id]
+        };
+
+        var rails = CarouselRailPolicy.SplitCandidates(workspace, [visible, minimized]);
+        var minimizedBounds = new Rect(20, 100, 300, 60);
+
+        Assert.Equal([visible.Id], rails.Main.Select(window => window.Id));
+        Assert.Equal([minimized.Id], rails.Minimized.Select(window => window.Id));
+        Assert.Equal(CarouselRailTarget.Main,
+            CarouselRailPolicy.TargetForPointer(new Point(30, 90), minimizedBounds, true));
+        Assert.Equal(CarouselRailTarget.Minimized,
+            CarouselRailPolicy.TargetForPointer(new Point(30, 120), minimizedBounds, true));
+        Assert.Equal(CarouselRailTarget.Main,
+            CarouselRailPolicy.TargetForPointer(new Point(30, 120), minimizedBounds, false));
+    }
+
+    [Fact]
+    public void CarouselOrdersTilingWindowsBySplitTreeInsteadOfWorkspaceMembership()
+    {
+        var taskSlinger = Window("TaskSlinger");
+        var claude = Window("Claude");
+        var floating = Window("Floating", mode: WindowMode.Floating);
+        var workspace = Workspace("Current", null) with
+        {
+            WindowIds = [taskSlinger.Id, claude.Id, floating.Id]
+        };
+        var tree = SplitNode(claude.Id, taskSlinger.Id);
+
+        var rails = CarouselRailPolicy.SplitCandidates(workspace, [taskSlinger, claude, floating], tree);
+
+        Assert.Equal([claude.Id, taskSlinger.Id, floating.Id], rails.Main.Select(window => window.Id));
+    }
+
+    [Fact]
+    public void CarouselSnapshotReorderingPreservesSelectionByWindowId()
+    {
+        var first = Window("First");
+        var selected = Window("Selected");
+        var last = Window("Last");
+        var workspace = Workspace("Current", null) with { WindowIds = [last.Id, selected.Id, first.Id] };
+        var firstTree = SplitNode(first.Id, selected.Id, last.Id);
+        var nextTree = SplitNode(last.Id, selected.Id, first.Id);
+        var state = new CarouselState();
+        var firstRail = CarouselRailPolicy.SplitCandidates(workspace, [first, selected, last], firstTree).Main;
+        state.BeginOpen(new SwitcherContext(workspace.Id, first.Id, first.MonitorId), firstRail);
+        state.MarkOpen();
+        Assert.True(state.Select(selected.Id));
+
+        var reorderedRail = CarouselRailPolicy.SplitCandidates(workspace, [first, selected, last], nextTree).Main;
+        state.UpdateCandidates(reorderedRail);
+
+        Assert.Equal([last.Id, selected.Id, first.Id], reorderedRail.Select(window => window.Id));
+        Assert.Equal(selected.Id, state.SelectedWindowId);
+        Assert.Equal(2, CarouselRailPolicy.RestoreIndexAfterSelection(reorderedRail, state.SelectedWindowId));
+    }
+
+    [Fact]
+    public void CarouselRestorePositionIsAfterHighlightedTilingWindow()
+    {
+        var first = Window("First");
+        var middle = Window("Middle");
+        var last = Window("Last");
+        var floating = Window("Floating", mode: WindowMode.Floating);
+        var candidates = new[] { first, middle, last, floating };
+
+        Assert.Equal(1, CarouselRailPolicy.RestoreIndexAfterSelection(candidates, first.Id));
+        Assert.Equal(2, CarouselRailPolicy.RestoreIndexAfterSelection(candidates, middle.Id));
+        Assert.Equal(3, CarouselRailPolicy.RestoreIndexAfterSelection(candidates, last.Id));
+        Assert.Equal(3, CarouselRailPolicy.RestoreIndexAfterSelection(candidates, floating.Id));
+        Assert.Equal(0, CarouselRailPolicy.RestoreIndexAfterSelection(candidates, Guid.NewGuid()));
+        Assert.Equal(0, CarouselRailPolicy.RestoreIndexAfterSelection([], null));
+    }
+
+    [Fact]
+    public void CarouselKeepsCandidateOrderWhenSplitTreeIsMissingOrEmpty()
+    {
+        var first = Window("First");
+        var second = Window("Second");
+        var workspace = Workspace("Current", null) with { WindowIds = [second.Id, first.Id] };
+
+        var missingTree = CarouselRailPolicy.SplitCandidates(workspace, [first, second]);
+        var emptyTree = CarouselRailPolicy.SplitCandidates(workspace, [first, second],
+            new SplitNodeInfo(Guid.NewGuid(), null, SplitOrientation.Horizontal, 0.5, null, null));
+
+        Assert.Equal([second.Id, first.Id], missingTree.Main.Select(window => window.Id));
+        Assert.Equal([second.Id, first.Id], emptyTree.Main.Select(window => window.Id));
     }
 
     [Fact]
@@ -1002,6 +1143,22 @@ public sealed class SpatialSwitcherTests
     }
 
     [Fact]
+    public void MinimizedCarouselCardsUseCompactDimensions()
+    {
+        var mainWindow = Window("Main");
+        var minimizedWindow = Window("Minimized", minimized: true);
+        var mainCard = Assert.Single(CarouselPresentation.Layout([mainWindow],
+            new Dictionary<Guid, PreviewImageSize>(), 1920, 1080, 1400, 800,
+            selectedWindowId: mainWindow.Id));
+        var minimizedCard = Assert.Single(CarouselPresentation.LayoutMinimized([minimizedWindow],
+            1920, 1080, 1400, 80, selectedWindowId: minimizedWindow.Id));
+
+        Assert.True(minimizedCard.CardBounds.Width < mainCard.CardBounds.Width);
+        Assert.True(minimizedCard.CardBounds.Height < mainCard.CardBounds.Height);
+        Assert.Equal(minimizedCard.CardBounds, minimizedCard.PreviewBounds);
+    }
+
+    [Fact]
     public void CarouselLayoutCentersFirstAndLastCardsAtScrollLimits()
     {
         var windows = new[] { Window("A"), Window("B"), Window("C"), Window("D") };
@@ -1155,6 +1312,18 @@ public sealed class SpatialSwitcherTests
             SpatialSwitcherPresentation.CaptureContext(snapshot));
     }
 
+    [Theory]
+    [InlineData(false, false, false, false)]
+    [InlineData(true, true, false, false)]
+    [InlineData(true, false, true, false)]
+    [InlineData(true, false, false, true)]
+    public void CarouselDeactivationDismissesOnlyWhenVisibleInactiveAndIdle(bool isVisible, bool isActive,
+        bool operationPending, bool shouldDismiss)
+    {
+        Assert.Equal(shouldDismiss,
+            CarouselWindow.ShouldDismissOnDeactivation(isVisible, isActive, operationPending));
+    }
+
     private static WorkspaceInfo Workspace(string name, DeskPosition? position) =>
         new(Guid.NewGuid(), name, Guid.Empty, false, [], WorkspaceLayout.Split, position);
 
@@ -1162,6 +1331,18 @@ public sealed class SpatialSwitcherTests
         bool overflow = false, bool ignored = false, WindowMode mode = WindowMode.Tiling) =>
         new(Guid.NewGuid(), Guid.NewGuid(), title, "process", "window", new(0, 0, 300, 200), visible,
             minimized, ignored, mode, LayoutOverflow: overflow);
+
+    private static SplitNodeInfo SplitNode(params Guid[] windowIds)
+    {
+        if (windowIds.Length == 0)
+            return new SplitNodeInfo(Guid.NewGuid(), null, SplitOrientation.Horizontal, 0.5, null, null);
+
+        SplitNodeInfo node = new(Guid.NewGuid(), windowIds[^1], null, 0.5, null, null);
+        for (var index = windowIds.Length - 2; index >= 0; index--)
+            node = new SplitNodeInfo(Guid.NewGuid(), null, SplitOrientation.Horizontal, 0.5,
+                new SplitNodeInfo(Guid.NewGuid(), windowIds[index], null, 0.5, null, null), node);
+        return node;
+    }
 
     private static PointerPressedEventArgs CreatePointerPress(Border source, Button root, Pointer pointer,
         int clickCount, bool isLeftButtonPressed)

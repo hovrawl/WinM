@@ -5,7 +5,9 @@ namespace HomeDeskManager;
 internal enum CarouselGestureAction
 {
     Open,
-    Accept
+    Accept,
+    MinimizeSelected,
+    RestoreSelected
 }
 
 internal static class SwitcherTouchpadPolicy
@@ -20,10 +22,18 @@ internal static class SwitcherTouchpadPolicy
         return true;
     }
 
-    public static CarouselGestureAction? Route(TouchpadGesture gesture, TouchpadCapabilityResult capability)
+    public static CarouselGestureAction? Route(TouchpadGesture gesture, TouchpadCapabilityResult capability,
+        bool minimizedRailFocused = false)
     {
-        if (!capability.CanRecognizeGestures || gesture.Kind != TouchpadGestureKind.Swipe || gesture.FingerCount != 3)
-            return null;
+        if (!capability.CanRecognizeGestures || gesture.Kind != TouchpadGestureKind.Swipe) return null;
+        if (gesture.FingerCount == 2)
+            return gesture.Direction switch
+            {
+                TouchpadSwipeDirection.Down when !minimizedRailFocused => CarouselGestureAction.MinimizeSelected,
+                TouchpadSwipeDirection.Up when minimizedRailFocused => CarouselGestureAction.RestoreSelected,
+                _ => null
+            };
+        if (gesture.FingerCount != 3) return null;
         return gesture.Direction switch
         {
             TouchpadSwipeDirection.Up => CarouselGestureAction.Open,

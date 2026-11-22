@@ -48,6 +48,7 @@ public sealed class ManagerEngine
     private readonly HashSet<Guid> resizingWindows = [];
     private readonly HashSet<Guid> overflowWindowIds = [];
     private readonly HashSet<Guid> managerMinimizedWindowIds = [];
+    private readonly HashSet<Guid> carouselMinimizedWindowIds = [];
     private readonly Dictionary<Guid, HashSet<Guid>> stagedWindowIds = [];
     private readonly Dictionary<Guid, Guid> lastFocusedStagedTileByWorkspace = [];
     private readonly Dictionary<Guid, Guid> lastFocusedWindowByWorkspace = [];
@@ -315,6 +316,7 @@ public sealed class ManagerEngine
         foreach (var id in movingWindows.Keys.Except(existing).ToArray()) movingWindows.Remove(id);
         overflowWindowIds.IntersectWith(existing);
         managerMinimizedWindowIds.IntersectWith(existing);
+        carouselMinimizedWindowIds.IntersectWith(existing);
         var observed = desktop.Windows.ToDictionary(window => window.Id);
         managerMinimizedWindowIds.RemoveWhere(id => !observed[id].Minimized);
         foreach (var staged in stagedWindowIds.Values) staged.IntersectWith(existing);
@@ -376,9 +378,20 @@ public sealed class ManagerEngine
         Guid? droppedWindowId = null, Guid? restoreOverflowWindowId = null,
         Guid? restoreFocusedWindowId = null,
         (Guid WindowId, WindowMode Mode)? modeChange = null,
-        (Guid WindowId, PixelRect Bounds)? floatingPlacement = null)
+        (Guid WindowId, PixelRect Bounds)? floatingPlacement = null,
+        Guid? restoreWindowId = null, Guid? insertAfterWindowId = null, int? restoreIndex = null)
     {
         var desktop = ApplyModes(await platform.CaptureAsync(cancellationToken));
+        var restoreWindowWasMinimized = restoreWindowId is { } requestedWindowId &&
+                                        desktop.Windows.Any(window => window.Id == requestedWindowId &&
+                                                                      window.Minimized);
+        if (restoreWindowWasMinimized)
+            desktop = desktop with
+            {
+                Windows = desktop.Windows.Select(window => window.Id == restoreWindowId
+                    ? window with { Visible = true, Minimized = false }
+                    : window).ToArray()
+            };
         var restoreFocusedWindowWasMinimized = restoreFocusedWindowId is { } restoreId &&
                                                desktop.Windows.Any(window =>
                                                    window.Id == restoreId && window.Minimized);
@@ -423,6 +436,15 @@ public sealed class ManagerEngine
         List<Guid> stackingOrderWindowIds = [];
         Dictionary<Guid, Guid[]> changedLayeredStackOrders = [];
         var restoreTargetStaged = false;
+        if (restoreWindowId is { } restoreForOrder &&
+            workspaces.WorkspaceFor(restoreForOrder) is { } restoreWorkspaceId &&
+            workspaces.Trees.TryGetValue(restoreWorkspaceId, out var restoreTree) &&
+            desktop.Windows.FirstOrDefault(window => window.Id == restoreForOrder) is
+                { Mode: WindowMode.Tiling, IsIgnored: false })
+        {
+            if (restoreIndex is { } index) restoreTree.MoveToIndex(restoreForOrder, index);
+            else restoreTree.MoveAfter(restoreForOrder, insertAfterWindowId);
+        }
         if (!paused)
         {
             var activeWorkspaces = workspaces.Snapshot.Where(workspace => workspace.Active).ToArray();
@@ -439,7 +461,7 @@ public sealed class ManagerEngine
                 try
                 {
                     var priority = new List<Guid>();
-                    var restoreTarget = restoreOverflowWindowId ?? restoreFocusedWindowId;
+                    var restoreTarget = restoreWindowId ?? restoreOverflowWindowId ?? restoreFocusedWindowId;
                     if (restoreTarget is { } restoring && workspace.WindowIds.Contains(restoring))
                         priority.Add(restoring);
                     var displacedFocus = restoreTarget is not null
@@ -561,10 +583,14 @@ public sealed class ManagerEngine
             .ToArray();
         var minimizations = desktop.Windows.Where(window =>
         {
+            if (window.Id == restoreWindowId) return restoreTargetStaged && restoreWindowWasMinimized;
             if (window.Id == restoreFocusedWindowId) return restoreTargetStaged && restoreFocusedWindowWasMinimized;
             if (overflowWindowIds.Contains(window.Id)) return !window.Minimized;
+            if (carouselMinimizedWindowIds.Contains(window.Id)) return !window.Minimized;
             return managerMinimizedWindowIds.Contains(window.Id) && window.Minimized;
-        }).Select(window => new WindowMinimization(window.Id, overflowWindowIds.Contains(window.Id))).ToArray();
+        }).Select(window => new WindowMinimization(window.Id,
+            window.Id != restoreWindowId &&
+            (overflowWindowIds.Contains(window.Id) || carouselMinimizedWindowIds.Contains(window.Id)))).ToArray();
         if (changes.Length > 0 || focus is not null || visibility.Length > 0 || minimizations.Length > 0 ||
             droppedWindowId is not null || stackingOrderWindowIds.Count > 0)
         {
@@ -856,6 +882,14 @@ public sealed class ManagerEngine
             command.Position is { IsValid: false } ||
             command.LayeredLayoutOptions is { IsValid: false })
             return Error("invalid_argument", "Unknown command or enum value.");
+        if (command.AfterWindowId is { } afterWindowId &&
+            (afterWindowId == Guid.Empty || command.Kind != CommandKind.RestoreWindow))
+            return Error("invalid_argument", "AfterWindowId is only supported by restoreWindow.");
+        if (command.RestoreIndex is { } restoreIndex &&
+            (restoreIndex < 0 || command.Kind != CommandKind.RestoreWindow))
+            return Error("invalid_argument", "RestoreIndex is only supported as a nonnegative restoreWindow index.");
+        if (command.RestoreIndex is not null && command.AfterWindowId is not null)
+            return Error("invalid_argument", "RestoreIndex and AfterWindowId cannot be used together.");
         if (command.MonitorId is not null &&
             command.Kind is not (CommandKind.ActivateWorkspace or CommandKind.MoveToMonitor))
             return Error("invalid_argument", "Monitor ID is only supported by activateWorkspace and moveToMonitor.");
@@ -899,6 +933,8 @@ public sealed class ManagerEngine
             return Error("invalid_argument", "Layered layout options are only supported by setWorkspaceLayout.");
         if (command.Kind != CommandKind.SetWorkspacePosition && command.Position is not null)
             return Error("invalid_argument", "Position is only supported by setWorkspacePosition.");
+        if (command.Kind is CommandKind.MinimizeWindow or CommandKind.RestoreWindow)
+            return await SetCarouselWindowStateAsync(command, cancellationToken);
         if (command.Kind == CommandKind.FocusCycle)
             return await FocusCycleAsync(command, cancellationToken);
         if (command.Kind == CommandKind.FocusMonitor)
@@ -1288,6 +1324,93 @@ public sealed class ManagerEngine
         else modes.Remove(window.Id);
         await ReconcileAsync(cancellationToken);
         return Result(failures);
+    }
+
+    private async Task<CommandResult> SetCarouselWindowStateAsync(ManagerCommand command,
+        CancellationToken cancellationToken)
+    {
+        if (command.WindowId is not { } windowId || windowId == Guid.Empty ||
+            command.Direction is not null || command.Amount is not null || command.Orientation is not null ||
+            command.Mode is not null || command.Paused is not null || command.WorkspaceId is not null ||
+            command.MonitorId is not null || command.WorkspaceName is not null || command.NodeId is not null ||
+            command.Navigation is not null || command.CycleDirection is not null || command.Layout is not null ||
+            command.Position is not null || command.LayeredLayoutOptions is not null ||
+            command.MonitorNumber is not null || command.WorkspaceNumber is not null)
+            return Error("invalid_argument", "Minimize and restore require a window ID and optional restore position.");
+        if (paused) return Error("not_ready", "Resume the manager before minimizing or restoring a window.");
+
+        var desktop = Current!.Desktop;
+        var window = desktop.Windows.SingleOrDefault(candidate => candidate.Id == windowId);
+        if (window is null) return Error("not_found", "Target window is not managed.");
+        if (window.IsIgnored) return Error("not_ready", "Ignored windows cannot be minimized or restored by the carousel.");
+        var workspaceId = workspaces.WorkspaceFor(windowId);
+        var workspace = workspaceId is { } assigned
+            ? workspaces.Snapshot.SingleOrDefault(candidate => candidate.Id == assigned)
+            : null;
+        if (workspace is null) return Error("not_found", "Target workspace disappeared.");
+        if (!workspace.Active)
+            return Error("not_ready", "Activate the workspace view before minimizing or restoring a window.");
+
+        if (command.Kind == CommandKind.MinimizeWindow)
+        {
+            if (window.Minimized) return new(true, null, null, revision);
+            if (!window.Visible || window.ManagerHidden || window.LayoutOverflow)
+                return Error("not_ready", "Only a visible window can be minimized from the carousel.");
+
+            carouselMinimizedWindowIds.Add(windowId);
+            var failures = await ReconcileAsync(cancellationToken);
+            if (failures.Count > 0 && Current!.Desktop.Windows.FirstOrDefault(candidate => candidate.Id == windowId)
+                    is { Minimized: false })
+            {
+                carouselMinimizedWindowIds.Remove(windowId);
+                await ReconcileAsync(cancellationToken);
+            }
+
+            return Result(failures);
+        }
+
+        if (!window.Minimized)
+        {
+            carouselMinimizedWindowIds.Remove(windowId);
+            return new(true, null, null, revision);
+        }
+
+        var tree = workspaces.Trees[workspace.Id];
+        var insertionAnchor = command.AfterWindowId;
+        var insertionIndex = command.RestoreIndex;
+        if (window.Mode == WindowMode.Tiling)
+        {
+            var existingTiles = tree.WindowOrder.Where(candidate => candidate != windowId).ToArray();
+            if (insertionIndex is { } requestedIndex)
+            {
+                insertionIndex = Math.Clamp(requestedIndex, 0, existingTiles.Length);
+                insertionAnchor = null;
+            }
+            else
+            {
+                if (existingTiles.Length == 0 && insertionAnchor is not null ||
+                    existingTiles.Length > 0 && insertionAnchor is null)
+                    return Error("invalid_argument", "Restore requires an active tiling anchor unless the layout is empty.");
+                if (insertionAnchor is { } anchor)
+                {
+                    var anchorWindow = desktop.Windows.FirstOrDefault(candidate => candidate.Id == anchor);
+                    if (anchor == windowId || workspaces.WorkspaceFor(anchor) != workspace.Id ||
+                        !existingTiles.Contains(anchor) || anchorWindow is not
+                            { Mode: WindowMode.Tiling, IsIgnored: false, Minimized: false })
+                        return Error("not_found", "Restore anchor is not an active tiling window in the same workspace.");
+                }
+            }
+        }
+        else
+        {
+            insertionAnchor = null;
+            insertionIndex = null;
+        }
+
+        carouselMinimizedWindowIds.Remove(windowId);
+        var restoreFailures = await ReconcileAsync(cancellationToken, restoreWindowId: windowId,
+            insertAfterWindowId: insertionAnchor, restoreIndex: insertionIndex);
+        return Result(restoreFailures);
     }
 
     private MonitorInfo? ResolveMonitorNumber(DesktopSnapshot desktop, int monitorNumber)

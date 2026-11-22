@@ -23,19 +23,26 @@ internal sealed class CarouselWindow : Window
 
     private readonly Func<IReadOnlyList<Guid>, CancellationToken, Task<PreviewTargetsResult>> queryPreviewTargets;
     private readonly Func<Guid, Task<CommandResult>> focusWindow;
+    private readonly Func<Guid, Task<CommandResult>> minimizeWindow;
+    private readonly Func<Guid, int, Task<CommandResult>> restoreWindow;
     private readonly Canvas root = new() { ClipToBounds = true };
     private readonly Canvas cardsHost = new() { ClipToBounds = true };
+    private readonly Canvas minimizedCardsHost = new() { ClipToBounds = true };
     private readonly Border shade = new() { Background = OverlayShade, IsHitTestVisible = false };
     private readonly TextBlock status = new();
+    private readonly TextBlock minimizedRailLabel = new();
     private readonly Dictionary<Guid, PreviewImageSize> sourceSizes = [];
     private readonly Dictionary<Guid, OwnedPreviewFrame> previewFrames = [];
     private readonly Dictionary<Guid, string> previewFailures = [];
     private readonly Dictionary<Guid, WindowPreviewTarget> previewTargets = [];
     private readonly Dictionary<Guid, CardVisual> cardVisuals = [];
+    private readonly Dictionary<Guid, CardVisual> minimizedCardVisuals = [];
     private readonly CarouselState state = new();
+    private readonly CarouselState minimizedRailState = new();
     private readonly CarouselScrollMotion scrollMotion = new();
     private readonly DispatcherTimer scrollAnimationTimer = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private IReadOnlyList<WindowInfo> candidates = [];
+    private IReadOnlyList<WindowInfo> minimizedCandidates = [];
     private ManagerSnapshot? snapshot;
     private PopupMonitor? placement;
     private WindowPreviewCapture? previewCapture;
@@ -45,16 +52,24 @@ internal sealed class CarouselWindow : Window
     private double viewportTop;
     private double viewportWidth;
     private double viewportHeight;
+    private Rect minimizedRailBounds;
     private bool managerConnected;
+    private bool pointerOverMinimizedRail;
+    private bool carouselOperationPending;
     private bool previewLookupPending;
+    private CarouselRailTarget activeScrollRail = CarouselRailTarget.Main;
     private CancellationTokenSource? openCancellation;
     private long lastScrollTick;
 
     public CarouselWindow(Func<IReadOnlyList<Guid>, CancellationToken, Task<PreviewTargetsResult>> queryPreviewTargets,
-        Func<Guid, Task<CommandResult>> focusWindow)
+        Func<Guid, Task<CommandResult>> focusWindow,
+        Func<Guid, Task<CommandResult>> minimizeWindow,
+        Func<Guid, int, Task<CommandResult>> restoreWindow)
     {
         this.queryPreviewTargets = queryPreviewTargets;
         this.focusWindow = focusWindow;
+        this.minimizeWindow = minimizeWindow;
+        this.restoreWindow = restoreWindow;
         Title = "Window preview carousel";
         WindowStartupLocation = WindowStartupLocation.Manual;
         WindowDecorations = WindowDecorations.None;
@@ -66,18 +81,29 @@ internal sealed class CarouselWindow : Window
         Canvas.SetLeft(status, 28);
         status.Foreground = OverlayMutedText;
         status.TextWrapping = TextWrapping.NoWrap;
+        minimizedRailLabel.Text = "Minimized";
+        minimizedRailLabel.Foreground = OverlayMutedText;
+        minimizedRailLabel.FontSize = 12;
         root.Children.Add(shade);
         root.Children.Add(cardsHost);
+        root.Children.Add(minimizedCardsHost);
+        root.Children.Add(status);
+        root.Children.Add(minimizedRailLabel);
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
+        root.PointerMoved += OnPointerMoved;
         scrollAnimationTimer.Tick += OnScrollAnimationTick;
         Deactivated += (_, _) =>
         {
-            if (IsVisible) HideCarousel();
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (ShouldDismissOnDeactivation(IsVisible, IsActive, carouselOperationPending)) HideCarousel();
+            });
         };
         Closed += (_, _) =>
         {
             StopScrollMotion();
             state.CloseExternally();
+            minimizedRailState.CloseExternally();
             CancelPreviewLookup();
             ReleasePreviewCapture();
         };
@@ -96,14 +122,19 @@ internal sealed class CarouselWindow : Window
         CancelPreviewLookup();
         StartPreviewCapture();
         state.CloseExternally();
+        minimizedRailState.CloseExternally();
         var cancellation = new CancellationTokenSource();
         openCancellation = cancellation;
         snapshot = nextSnapshot;
         placement = targetPlacement;
         managerConnected = connected;
         var workspace = snapshot.Workspaces?.FirstOrDefault(candidate => candidate.Id == workspaceId);
-        candidates = SpatialSwitcherPresentation.WindowsForWorkspace(workspace, snapshot.Desktop.Windows);
+        var rails = CarouselRailPolicy.SplitCandidates(workspace, snapshot.Desktop.Windows,
+            snapshot.Trees.GetValueOrDefault(workspaceId));
+        candidates = rails.Main;
+        minimizedCandidates = rails.Minimized;
         state.BeginOpen(context, candidates);
+        minimizedRailState.BeginOpen(context, minimizedCandidates);
         previewLookupPending = managerConnected && candidates.Any(window => window.Visible && !window.Minimized);
         ConfigurePlacement();
         var selectedIndex = state.SelectedWindowId is { } selected
@@ -111,12 +142,20 @@ internal sealed class CarouselWindow : Window
             : 0;
         state.SetInitialOffset(Math.Max(0, selectedIndex) * CarouselPresentation.CardStride(workAreaWidth),
             CarouselPresentation.MaximumScrollOffset(candidates.Count, workAreaWidth, viewportWidth));
+        var minimizedSelectedIndex = minimizedRailState.SelectedWindowId is { } minimizedSelected
+            ? Array.FindIndex(minimizedCandidates.ToArray(), window => window.Id == minimizedSelected)
+            : 0;
+        minimizedRailState.SetInitialOffset(Math.Max(0, minimizedSelectedIndex) *
+                                            CarouselPresentation.MinimizedCardStride(workAreaWidth),
+            CarouselPresentation.MaximumMinimizedScrollOffset(minimizedCandidates.Count, workAreaWidth,
+                viewportWidth));
         RenderCards();
         Topmost = false;
         if (!IsVisible) Show();
         Topmost = true;
         Activate();
         if (!state.MarkOpen()) return;
+        minimizedRailState.MarkOpen();
 
         try
         {
@@ -165,14 +204,21 @@ internal sealed class CarouselWindow : Window
             return;
         }
 
-        var nextCandidates = SpatialSwitcherPresentation.WindowsForWorkspace(workspace, nextSnapshot.Desktop.Windows);
-        var candidatesChanged = !candidates.SequenceEqual(nextCandidates);
+        var nextRails = CarouselRailPolicy.SplitCandidates(workspace, nextSnapshot.Desktop.Windows,
+            nextSnapshot.Trees.GetValueOrDefault(workspaceId));
+        var mainCandidatesChanged = !candidates.SequenceEqual(nextRails.Main);
+        var minimizedCandidatesChanged = !minimizedCandidates.SequenceEqual(nextRails.Minimized);
+        var candidatesChanged = mainCandidatesChanged || minimizedCandidatesChanged;
+        var railVisibilityChanged = (minimizedCandidates.Count > 0) != (nextRails.Minimized.Count > 0);
         if (candidatesChanged) StopScrollMotion();
         var previousSelection = state.SelectedWindowId;
+        var previousMinimizedSelection = minimizedRailState.SelectedWindowId;
         snapshot = nextSnapshot;
         managerConnected = connected;
-        candidates = nextCandidates;
+        candidates = nextRails.Main;
+        minimizedCandidates = nextRails.Minimized;
         state.UpdateCandidates(candidates);
+        minimizedRailState.UpdateCandidates(minimizedCandidates);
         var nextPlacement = PopupPlacement.FromSnapshot(nextSnapshot.Desktop.Monitors, monitorId);
         if (nextPlacement is null)
         {
@@ -182,7 +228,7 @@ internal sealed class CarouselWindow : Window
 
         var placementChanged = placement != nextPlacement;
         placement = nextPlacement;
-        if (placementChanged)
+        if (placementChanged || railVisibilityChanged)
         {
             StopScrollMotion();
             ConfigurePlacement();
@@ -192,8 +238,14 @@ internal sealed class CarouselWindow : Window
         state.ClampOffset(maximumOffset);
         if (candidatesChanged || previousSelection != state.SelectedWindowId)
             state.ScrollToSelected(CarouselPresentation.CardStride(workAreaWidth), maximumOffset);
+        var maximumMinimizedOffset = CarouselPresentation.MaximumMinimizedScrollOffset(minimizedCandidates.Count,
+            workAreaWidth, viewportWidth);
+        minimizedRailState.ClampOffset(maximumMinimizedOffset);
+        if (candidatesChanged || previousMinimizedSelection != minimizedRailState.SelectedWindowId)
+            minimizedRailState.ScrollToSelected(CarouselPresentation.MinimizedCardStride(workAreaWidth),
+                maximumMinimizedOffset);
 
-        if (candidatesChanged)
+        if (mainCandidatesChanged)
         {
             CancelPreviewLookup();
             using var cancellation = new CancellationTokenSource();
@@ -236,6 +288,7 @@ internal sealed class CarouselWindow : Window
         CancelPreviewLookup();
         ReleasePreviewCapture();
         state.CloseExternally();
+        minimizedRailState.CloseExternally();
         if (IsVisible) Close();
     }
 
@@ -245,14 +298,71 @@ internal sealed class CarouselWindow : Window
 
     public void CancelSelection() => _ = CancelAsync();
 
+    public bool IsPointerOverMinimizedRail => pointerOverMinimizedRail;
+
+    public void MinimizeSelectedWindow()
+    {
+        if (!IsVisible || !managerConnected || carouselOperationPending || state.SelectedWindowId is not { } windowId ||
+            !candidates.Any(window => window.Id == windowId)) return;
+        _ = RunWindowOperationAsync(() => minimizeWindow(windowId), "Minimizing window…", "Minimize requested");
+    }
+
+    public void RestoreSelectedWindow()
+    {
+        if (!IsVisible || !managerConnected || carouselOperationPending ||
+            minimizedRailState.SelectedWindowId is not { } windowId ||
+            !minimizedCandidates.Any(window => window.Id == windowId)) return;
+        var restoreIndex = CarouselRailPolicy.RestoreIndexAfterSelection(candidates, state.SelectedWindowId);
+        _ = RunWindowOperationAsync(() => restoreWindow(windowId, restoreIndex),
+            "Restoring window…", "Restore requested");
+    }
+
     public void ScrollBy(double horizontalDelta)
     {
         if (!double.IsFinite(horizontalDelta) || horizontalDelta == 0) return;
+        var targetRail = pointerOverMinimizedRail && minimizedCandidates.Count > 0
+            ? CarouselRailTarget.Minimized
+            : CarouselRailTarget.Main;
+        if (targetRail != activeScrollRail)
+        {
+            StopScrollMotion();
+            activeScrollRail = targetRail;
+        }
         scrollMotion.AddInput(horizontalDelta * workAreaWidth * 1.8);
         if (scrollAnimationTimer.IsEnabled) return;
         lastScrollTick = Stopwatch.GetTimestamp();
         scrollAnimationTimer.Start();
     }
+
+    private async Task RunWindowOperationAsync(Func<Task<CommandResult>> operation, string progressMessage,
+        string successMessage)
+    {
+        if (carouselOperationPending) return;
+        carouselOperationPending = true;
+        status.Text = progressMessage;
+        try
+        {
+            var result = await operation();
+            status.Text = result.Success
+                ? successMessage
+                : $"Window operation failed · {result.ErrorCode}: {result.Message}";
+        }
+        catch (Exception error)
+        {
+            status.Text = $"Window operation failed · {error.Message}";
+        }
+        finally
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (IsVisible) Activate();
+                carouselOperationPending = false;
+            });
+        }
+    }
+
+    internal static bool ShouldDismissOnDeactivation(bool isVisible, bool isActive, bool operationPending) =>
+        isVisible && !isActive && !operationPending;
 
     private void ConfigurePlacement()
     {
@@ -269,9 +379,15 @@ internal sealed class CarouselWindow : Window
         MinWidth = Math.Min(480, Width);
         MinHeight = Math.Min(420, Height);
         viewportLeft = 28;
-        viewportTop = 90;
+        viewportTop = Math.Min(90, Height * 0.12);
         viewportWidth = Math.Max(0, Width - viewportLeft * 2);
-        viewportHeight = Math.Max(0, Height - viewportTop - 78);
+        var reservedRailHeight = minimizedCandidates.Count > 0 ? 138 : 78;
+        viewportHeight = Math.Max(0, Height - viewportTop - reservedRailHeight);
+        var minimizedRailTop = viewportTop + viewportHeight + 20;
+        var minimizedRailHeight = minimizedCandidates.Count == 0
+            ? 0
+            : Math.Max(0, Height - minimizedRailTop - 24);
+        minimizedRailBounds = new Rect(viewportLeft, minimizedRailTop, viewportWidth, minimizedRailHeight);
         root.Width = Width;
         root.Height = Height;
         shade.Width = Width;
@@ -280,6 +396,15 @@ internal sealed class CarouselWindow : Window
         cardsHost.Height = viewportHeight;
         Canvas.SetLeft(cardsHost, viewportLeft);
         Canvas.SetTop(cardsHost, viewportTop);
+        minimizedCardsHost.Width = viewportWidth;
+        minimizedCardsHost.Height = minimizedRailHeight;
+        minimizedCardsHost.IsVisible = minimizedCandidates.Count > 0;
+        Canvas.SetLeft(minimizedCardsHost, viewportLeft);
+        Canvas.SetTop(minimizedCardsHost, minimizedRailTop);
+        minimizedRailLabel.IsVisible = minimizedCandidates.Count > 0;
+        Canvas.SetLeft(minimizedRailLabel, viewportLeft);
+        Canvas.SetTop(minimizedRailLabel, minimizedRailTop - 18);
+        Canvas.SetLeft(status, viewportLeft);
         Canvas.SetTop(status, Height - 48);
         PopupPlacement.CoverMonitor(this, target);
     }
@@ -421,6 +546,83 @@ internal sealed class CarouselWindow : Window
             Canvas.SetLeft(visual.Button, layout.CardBounds.X);
             Canvas.SetTop(visual.Button, layout.CardBounds.Y);
         }
+
+        RenderMinimizedCards();
+    }
+
+    private void RenderMinimizedCards()
+    {
+        minimizedCardsHost.IsVisible = minimizedCandidates.Count > 0;
+        minimizedRailLabel.IsVisible = minimizedCandidates.Count > 0;
+        var layouts = CarouselPresentation.LayoutMinimized(minimizedCandidates, workAreaWidth, workAreaHeight,
+            viewportWidth, minimizedCardsHost.Height, minimizedRailState.HorizontalOffset,
+            minimizedRailState.SelectedWindowId);
+        var activeWindowIds = layouts.Select(layout => layout.WindowId).ToHashSet();
+        foreach (var staleWindowId in minimizedCardVisuals.Keys.Where(id => !activeWindowIds.Contains(id)).ToArray())
+        {
+            var staleVisual = minimizedCardVisuals[staleWindowId];
+            minimizedCardsHost.Children.Remove(staleVisual.Button);
+            minimizedCardVisuals.Remove(staleWindowId);
+            staleVisual.Dispose();
+        }
+
+        foreach (var layout in layouts)
+        {
+            var window = minimizedCandidates.First(candidate => candidate.Id == layout.WindowId);
+            var selected = layout.WindowId == minimizedRailState.SelectedWindowId;
+            var title = string.IsNullOrWhiteSpace(window.Title) ? window.ProcessName : window.Title;
+            var key = new CardPresentationKey(title, window.ProcessName, true, selected, false, null,
+                layout.CardBounds.Width, layout.CardBounds.Height);
+            if (!minimizedCardVisuals.TryGetValue(layout.WindowId, out var visual) || visual.Key != key)
+            {
+                if (visual is not null)
+                {
+                    minimizedCardsHost.Children.Remove(visual.Button);
+                    visual.Dispose();
+                }
+
+                visual = CreateMinimizedCard(window, layout, selected, key);
+                minimizedCardVisuals[layout.WindowId] = visual;
+                minimizedCardsHost.Children.Add(visual.Button);
+            }
+
+            Canvas.SetLeft(visual.Button, layout.CardBounds.X);
+            Canvas.SetTop(visual.Button, layout.CardBounds.Y);
+        }
+    }
+
+    private CardVisual CreateMinimizedCard(WindowInfo window, CarouselCardLayout layout, bool selected,
+        CardPresentationKey key)
+    {
+        var title = new TextBlock
+        {
+            Text = key.Title,
+            Foreground = OverlayText,
+            FontWeight = FontWeight.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+            MaxWidth = Math.Max(1, layout.CardBounds.Width - 24),
+            Margin = new Thickness(12, 0)
+        };
+        var card = new Button
+        {
+            Width = layout.CardBounds.Width,
+            Height = layout.CardBounds.Height,
+            Padding = new Thickness(0),
+            Background = new SolidColorBrush(Color.FromArgb(220, 32, 38, 48)),
+            BorderBrush = selected ? SwitcherTheme.Accent : Brushes.Transparent,
+            BorderThickness = new Thickness(selected ? 2 : 0),
+            CornerRadius = new CornerRadius(8),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
+            Content = title
+        };
+        card.Click += (_, _) =>
+        {
+            if (!minimizedRailState.Select(window.Id)) return;
+            RenderCards();
+        };
+        return new CardVisual(window.Id, card, new Border(), null, null, key);
     }
 
     private CardVisual CreateCard(WindowInfo window, CarouselCardLayout layout, bool selected,
@@ -662,10 +864,23 @@ internal sealed class CarouselWindow : Window
     {
         StopScrollMotion();
         state.CloseExternally();
+        minimizedRailState.CloseExternally();
+        pointerOverMinimizedRail = false;
+        activeScrollRail = CarouselRailTarget.Main;
         CancelPreviewLookup();
         previewCapture?.Pause();
         ClearPreviewPresentation();
         if (IsVisible) Hide();
+    }
+
+    private void OnPointerMoved(object? sender, PointerEventArgs args)
+    {
+        var targetRail = CarouselRailPolicy.TargetForPointer(args.GetPosition(root), minimizedRailBounds,
+            minimizedCandidates.Count > 0);
+        pointerOverMinimizedRail = targetRail == CarouselRailTarget.Minimized;
+        if (targetRail == activeScrollRail) return;
+        StopScrollMotion();
+        activeScrollRail = targetRail;
     }
 
     private void OnScrollAnimationTick(object? sender, EventArgs args)
@@ -682,10 +897,20 @@ internal sealed class CarouselWindow : Window
         var delta = scrollMotion.Advance(elapsed);
         if (delta != 0)
         {
-            var maximumOffset = CarouselPresentation.MaximumScrollOffset(candidates.Count, workAreaWidth,
-                viewportWidth);
-            if (!state.ScrollBy(delta, maximumOffset, CarouselPresentation.CardStride(workAreaWidth),
-                    CarouselPresentation.CardWidth(workAreaWidth), viewportWidth))
+            var scrollingMinimizedRail = activeScrollRail == CarouselRailTarget.Minimized;
+            var railState = scrollingMinimizedRail ? minimizedRailState : state;
+            var railCandidates = scrollingMinimizedRail ? minimizedCandidates : candidates;
+            var maximumOffset = scrollingMinimizedRail
+                ? CarouselPresentation.MaximumMinimizedScrollOffset(railCandidates.Count, workAreaWidth,
+                    viewportWidth)
+                : CarouselPresentation.MaximumScrollOffset(railCandidates.Count, workAreaWidth, viewportWidth);
+            var cardWidth = scrollingMinimizedRail
+                ? CarouselPresentation.MinimizedCardWidth(workAreaWidth)
+                : CarouselPresentation.CardWidth(workAreaWidth);
+            var stride = scrollingMinimizedRail
+                ? CarouselPresentation.MinimizedCardStride(workAreaWidth)
+                : CarouselPresentation.CardStride(workAreaWidth);
+            if (!railState.ScrollBy(delta, maximumOffset, stride, cardWidth, viewportWidth))
             {
                 StopScrollMotion();
                 return;
@@ -743,8 +968,14 @@ internal sealed class CarouselWindow : Window
             cardsHost.Children.Remove(visual.Button);
             visual.Dispose();
         }
+        foreach (var visual in minimizedCardVisuals.Values)
+        {
+            minimizedCardsHost.Children.Remove(visual.Button);
+            visual.Dispose();
+        }
 
         cardVisuals.Clear();
+        minimizedCardVisuals.Clear();
         previewTargets.Clear();
         previewFrames.Clear();
         previewFailures.Clear();

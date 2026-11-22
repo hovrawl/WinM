@@ -47,6 +47,36 @@ public sealed class ClientIntegrationTests
     }
 
     [Fact]
+    public async Task SdkMinimizesAndRestoresWindowThroughPipe()
+    {
+        await using var host = await PipeHost.StartAsync();
+        await using var client = await HomeDeskClient.ConnectAsync(host.Name, cancellationToken: host.Token);
+        var windowId = Assert.Single((await client.QuerySnapshotAsync(host.Token)).Desktop.Windows).Id;
+
+        var minimized = await client.ExecuteAsync(new(CommandKind.MinimizeWindow, windowId), host.Token);
+
+        Assert.True(minimized.Success);
+        Assert.True((await client.QuerySnapshotAsync(host.Token)).Desktop.Windows
+            .Single(window => window.Id == windowId).Minimized);
+
+        var invalidAnchor = await Assert.ThrowsAsync<HomeDeskRemoteException>(() =>
+            client.ExecuteAsync(new(CommandKind.RestoreWindow, windowId, AfterWindowId: Guid.NewGuid()), host.Token));
+        Assert.Equal("invalid_argument", invalidAnchor.ErrorCode);
+        Assert.Equal("Restore requires an active tiling anchor unless the layout is empty.", invalidAnchor.Message);
+
+        var conflictingRestore = await Assert.ThrowsAsync<HomeDeskRemoteException>(() =>
+            client.ExecuteAsync(new(CommandKind.RestoreWindow, windowId, AfterWindowId: windowId, RestoreIndex: 0),
+                host.Token));
+        Assert.Equal("invalid_argument", conflictingRestore.ErrorCode);
+
+        var restored = await client.ExecuteAsync(new(CommandKind.RestoreWindow, windowId, RestoreIndex: 0), host.Token);
+
+        Assert.True(restored.Success);
+        Assert.False((await client.QuerySnapshotAsync(host.Token)).Desktop.Windows
+            .Single(window => window.Id == windowId).Minimized);
+    }
+
+    [Fact]
     public async Task SdkCyclesFilteredFocusAndReceivesObservedFocusEvents()
     {
         await using var host = await PipeHost.StartAsync();

@@ -164,11 +164,11 @@ public sealed class TouchpadGestureRecognizer
 
     private IReadOnlyList<TouchpadGesture> Complete(long timestamp)
     {
-        if (!settled || stableFingerCount is not (3 or 4)) return [];
+        if (!settled || stableFingerCount is not (2 or 3 or 4)) return [];
         var horizontal = Math.Abs(travelX);
         var vertical = Math.Abs(travelY);
         if (Math.Max(horizontal, vertical) < MinimumSwipeTravel) return [];
-        if (horizontal >= vertical * DominantAxisRatio)
+        if (stableFingerCount != 2 && horizontal >= vertical * DominantAxisRatio)
             return
             [
                 new TouchpadGesture(TouchpadGestureKind.Swipe, stableFingerCount,

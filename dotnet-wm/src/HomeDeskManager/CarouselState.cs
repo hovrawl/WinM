@@ -20,6 +20,14 @@ internal sealed class CarouselState
     public Guid? OriginalWindowId { get; private set; }
     public Guid? SelectedWindowId { get; private set; }
     public double HorizontalOffset { get; private set; }
+    public int SelectedIndex
+    {
+        get
+        {
+            var index = SelectedWindowId is { } selected ? candidateOrder.IndexOf(selected) : -1;
+            return Math.Max(0, index);
+        }
+    }
 
     public void BeginOpen(SwitcherContext context, IReadOnlyList<WindowInfo> windows)
     {

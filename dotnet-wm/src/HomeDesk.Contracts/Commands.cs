@@ -66,7 +66,9 @@ public enum CommandKind
     SetWorkspaceLayout,
     SetWorkspacePosition,
     FocusMonitor,
-    MoveSpatial
+    MoveSpatial,
+    MinimizeWindow,
+    RestoreWindow
 }
 
 public sealed record DeskPosition(double X, double Y)
@@ -96,7 +98,9 @@ public sealed record ManagerCommand(
     DeskPosition? Position = null,
     LayeredLayoutOptions? LayeredLayoutOptions = null,
     int? MonitorNumber = null,
-    int? WorkspaceNumber = null);
+    int? WorkspaceNumber = null,
+    Guid? AfterWindowId = null,
+    int? RestoreIndex = null);
 
 public sealed record CommandResult(bool Success, string? ErrorCode, string? Message, long StateRevision);
 

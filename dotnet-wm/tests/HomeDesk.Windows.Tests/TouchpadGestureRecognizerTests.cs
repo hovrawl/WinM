@@ -318,6 +318,42 @@ public sealed class TouchpadGestureRecognizerTests
         Assert.Empty(recognizer.Process(Frame(72, 0)));
     }
 
+    [Theory]
+    [InlineData(-1, TouchpadSwipeDirection.Up)]
+    [InlineData(1, TouchpadSwipeDirection.Down)]
+    public void TwoFingerVerticalSwipeIsRecognizedOnContactEnd(double direction, TouchpadSwipeDirection expected)
+    {
+        var recognizer = new TouchpadGestureRecognizer();
+        recognizer.Process(TwoFingerVerticalFrame(0, 0));
+        recognizer.Process(TwoFingerVerticalFrame(40, 0));
+        recognizer.Process(TwoFingerVerticalFrame(56, direction * 0.05));
+        recognizer.Process(TwoFingerVerticalFrame(72, direction * 0.2));
+
+        var gesture = Assert.Single(recognizer.Process(Frame(88, 0)));
+
+        Assert.Equal(TouchpadGestureKind.Swipe, gesture.Kind);
+        Assert.Equal(2, gesture.FingerCount);
+        Assert.Equal(expected, gesture.Direction);
+    }
+
+    [Fact]
+    public void TwoFingerHorizontalAndAmbiguousMovementDoNotCompleteDirectionalSwipes()
+    {
+        var horizontal = new TouchpadGestureRecognizer();
+        horizontal.Process(FramePoints(0, (0.4, 0.4), (0.6, 0.6)));
+        horizontal.Process(FramePoints(40, (0.4, 0.4), (0.6, 0.6)));
+        horizontal.Process(FramePoints(56, (0.3, 0.4), (0.5, 0.6)));
+        horizontal.Process(FramePoints(72, (0.1, 0.4), (0.3, 0.6)));
+        Assert.Empty(horizontal.Process(Frame(88, 0)));
+
+        var diagonal = new TouchpadGestureRecognizer();
+        diagonal.Process(FramePoints(0, (0.3, 0.3), (0.7, 0.7)));
+        diagonal.Process(FramePoints(40, (0.3, 0.3), (0.7, 0.7)));
+        diagonal.Process(FramePoints(56, (0.25, 0.25), (0.65, 0.65)));
+        diagonal.Process(FramePoints(72, (0.1, 0.1), (0.5, 0.5)));
+        Assert.Empty(diagonal.Process(Frame(88, 0)));
+    }
+
     [Fact]
     public void ThreeFingerVerticalSwipeIsRecognizedSeparatelyFromHorizontalFocus()
     {
@@ -394,6 +430,9 @@ public sealed class TouchpadGestureRecognizerTests
             new TouchpadContact((uint)(index + 1), true, point.X, point.Y)).ToArray();
         return new TouchpadContactFrame(42, timestamp, (uint)timestamp, points.Length, contacts);
     }
+
+    private static TouchpadContactFrame TwoFingerVerticalFrame(long timestamp, double offset) =>
+        FramePoints(timestamp, (0.4, 0.3 + offset), (0.6, 0.7 + offset));
 
     private static TouchpadContactFrame FrameFromContacts(long timestamp, int expectedCount,
         params TouchpadContact[] contacts) =>

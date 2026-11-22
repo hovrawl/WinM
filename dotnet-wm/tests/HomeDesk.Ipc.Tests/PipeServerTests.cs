@@ -717,7 +717,9 @@ internal sealed class TestWindowPlatform : IWindowPlatform
                 Bounds = plan.Placements.FirstOrDefault(placement => placement.WindowId == window.Id)?.Bounds ??
                          window.Bounds,
                 Visible = plan.Visibility?.FirstOrDefault(visibility => visibility.WindowId == window.Id)?.Visible ??
-                          window.Visible
+                          window.Visible,
+                Minimized = plan.Minimizations?.FirstOrDefault(minimization => minimization.WindowId == window.Id)
+                                ?.Minimized ?? window.Minimized
             }).ToArray(),
             FocusedWindowId = plan.FocusWindowId ?? desktop.FocusedWindowId
         };

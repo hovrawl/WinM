@@ -101,6 +101,40 @@ public sealed class SplitTree
         return true;
     }
 
+    public bool MoveAfter(Guid windowId, Guid? afterWindowId)
+    {
+        var currentOrder = WindowOrder.ToList();
+        if (!currentOrder.Contains(windowId)) return false;
+        if (afterWindowId is null) return currentOrder.Count == 1;
+        if (afterWindowId == windowId || !currentOrder.Contains(afterWindowId.Value)) return false;
+
+        var targetOrder = currentOrder.Where(id => id != windowId).ToList();
+        targetOrder.Insert(targetOrder.IndexOf(afterWindowId.Value) + 1, windowId);
+        return MoveToOrder(currentOrder, targetOrder);
+    }
+
+    public bool MoveToIndex(Guid windowId, int index)
+    {
+        var currentOrder = WindowOrder.ToList();
+        if (!currentOrder.Contains(windowId) || index < 0 || index >= currentOrder.Count) return false;
+        var targetOrder = currentOrder.Where(id => id != windowId).ToList();
+        targetOrder.Insert(index, windowId);
+        return MoveToOrder(currentOrder, targetOrder);
+    }
+
+    private bool MoveToOrder(List<Guid> currentOrder, List<Guid> targetOrder)
+    {
+        for (var index = 0; index < targetOrder.Count; index++)
+        {
+            if (currentOrder[index] == targetOrder[index]) continue;
+            var swapIndex = currentOrder.IndexOf(targetOrder[index], index + 1);
+            if (swapIndex < 0 || !Swap(currentOrder[index], currentOrder[swapIndex])) return false;
+            (currentOrder[index], currentOrder[swapIndex]) = (currentOrder[swapIndex], currentOrder[index]);
+        }
+
+        return true;
+    }
+
     public bool Resize(Guid windowId, Direction direction, double amount)
     {
         if (!double.IsFinite(amount) || amount <= 0)
