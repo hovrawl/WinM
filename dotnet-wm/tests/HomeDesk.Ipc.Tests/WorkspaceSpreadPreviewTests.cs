@@ -1,6 +1,7 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using HomeDesk.Contracts;
 using HomeDeskManager;
 using Xunit;
@@ -84,6 +85,65 @@ public sealed class WorkspaceSpreadPreviewTests
         Assert.Single(preview.PreviewCards).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
         Assert.Equal(window.Id, requestedWindowId);
+    }
+
+    [Fact]
+    public void SpreadAnimatesFromWorkspaceAndDismissalCollapsesWithoutAllowingActivation()
+    {
+        var window = Window("Editor");
+        var workspace = Workspace(window.Id) with { Position = new DeskPosition(200, 150) };
+        var preview = new WorkspaceSpreadPreview((_, _) => Task.FromResult(EmptyTargets()));
+        Guid? requestedWindowId = null;
+        preview.WindowActivationRequested += windowId => requestedWindowId = windowId;
+
+        preview.ShowForWorkspace(workspace, [window], false);
+        preview.SetPlacement(new Point(200, 150), new Size(800, 600));
+
+        var layout = WorkspaceSpreadPreview.CalculateLayout(new Point(200, 150), 1, new Size(800, 600));
+        Assert.Equal(1, preview.AnimationTargetProgress);
+        Assert.Equal(new RelativePoint(
+            (200 + 141 / 2d - layout.Position.X) / layout.Size.Width,
+            (150 + 112 / 2d - layout.Position.Y) / layout.Size.Height,
+            RelativeUnit.Relative), preview.RenderTransformOrigin);
+        preview.SetAnimationProgressForTest(0.5);
+        Assert.Equal(0.5, preview.Opacity);
+        Assert.Equal(0.54, Assert.IsType<ScaleTransform>(preview.RenderTransform).ScaleX, 2);
+
+        var card = Assert.Single(preview.PreviewCards);
+        preview.Dismiss();
+        Assert.False(preview.IsOpen);
+        Assert.True(preview.IsVisible);
+        Assert.Single(preview.PreviewCards);
+        card.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert.Null(requestedWindowId);
+
+        preview.SetAnimationProgressForTest(0);
+        Assert.False(preview.IsVisible);
+        Assert.Equal(0, preview.CardCount);
+        Assert.Equal(0, preview.Opacity);
+    }
+
+    [Fact]
+    public void ReopeningSameWorkspaceReversesCollapseAndKeepsCards()
+    {
+        var window = Window("Editor");
+        var workspace = Workspace(window.Id);
+        var preview = new WorkspaceSpreadPreview((_, _) => Task.FromResult(EmptyTargets()));
+        preview.ShowForWorkspace(workspace, [window], false);
+        preview.SetPlacement(new Point(0, 0), new Size(800, 600));
+        preview.SetAnimationProgressForTest(0.4);
+        var card = Assert.Single(preview.PreviewCards);
+
+        preview.Dismiss();
+        Assert.Equal(0, preview.AnimationTargetProgress);
+        preview.ShowForWorkspace(workspace, [window], false);
+        preview.SetPlacement(new Point(0, 0), new Size(800, 600));
+
+        Assert.True(preview.IsOpen);
+        Assert.Equal(1, preview.AnimationTargetProgress);
+        Assert.Same(card, Assert.Single(preview.PreviewCards));
+        Assert.Equal(0.4, preview.AnimationProgress, 2);
+        preview.ResetSession();
     }
 
     [Fact]
@@ -221,7 +281,8 @@ public sealed class WorkspaceSpreadPreviewTests
         var captureCount = 0;
         var captureCreatedCount = 0;
         var captureStarted = new ManualResetEventSlim();
-        var capturedFrame = new TaskCompletionSource<OwnedPreviewFrame?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var capturedFrame =
+            new TaskCompletionSource<OwnedPreviewFrame?>(TaskCreationOptions.RunContinuationsAsynchronously);
         CancellationToken captureToken = default;
         var preview = new WorkspaceSpreadPreview((ids, _) =>
         {

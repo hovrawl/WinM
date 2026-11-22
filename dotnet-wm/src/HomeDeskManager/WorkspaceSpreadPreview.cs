@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -17,15 +18,22 @@ internal sealed class WorkspaceSpreadPreview : Border
 
     private const double CardSpacing = 12;
     private const double OverlayPadding = 10;
+    private const double CollapsedScale = 0.08;
+    private static readonly TimeSpan AnimationDuration = TimeSpan.FromMilliseconds(180);
     private readonly Func<IReadOnlyList<Guid>, CancellationToken, Task<PreviewTargetsResult>> queryPreviewTargets;
     private readonly Func<WindowPreviewCapture> createPreviewCapture;
+    private readonly ScaleTransform scaleTransform = new(CollapsedScale, CollapsedScale);
+    private readonly DispatcherTimer animationTimer = new() { Interval = TimeSpan.FromMilliseconds(16) };
     private readonly WrapPanel cardsPanel = new() { Orientation = Orientation.Horizontal };
+
     private readonly ScrollViewer scrollViewer = new()
     {
         HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
         VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto
     };
+
     private readonly TextBlock heading = new();
+
     private readonly TextBlock emptyState = new()
     {
         Text = "No windows in this workspace",
@@ -34,6 +42,7 @@ internal sealed class WorkspaceSpreadPreview : Border
         VerticalAlignment = VerticalAlignment.Center,
         TextWrapping = TextWrapping.Wrap
     };
+
     private readonly Dictionary<Guid, WindowPreviewTarget> previewTargets = [];
     private readonly Dictionary<Guid, OwnedPreviewFrame> previewFrames = [];
     private readonly Dictionary<Guid, string> previewFailures = [];
@@ -50,6 +59,11 @@ internal sealed class WorkspaceSpreadPreview : Border
     private bool previewAvailable;
     private bool captureBatchStarted;
     private bool isOpen;
+    private bool animationRunning;
+    private double animationProgress;
+    private double animationStartProgress;
+    private double animationTargetProgress;
+    private long animationStartedAt;
 
     public WorkspaceSpreadPreview(
         Func<IReadOnlyList<Guid>, CancellationToken, Task<PreviewTargetsResult>> queryPreviewTargets,
@@ -65,8 +79,12 @@ internal sealed class WorkspaceSpreadPreview : Border
         Padding = new Thickness(OverlayPadding);
         HorizontalAlignment = HorizontalAlignment.Left;
         VerticalAlignment = VerticalAlignment.Top;
+        RenderTransform = scaleTransform;
+        RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative);
+        Opacity = 0;
         IsVisible = false;
         ClipToBounds = true;
+        animationTimer.Tick += OnAnimationTick;
 
         heading.FontSize = 13;
         heading.FontWeight = FontWeight.SemiBold;
@@ -96,6 +114,8 @@ internal sealed class WorkspaceSpreadPreview : Border
     internal IReadOnlyList<Button> PreviewCards => windows.Select(window => cards[window.Id].Card).ToArray();
     internal IReadOnlyList<string?> PreviewMessages => windows.Select(window => cards[window.Id].Message).ToArray();
     internal Task? PendingLookup => previewLookupTask;
+    internal double AnimationProgress => animationProgress;
+    internal double AnimationTargetProgress => animationTargetProgress;
     internal event Action<Guid>? WindowActivationRequested;
 
     internal static bool ShouldShow(bool controlHeld, Guid? hoveredWorkspaceId, bool contextMenuOpen) =>
@@ -110,7 +130,7 @@ internal sealed class WorkspaceSpreadPreview : Border
         var availableWidth = Math.Max(0, viewport.Width - margin * 2);
         var availableHeight = Math.Max(0, viewport.Height - margin * 2);
         var maximumColumns = Math.Clamp((int)Math.Floor((availableWidth + CardSpacing) /
-                                                       (PreviewCardWidth + CardSpacing)), 1, 3);
+                                                        (PreviewCardWidth + CardSpacing)), 1, 3);
         var columns = windowCount == 0 ? 1 : Math.Min(windowCount, maximumColumns);
         var rows = windowCount == 0 ? 0 : (windowCount + columns - 1) / columns;
         var cardsWidth = columns * PreviewCardWidth + (columns - 1) * CardSpacing;
@@ -129,8 +149,16 @@ internal sealed class WorkspaceSpreadPreview : Border
     internal void ShowForWorkspace(WorkspaceInfo workspace, IReadOnlyList<WindowInfo> workspaceWindows,
         bool canPreview)
     {
+        if (workspaceId is not null && workspaceId != workspace.Id)
+        {
+            CompleteDismissal();
+            animationProgress = 0;
+            ApplyAnimationVisuals();
+        }
+
         isOpen = true;
         IsVisible = true;
+        IsHitTestVisible = true;
         UpdateWorkspace(workspace, workspaceWindows, canPreview);
     }
 
@@ -151,7 +179,8 @@ internal sealed class WorkspaceSpreadPreview : Border
         previewAvailable = canPreview;
 
         var candidates = canPreview
-            ? windows.Where(window => window.Visible && !window.Minimized).Select(window => window.Id).Distinct().ToArray()
+            ? windows.Where(window => window.Visible && !window.Minimized).Select(window => window.Id).Distinct()
+                .ToArray()
             : [];
         if (canPreview) RequestPreviewTargets(candidates);
 
@@ -167,11 +196,27 @@ internal sealed class WorkspaceSpreadPreview : Border
         cardsPanel.Width = Math.Max(1, layout.Size.Width - OverlayPadding * 2);
         Canvas.SetLeft(this, layout.Position.X);
         Canvas.SetTop(this, layout.Position.Y);
+        var sourceX = (workspacePosition.X + 141 / 2d - layout.Position.X) / Math.Max(1, layout.Size.Width);
+        var sourceY = (workspacePosition.Y + 112 / 2d - layout.Position.Y) / Math.Max(1, layout.Size.Height);
+        RenderTransformOrigin = new RelativePoint(sourceX, sourceY, RelativeUnit.Relative);
+        AnimateTo(1);
     }
 
     internal void Dismiss()
     {
+        if (!isOpen) return;
         isOpen = false;
+        IsHitTestVisible = false;
+        AnimateTo(0);
+    }
+
+    private void CompleteDismissal()
+    {
+        animationTimer.Stop();
+        animationRunning = false;
+        animationProgress = 0;
+        animationStartProgress = 0;
+        animationTargetProgress = 0;
         IsVisible = false;
         workspaceId = null;
         workspaceName = string.Empty;
@@ -180,11 +225,13 @@ internal sealed class WorkspaceSpreadPreview : Border
         cards.Clear();
         cardsPanel.Children.Clear();
         renderedCardIds = [];
+        ApplyAnimationVisuals();
     }
 
     internal void ResetSession()
     {
-        Dismiss();
+        isOpen = false;
+        CompleteDismissal();
         if (previewSessionCancellation is { } cancellation)
         {
             previewSessionCancellation = null;
@@ -206,6 +253,61 @@ internal sealed class WorkspaceSpreadPreview : Border
         lookupPendingIds.Clear();
         previewLookupTask = null;
         captureBatchStarted = false;
+    }
+
+    private void AnimateTo(double targetProgress)
+    {
+        if (animationRunning && animationTargetProgress == targetProgress) return;
+        if (Math.Abs(animationProgress - targetProgress) < double.Epsilon)
+        {
+            animationTargetProgress = targetProgress;
+            if (targetProgress == 0) CompleteDismissal();
+            return;
+        }
+
+        animationStartProgress = animationProgress;
+        animationTargetProgress = targetProgress;
+        animationStartedAt = Stopwatch.GetTimestamp();
+        animationRunning = true;
+        animationTimer.Start();
+    }
+
+    private void OnAnimationTick(object? sender, EventArgs args)
+    {
+        if (!animationRunning) return;
+        var distance = Math.Abs(animationTargetProgress - animationStartProgress);
+        var duration = TimeSpan.FromTicks((long)(AnimationDuration.Ticks * distance));
+        var progress = Math.Clamp(Stopwatch.GetElapsedTime(animationStartedAt).TotalMilliseconds /
+                                  Math.Max(1, duration.TotalMilliseconds), 0, 1);
+        animationProgress = animationStartProgress +
+                            (animationTargetProgress - animationStartProgress) * progress;
+        ApplyAnimationVisuals();
+        if (progress < 1) return;
+
+        animationTimer.Stop();
+        animationRunning = false;
+        animationProgress = animationTargetProgress;
+        ApplyAnimationVisuals();
+        if (animationTargetProgress == 0) CompleteDismissal();
+    }
+
+    internal void SetAnimationProgressForTest(double progress)
+    {
+        animationTimer.Stop();
+        animationRunning = false;
+        animationProgress = Math.Clamp(progress, 0, 1);
+        ApplyAnimationVisuals();
+        if (animationProgress != animationTargetProgress) return;
+        if (animationTargetProgress == 0) CompleteDismissal();
+    }
+
+    private void ApplyAnimationVisuals()
+    {
+        var eased = animationProgress * animationProgress * (3 - 2 * animationProgress);
+        var scale = CollapsedScale + (1 - CollapsedScale) * eased;
+        scaleTransform.ScaleX = scale;
+        scaleTransform.ScaleY = scale;
+        Opacity = eased;
     }
 
     private void RequestPreviewTargets(Guid[] candidates)
@@ -271,7 +373,8 @@ internal sealed class WorkspaceSpreadPreview : Border
         finally
         {
             if (ReferenceEquals(previewSessionCancellation, cancellation))
-                foreach (var id in ids) lookupPendingIds.Remove(id);
+                foreach (var id in ids)
+                    lookupPendingIds.Remove(id);
         }
     }
 
@@ -351,6 +454,7 @@ internal sealed class WorkspaceSpreadPreview : Border
             foreach (var window in windows) cardsPanel.Children.Add(cards[window.Id].Card);
             renderedCardIds = cardIds;
         }
+
         heading.Text = $"{workspaceName} · {windows.Length} windows";
         emptyState.IsVisible = windows.Length == 0;
         scrollViewer.IsVisible = windows.Length > 0;
@@ -389,6 +493,7 @@ internal sealed class WorkspaceSpreadPreview : Border
     private sealed class SpreadWindowCard : IDisposable
     {
         private readonly Image preview = new() { Stretch = Stretch.UniformToFill };
+
         private readonly TextBlock title = new()
         {
             FontSize = 11,
@@ -396,6 +501,7 @@ internal sealed class WorkspaceSpreadPreview : Border
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center
         };
+
         private readonly TextBlock placeholder = new()
         {
             FontSize = 10,
@@ -406,6 +512,7 @@ internal sealed class WorkspaceSpreadPreview : Border
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(8)
         };
+
         private WriteableBitmap? bitmap;
         private OwnedPreviewFrame? currentFrame;
 

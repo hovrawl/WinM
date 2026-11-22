@@ -58,7 +58,8 @@ host, independent of configured ignore lists.
   typing to reveal the floating search field; matching dims other cards without
   moving them. Escape clears a non-empty search first, then dismisses the switcher.
 - Hold Ctrl while hovering a workspace to spread its windows into compact preview
-  cards. Live capture is unavailable for hidden or minimized windows and while
+  cards; they animate outward from the workspace and collapse back when dismissed.
+  Live capture is unavailable for hidden or minimized windows and while
   disconnected or in demo mode; those windows remain visible as placeholder cards.
   Pressing Ctrl while the pointer is already over a workspace also opens the spread;
   click a window card to focus it. Target lookup and captured frames are reused for
