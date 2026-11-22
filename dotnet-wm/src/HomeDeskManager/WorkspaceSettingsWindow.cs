@@ -17,6 +17,7 @@ internal sealed class WorkspaceSettingsWindow : Window
         Height = 360;
         MinWidth = 560;
         MinHeight = 300;
+        Topmost = true;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         ShowInTaskbar = true;
         Background = SwitcherTheme.Canvas;

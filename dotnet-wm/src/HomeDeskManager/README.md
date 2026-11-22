@@ -54,13 +54,19 @@ host, independent of configured ignore lists.
 
 ## Select and activate
 
-- Both switchers provide a **Workflow settings** button that opens an independent
-  window for workspace layout settings. It stays bound to the selected workspace
-  when the switcher hides or the spatial selection changes. Use **Use Split** or
-  **Use Layered** to change the layout, or edit the layered preferred width cap and
-  horizontal spacing in DIPs and choose **Apply settings**. Changes apply to that
-  explicit workspace ID; editing is disabled in demo mode, while disconnected, or
-  while another command is running.
+- The workspace switcher shows only the shared desk and workspace cards. Start
+  typing to reveal the floating search field; matching dims other cards without
+  moving them. Escape clears a non-empty search first, then dismisses the switcher.
+- Right-click a workspace card to activate it on a specific monitor or open that
+  workspace's settings. Activation is unavailable in demo mode, while disconnected,
+  or while another command is running; settings remain inspectable in those states,
+  but editing is disabled. Layout changes use **Use Split** or **Use Layered**, or
+  edit the layered preferred width cap and horizontal spacing in DIPs and choose
+  **Apply settings**. Changes apply to that explicit workspace ID.
+- Arrow keys select the nearest workspace in that desk direction. Enter or plain
+  Space activates the selected workspace on the explicitly selected monitor; Space
+  remains available for typing while the search field is focused. Clicking a card
+  changes selection but does not activate it.
 - Layered width is a preferred maximum percentage from greater than 0 through 100
   of the usable work width. At the 100% default, one page fills the padded work
   area and each added page reduces every page by one horizontal offset while the
@@ -75,11 +81,6 @@ host, independent of configured ignore lists.
 - Cards are drawn for every workspace, including unviewed workspaces. Their small
   window silhouettes use observed native bounds relative to each window's monitor
   work area; they do not capture screenshots or invent window contents.
-- Search dims nonmatching cards while preserving their map positions and selection.
-- Arrow keys select the nearest workspace in that desk direction. Enter or plain
-  Space activates the selected workspace on the explicitly selected monitor;
-  Space remains available for typing while the search field is focused. Escape
-  dismisses the switcher. Clicking a card changes selection but does not activate it.
 - A ready manager connection installs a process-wide Win32 low-level keyboard
   hook. `Alt+Tab` opens a separate current-workspace window switcher, showing
   visible windows as larger geometric previews and minimized/overflow windows in

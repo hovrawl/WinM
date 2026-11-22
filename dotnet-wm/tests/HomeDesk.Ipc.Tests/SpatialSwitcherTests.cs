@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -264,6 +265,111 @@ public sealed class SpatialSwitcherTests
         Assert.Equal("Research", Assert.Single(matches).Name);
         Assert.Equal(before, after);
         Assert.False(SpatialSwitcherPresentation.Matches(workspaces[0], "res"));
+    }
+
+    [Fact]
+    public void SearchStartsOnlyForPlainTextOutsideTheSearchFieldAndContextMenu()
+    {
+        Assert.True(SwitcherInteractionPolicy.ShouldStartSearch("c", KeyModifiers.None,
+            contextMenuOpen: false, searchFocused: false));
+        Assert.True(SwitcherInteractionPolicy.ShouldStartSearch("C", KeyModifiers.Shift,
+            contextMenuOpen: false, searchFocused: false));
+        Assert.False(SwitcherInteractionPolicy.ShouldStartSearch("c", KeyModifiers.Control,
+            contextMenuOpen: false, searchFocused: false));
+        Assert.False(SwitcherInteractionPolicy.ShouldStartSearch("c", KeyModifiers.Alt,
+            contextMenuOpen: false, searchFocused: false));
+        Assert.False(SwitcherInteractionPolicy.ShouldStartSearch("c", KeyModifiers.Meta,
+            contextMenuOpen: false, searchFocused: false));
+        Assert.False(SwitcherInteractionPolicy.ShouldStartSearch("c", KeyModifiers.None,
+            contextMenuOpen: true, searchFocused: false));
+        Assert.False(SwitcherInteractionPolicy.ShouldStartSearch("c", KeyModifiers.None,
+            contextMenuOpen: false, searchFocused: true));
+    }
+
+    [Fact]
+    public void SwitcherPopupStyleUsesOverlayHostingWithinItsWindowStyles()
+    {
+        var switcherStyles = new Styles();
+        var style = SwitcherWindow.CreateOverlayPopupStyle();
+        switcherStyles.Add(style);
+
+        var setter = Assert.IsType<Setter>(Assert.Single(style.Setters));
+        Assert.Same(Popup.ShouldUseOverlayLayerProperty, setter.Property);
+        Assert.Equal(true, setter.Value);
+        Assert.Contains(nameof(Popup), style.Selector?.ToString() ?? string.Empty);
+        Assert.Single(switcherStyles);
+    }
+
+    [Fact]
+    public void MapRefreshesAreCoalescedUntilTheContextMenuCloses()
+    {
+        var gate = new SwitcherMapRefreshGate();
+
+        gate.BeginMenu();
+
+        Assert.False(gate.RequestRefresh());
+        Assert.False(gate.RequestRefresh());
+        Assert.True(gate.IsMenuOpen);
+        Assert.True(gate.EndMenu());
+        Assert.False(gate.IsMenuOpen);
+        Assert.True(gate.RequestRefresh());
+        Assert.False(gate.EndMenu());
+    }
+
+    [Fact]
+    public void ResettingTheMapRefreshGateReleasesPendingRefreshAndClosesMenu()
+    {
+        var gate = new SwitcherMapRefreshGate();
+        gate.BeginMenu();
+        Assert.False(gate.RequestRefresh());
+
+        Assert.True(gate.Reset());
+        Assert.False(gate.IsMenuOpen);
+        Assert.True(gate.RequestRefresh());
+        Assert.False(gate.EndMenu());
+    }
+
+    [Fact]
+    public void MapRefreshesProceedImmediatelyWhenTheContextMenuIsClosed()
+    {
+        var gate = new SwitcherMapRefreshGate();
+
+        Assert.False(gate.IsMenuOpen);
+        Assert.True(gate.RequestRefresh());
+        Assert.True(gate.RequestRefresh());
+    }
+
+    [Fact]
+    public void EmptySearchHidesOverlayAndEscapeClearsBeforeDismissing()
+    {
+        Assert.False(SwitcherInteractionPolicy.ShouldShowSearch(null));
+        Assert.False(SwitcherInteractionPolicy.ShouldShowSearch(" "));
+        Assert.True(SwitcherInteractionPolicy.ShouldShowSearch("code"));
+        Assert.Equal(SearchEscapeAction.ClearSearch, SwitcherInteractionPolicy.EscapeAction("code"));
+        Assert.Equal(SearchEscapeAction.Dismiss, SwitcherInteractionPolicy.EscapeAction(""));
+    }
+
+    [Fact]
+    public void WorkspaceContextTargetsUseTheInvokedWorkspaceAndRespectAvailability()
+    {
+        var workspaceId = Guid.NewGuid();
+        var firstMonitorId = Guid.NewGuid();
+        var secondMonitorId = Guid.NewGuid();
+
+        var unavailable = SwitcherInteractionPolicy.ContextTargets(workspaceId,
+            [firstMonitorId, Guid.Empty, secondMonitorId], canActivate: false);
+
+        Assert.Equal(3, unavailable.Count);
+        Assert.All(unavailable, target => Assert.Equal(workspaceId, target.WorkspaceId));
+        Assert.All(unavailable.Where(target => target.Action == WorkspaceContextAction.Activate),
+            target => Assert.False(target.IsEnabled));
+        Assert.Equal([firstMonitorId, secondMonitorId], unavailable
+            .Where(target => target.Action == WorkspaceContextAction.Activate)
+            .Select(target => target.MonitorId!.Value));
+        Assert.True(Assert.Single(unavailable, target => target.Action == WorkspaceContextAction.Settings).IsEnabled);
+
+        var available = SwitcherInteractionPolicy.ContextTargets(workspaceId, [firstMonitorId], canActivate: true);
+        Assert.True(Assert.Single(available, target => target.Action == WorkspaceContextAction.Activate).IsEnabled);
     }
 
     [Fact]

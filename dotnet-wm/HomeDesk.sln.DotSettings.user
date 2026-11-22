@@ -4,8 +4,5 @@
   &lt;Solution /&gt;&#xD;
 &lt;/SessionState&gt;</s:String>
 	<s:String x:Key="/Default/Environment/UnitTesting/UnitTestSessionStore/Sessions/=aabb4658_002De5a5_002D4032_002D9fed_002D5864cc6788a5/@EntryIndexedValue">&lt;SessionState ContinuousTestingMode="0" IsActive="True" Name="Agent Session" xmlns="urn:schemas-jetbrains-com:jetbrains-ut-session"&gt;&#xD;
-  &lt;TestAncestor&gt;&#xD;
-    &lt;TestId&gt;xUnit::632424EA-5CFB-453C-9C7E-5FD9C86593B9::net10.0-windows7.0::HomeDesk.Ipc.Tests.SpatialSwitcherTests&lt;/TestId&gt;&#xD;
-    &lt;TestId&gt;xUnit::632424EA-5CFB-453C-9C7E-5FD9C86593B9::net10.0-windows10.0.19041.0::HomeDesk.Ipc.Tests.SpatialSwitcherTests&lt;/TestId&gt;&#xD;
-  &lt;/TestAncestor&gt;&#xD;
+  &lt;ProjectFile&gt;632424EA-5CFB-453C-9C7E-5FD9C86593B9/f:SpatialSwitcherTests.cs&lt;/ProjectFile&gt;&#xD;
 &lt;/SessionState&gt;</s:String></wpf:ResourceDictionary>
