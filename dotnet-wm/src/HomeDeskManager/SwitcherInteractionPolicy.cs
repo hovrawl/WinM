@@ -1,4 +1,5 @@
-﻿using Avalonia.Input;
+﻿using Avalonia;
+using Avalonia.Input;
 
 namespace HomeDeskManager;
 
@@ -22,6 +23,19 @@ internal enum SearchEscapeAction
 
 internal static class SwitcherInteractionPolicy
 {
+    public static bool ShouldActivateWorkspace(int clickCount, bool workspaceAvailable, bool canActivate) =>
+        WindowSwitcherPresentation.IsDoubleClick(clickCount) && workspaceAvailable && canActivate;
+
+    public static Guid? WorkspaceAt(Point pointerPosition, IReadOnlyDictionary<Guid, Point> tileLocations,
+        Size tileSize)
+    {
+        ArgumentNullException.ThrowIfNull(tileLocations);
+        foreach (var (workspaceId, location) in tileLocations)
+            if (new Rect(location, tileSize).Contains(pointerPosition))
+                return workspaceId;
+        return null;
+    }
+
     public static bool ShouldStartSearch(string? text, KeyModifiers modifiers, bool contextMenuOpen,
         bool searchFocused) =>
         !contextMenuOpen && !searchFocused &&

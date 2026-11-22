@@ -10,6 +10,17 @@ namespace HomeDesk.Ipc.Tests;
 public sealed class WindowPreviewCaptureTests
 {
     [Fact]
+    public void SnapshotBackendPreservesCancellationInsteadOfReportingCaptureFailure()
+    {
+        var cancellation = new OperationCanceledException("Preview lookup was dismissed.");
+
+        var normalized = WindowsSnapshotBackend.NormalizeCaptureError(cancellation, default);
+
+        Assert.Same(cancellation, normalized);
+        Assert.IsNotType<PreviewCaptureException>(normalized);
+    }
+
+    [Fact]
     public void CaptureItemInteropCallsFirstIUnknownMethod()
     {
         var requestedWindow = new nint(1234);

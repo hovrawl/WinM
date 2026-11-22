@@ -23,6 +23,7 @@ internal sealed class SwitcherWindow : Window
     private readonly Action<string, string>? trayStatusChanged;
     private readonly CancellationTokenSource lifetime = new();
     private readonly Canvas map = new() { ClipToBounds = true, Focusable = true };
+    private readonly Canvas spreadLayer = new() { ClipToBounds = true };
     private readonly TextBox search = new();
     private readonly TextBlock resultCount = new();
     private readonly TextBlock status = new();
@@ -31,11 +32,13 @@ internal sealed class SwitcherWindow : Window
     private readonly CurrentWorkspaceWindow currentWorkspaceWindow;
     private readonly CarouselWindow carouselWindow;
     private readonly CarouselScrollAccumulator scrollAccumulator;
+    private readonly WorkspaceSpreadPreview workspaceSpreadPreview;
     private GeneralSettingsWindow? settingsWindow;
     private WorkspaceSettingsWindow? workspaceSettingsWindow;
     private TouchpadInputSource? touchpadInput;
     private Task? connectionRetry;
     private readonly Dictionary<Guid, Button> workspaceTiles = [];
+    private readonly Dictionary<Guid, Point> workspaceTileLocations = [];
     private SwitcherKeyboardHook? keyboardHook;
     private ManagerSession? session;
     private ManagerSnapshot? snapshot;
@@ -48,6 +51,9 @@ internal sealed class SwitcherWindow : Window
     private bool connecting;
     private bool commandBusy;
     private KeyModifiers lastKeyModifiers;
+    private Guid? hoveredWorkspaceId;
+    private Point? lastPointerPosition;
+    private bool controlHeld;
     private bool allowClose;
     private bool touchpadConfigurationLoaded;
     private bool touchpadEnabled = true;
@@ -63,6 +69,8 @@ internal sealed class SwitcherWindow : Window
         currentWorkspaceWindow = new CurrentWorkspaceWindow(FocusWindowAsync, QueryPreviewTargetsAsync);
         carouselWindow = new CarouselWindow(QueryPreviewTargetsAsync, FocusWindowAsync, MinimizeWindowAsync,
             RestoreWindowAsync);
+        workspaceSpreadPreview = new WorkspaceSpreadPreview(QueryPreviewTargetsAsync);
+        workspaceSpreadPreview.WindowActivationRequested += windowId => _ = ActivatePreviewWindowAsync(windowId);
         scrollAccumulator = new CarouselScrollAccumulator(action => Dispatcher.UIThread.Post(action), delta =>
         {
             if (carouselWindow.IsVisible) carouselWindow.ScrollBy(delta);
@@ -80,6 +88,8 @@ internal sealed class SwitcherWindow : Window
         Styles.Add(CreateOverlayPopupStyle());
         Content = BuildContent();
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
+        AddHandler(KeyUpEvent, OnKeyUp, RoutingStrategies.Tunnel);
+        AddHandler(PointerMovedEvent, OnPointerMoved, RoutingStrategies.Tunnel);
         AddHandler(TextInputEvent, OnTextInput, RoutingStrategies.Tunnel);
         Deactivated += (_, _) =>
         {
@@ -122,6 +132,10 @@ internal sealed class SwitcherWindow : Window
 
     public void ShowWorkspaceSwitcher()
     {
+        workspaceSpreadPreview.ResetSession();
+        hoveredWorkspaceId = null;
+        lastPointerPosition = null;
+        controlHeld = false;
         search.Clear();
         searchOverlay.IsVisible = false;
         mapRefreshGate.Reset();
@@ -195,6 +209,7 @@ internal sealed class SwitcherWindow : Window
         keyboardHook = null;
         currentWorkspaceWindow.PrepareForShutdown();
         carouselWindow.PrepareForShutdown();
+        workspaceSpreadPreview.ResetSession();
         if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 15063) && touchpadInput is { } source)
         {
             touchpadInput = null;
@@ -248,6 +263,10 @@ internal sealed class SwitcherWindow : Window
         mapBorder.ClipToBounds = true;
         map.SizeChanged += (_, _) => RenderMap();
         desk.Children.Add(mapBorder);
+        spreadLayer.SizeChanged += (_, _) => PositionWorkspaceSpread();
+        spreadLayer.Children.Add(workspaceSpreadPreview);
+        workspaceSpreadPreview.PointerExited += (_, _) => ScheduleWorkspaceSpreadDismissal();
+        desk.Children.Add(spreadLayer);
 
         var searchGrid = new Grid
         {
@@ -386,14 +405,18 @@ internal sealed class SwitcherWindow : Window
     private void HandleDisconnect(ManagerSession source, Exception? failure)
     {
         if (!ReferenceEquals(session, source)) return;
+        var refreshSpread = workspaceSpreadPreview.IsOpen;
+        workspaceSpreadPreview.ResetSession();
         session = null;
         settingsWindow?.UpdateSession(null);
         connected = false;
+        UpdateWorkspaceSpreadSnapshot(snapshot);
         carouselWindow.Dismiss();
         currentWorkspaceWindow.Dismiss();
         keyboardHook?.Dispose();
         keyboardHook = null;
         keyboardHookAttempted = false;
+        if (refreshSpread) UpdateWorkspaceSpread();
         lastMessage = failure is null
             ? "Connection closed · snapshot is stale · reconnect before activating."
             : $"Connection lost · {failure.Message} · command outcome may be unknown.";
@@ -418,6 +441,7 @@ internal sealed class SwitcherWindow : Window
         settingsWindow?.UpdateSnapshot(next);
         workspaceSettingsWindow?.UpdateSnapshot(next, connected && !demoMode && !commandBusy);
         if (carouselWindow.IsVisible) _ = carouselWindow.UpdateSnapshotAsync(next, connected);
+        UpdateWorkspaceSpreadSnapshot(next);
         RequestMapRender();
         UpdateActions();
     }
@@ -442,6 +466,10 @@ internal sealed class SwitcherWindow : Window
 
     private void HideSwitcher()
     {
+        workspaceSpreadPreview.ResetSession();
+        hoveredWorkspaceId = null;
+        lastPointerPosition = null;
+        controlHeld = false;
         if (mapRefreshGate.Reset()) QueueMapRender();
         Hide();
     }
@@ -450,8 +478,10 @@ internal sealed class SwitcherWindow : Window
     {
         map.Children.Clear();
         workspaceTiles.Clear();
+        workspaceTileLocations.Clear();
         if (snapshot?.Workspaces is not { Count: > 0 } workspaces)
         {
+            DismissWorkspaceSpread();
             resultCount.Text = "0 workspaces";
             map.Children.Add(SwitcherTheme.Caption("Waiting for workspace state…"));
             return;
@@ -459,6 +489,7 @@ internal sealed class SwitcherWindow : Window
 
         if (!SpatialSwitcherPresentation.HasSpatialState(workspaces))
         {
+            DismissWorkspaceSpread();
             resultCount.Text = "spatial state unavailable";
             map.Children.Add(new TextBlock
             {
@@ -502,9 +533,11 @@ internal sealed class SwitcherWindow : Window
             tile.Opacity = SpatialSwitcherPresentation.Matches(workspace, query) ? 1 : 0.22;
             map.Children.Add(tile);
             workspaceTiles.Add(workspace.Id, tile);
+            workspaceTileLocations.Add(workspace.Id, locations[workspace.Id]);
         }
 
         UpdateSelectedWorkspaceTile();
+        PositionWorkspaceSpread();
     }
 
     private Button CreateWorkspaceTile(WorkspaceInfo workspace)
@@ -567,7 +600,11 @@ internal sealed class SwitcherWindow : Window
             : $"{workspace.Layout} · {workspace.WindowIds.Count} windows · unviewed";
         content.Children.Add(new TextBlock { Text = view, FontSize = 9, Foreground = SwitcherTheme.MutedText });
         card.Content = content;
-        card.Click += (_, _) => SelectWorkspace(workspace.Id);
+        card.Click += (_, _) => SelectWorkspace(workspace.Id, renderMap: false);
+        CurrentWorkspaceWindow.AttachCardPointerHandler(card,
+            clickCount => HandleWorkspaceTilePointerPressed(workspace.Id, clickCount));
+        card.PointerEntered += (_, args) => OnWorkspaceTilePointerEntered(workspace.Id, args);
+        card.PointerExited += (_, _) => OnWorkspaceTilePointerExited(workspace.Id, card);
         card.ContextMenu = CreateWorkspaceContextMenu(workspace.Id);
         return card;
     }
@@ -605,7 +642,11 @@ internal sealed class SwitcherWindow : Window
         var settings = new MenuItem { Header = "Workspace settings" };
         settings.Click += (_, _) => ShowWorkspaceSettingsWindow(workspaceId);
         menu.Items.Add(settings);
-        menu.Opening += (_, _) => mapRefreshGate.BeginMenu();
+        menu.Opening += (_, _) =>
+        {
+            DismissWorkspaceSpread();
+            mapRefreshGate.BeginMenu();
+        };
         menu.Opened += (_, _) =>
         {
             mapRefreshGate.BeginMenu();
@@ -683,6 +724,15 @@ internal sealed class SwitcherWindow : Window
     private void OnKeyDown(object? sender, KeyEventArgs args)
     {
         lastKeyModifiers = args.KeyModifiers;
+        if (IsControlKey(args.Key) || args.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            controlHeld = true;
+            if (lastPointerPosition is { } pointerPosition)
+                hoveredWorkspaceId = SwitcherInteractionPolicy.WorkspaceAt(pointerPosition, workspaceTileLocations,
+                    new Size(141, 112));
+            UpdateWorkspaceSpread();
+        }
+
         if (mapRefreshGate.IsMenuOpen || !WorkspaceDetailsControl.ShouldHandlePopupKey(false, args.Key)) return;
 
         if (args.Key == Key.Escape)
@@ -721,6 +771,171 @@ internal sealed class SwitcherWindow : Window
         {
             SelectWorkspace(target);
             args.Handled = true;
+        }
+    }
+
+    private void OnKeyUp(object? sender, KeyEventArgs args)
+    {
+        lastKeyModifiers = args.KeyModifiers;
+        if (IsControlKey(args.Key))
+        {
+            controlHeld = false;
+            DismissWorkspaceSpread();
+            return;
+        }
+
+        controlHeld = args.KeyModifiers.HasFlag(KeyModifiers.Control);
+    }
+
+    private static bool IsControlKey(Key key) => key is Key.LeftCtrl or Key.RightCtrl;
+
+    private void OnPointerMoved(object? sender, PointerEventArgs args)
+    {
+        if (workspaceSpreadPreview.IsPointerOver) return;
+        lastPointerPosition = args.GetPosition(map);
+    }
+
+    private void OnWorkspaceTilePointerEntered(Guid workspaceId, PointerEventArgs args)
+    {
+        hoveredWorkspaceId = workspaceId;
+        lastPointerPosition = args.GetPosition(map);
+        controlHeld = args.KeyModifiers.HasFlag(KeyModifiers.Control);
+        UpdateWorkspaceSpread();
+    }
+
+    private bool HandleWorkspaceTilePointerPressed(Guid workspaceId, int clickCount)
+    {
+        var workspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == workspaceId);
+        var monitorId = popupContext.MonitorId;
+        var canActivate = connected && !demoMode && !commandBusy && session is { IsConnected: true } &&
+                          monitorId is { } targetMonitorId &&
+                          snapshot?.Desktop.Monitors.Any(monitor => monitor.Id == targetMonitorId) == true;
+        if (!SwitcherInteractionPolicy.ShouldActivateWorkspace(clickCount,
+                workspace is not null && SpatialSwitcherPresentation.HasSpatialState(snapshot?.Workspaces), canActivate))
+            return false;
+
+        SelectWorkspace(workspaceId, renderMap: false);
+        _ = ActivateWorkspaceAsync(workspaceId, monitorId!.Value);
+        return true;
+    }
+
+    private void OnWorkspaceTilePointerExited(Guid workspaceId, Button tile)
+    {
+        if (workspaceTiles.TryGetValue(workspaceId, out var currentTile) && ReferenceEquals(currentTile, tile))
+            ScheduleWorkspaceSpreadDismissal();
+    }
+
+    private void UpdateWorkspaceSpread()
+    {
+        if (!WorkspaceSpreadPreview.ShouldShow(controlHeld, hoveredWorkspaceId, mapRefreshGate.IsMenuOpen))
+        {
+            if (!controlHeld || mapRefreshGate.IsMenuOpen) DismissWorkspaceSpread();
+            return;
+        }
+
+        if (snapshot?.Workspaces is not { } workspaces ||
+            workspaces.FirstOrDefault(workspace => workspace.Id == hoveredWorkspaceId) is not { } workspace)
+        {
+            DismissWorkspaceSpread();
+            return;
+        }
+
+        var windows = SpatialSwitcherPresentation.WindowsForWorkspace(workspace, snapshot.Desktop.Windows);
+        var canPreview = connected && !demoMode;
+        if (!workspaceSpreadPreview.IsOpen || workspaceSpreadPreview.WorkspaceId != workspace.Id)
+            workspaceSpreadPreview.ShowForWorkspace(workspace, windows, canPreview);
+        else
+            workspaceSpreadPreview.UpdateWorkspace(workspace, windows, canPreview);
+        PositionWorkspaceSpread();
+    }
+
+    private void UpdateWorkspaceSpreadSnapshot(ManagerSnapshot? currentSnapshot)
+    {
+        if (!workspaceSpreadPreview.IsOpen || workspaceSpreadPreview.WorkspaceId is not { } id) return;
+        var workspace = currentSnapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == id);
+        if (workspace is null)
+        {
+            DismissWorkspaceSpread();
+            return;
+        }
+
+        workspaceSpreadPreview.UpdateWorkspace(workspace,
+            SpatialSwitcherPresentation.WindowsForWorkspace(workspace, currentSnapshot!.Desktop.Windows),
+            connected && !demoMode);
+        PositionWorkspaceSpread();
+    }
+
+    private void PositionWorkspaceSpread()
+    {
+        if (!workspaceSpreadPreview.IsOpen) return;
+        if (workspaceSpreadPreview.WorkspaceId is not { } id || !workspaceTileLocations.TryGetValue(id, out var location))
+        {
+            DismissWorkspaceSpread();
+            return;
+        }
+
+        workspaceSpreadPreview.SetPlacement(location, spreadLayer.Bounds.Size);
+    }
+
+    private void ScheduleWorkspaceSpreadDismissal()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!IsVisible || mapRefreshGate.IsMenuOpen || !controlHeld)
+            {
+                DismissWorkspaceSpread();
+                if (!controlHeld || mapRefreshGate.IsMenuOpen) hoveredWorkspaceId = null;
+                return;
+            }
+
+            if (workspaceSpreadPreview.IsPointerOver) return;
+            if (hoveredWorkspaceId is { } id && workspaceTiles.TryGetValue(id, out var tile) && tile.IsPointerOver)
+                return;
+            DismissWorkspaceSpread();
+            hoveredWorkspaceId = null;
+        });
+    }
+
+    private void DismissWorkspaceSpread() => workspaceSpreadPreview.Dismiss();
+
+    private async Task ActivatePreviewWindowAsync(Guid windowId)
+    {
+        if (!workspaceSpreadPreview.IsOpen || !connected || demoMode || commandBusy ||
+            session is not { IsConnected: true } || workspaceSpreadPreview.WorkspaceId is not { } workspaceId ||
+            snapshot?.Workspaces?.FirstOrDefault(workspace => workspace.Id == workspaceId) is not { } workspace ||
+            !workspace.WindowIds.Contains(windowId) ||
+            snapshot.Desktop.Windows.FirstOrDefault(window => window.Id == windowId) is not { } window)
+            return;
+
+        commandBusy = true;
+        SetStatus($"Focusing {window.Title}…");
+        UpdateActions();
+        try
+        {
+            var result = await FocusWindowAsync(windowId);
+            if (result.Success)
+            {
+                lastMessage = $"Focused {window.Title} · revision {result.StateRevision}";
+                SetStatus(lastMessage);
+                HideSwitcher();
+            }
+            else
+            {
+                lastMessage = $"Window focus failed · {result.ErrorCode}: {result.Message}";
+                SetStatus(lastMessage);
+            }
+        }
+        catch (Exception error)
+        {
+            lastMessage = session is { IsConnected: true }
+                ? $"Window focus failed · {error.Message}"
+                : $"Connection lost during window focus · outcome may be unknown. Reconnect and inspect state. {error.Message}";
+            SetStatus(lastMessage);
+        }
+        finally
+        {
+            commandBusy = false;
+            UpdateActions();
         }
     }
 

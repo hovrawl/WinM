@@ -57,16 +57,23 @@ host, independent of configured ignore lists.
 - The workspace switcher shows only the shared desk and workspace cards. Start
   typing to reveal the floating search field; matching dims other cards without
   moving them. Escape clears a non-empty search first, then dismisses the switcher.
+- Hold Ctrl while hovering a workspace to spread its windows into compact preview
+  cards. Live capture is unavailable for hidden or minimized windows and while
+  disconnected or in demo mode; those windows remain visible as placeholder cards.
+  Pressing Ctrl while the pointer is already over a workspace also opens the spread;
+  click a window card to focus it. Target lookup and captured frames are reused for
+  each window until the workspace switcher closes.
 - Right-click a workspace card to activate it on a specific monitor or open that
   workspace's settings. Activation is unavailable in demo mode, while disconnected,
   or while another command is running; settings remain inspectable in those states,
   but editing is disabled. Layout changes use **Use Split** or **Use Layered**, or
   edit the layered preferred width cap and horizontal spacing in DIPs and choose
   **Apply settings**. Changes apply to that explicit workspace ID.
+- Double-click a workspace to activate it on the switcher's current monitor.
 - Arrow keys select the nearest workspace in that desk direction. Enter or plain
   Space activates the selected workspace on the explicitly selected monitor; Space
-  remains available for typing while the search field is focused. Clicking a card
-  changes selection but does not activate it.
+  remains available for typing while the search field is focused. A single click
+  changes selection without activating the workspace.
 - Layered width is a preferred maximum percentage from greater than 0 through 100
   of the usable work width. At the 100% default, one page fills the padded work
   area and each added page reduces every page by one horizontal offset while the

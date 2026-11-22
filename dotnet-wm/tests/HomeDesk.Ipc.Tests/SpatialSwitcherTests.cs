@@ -1113,6 +1113,51 @@ public sealed class SpatialSwitcherTests
         Assert.Equal(1, acceptedPresses);
     }
 
+    [Theory]
+    [InlineData(1, true, true, false)]
+    [InlineData(2, false, true, false)]
+    [InlineData(2, true, false, false)]
+    [InlineData(2, true, true, true)]
+    public void WorkspaceActivationRequiresAvailableWorkspaceAndLeftDoublePress(int clickCount,
+        bool isLeftButtonPressed, bool canActivate, bool expected)
+    {
+        var button = new Button { Content = new Border() };
+        var pointer = new Pointer(1, PointerType.Mouse, true);
+        var activated = 0;
+        CurrentWorkspaceWindow.AttachCardPointerHandler(button, count =>
+        {
+            var shouldActivate = SwitcherInteractionPolicy.ShouldActivateWorkspace(count,
+                workspaceAvailable: true, canActivate);
+            if (shouldActivate) activated++;
+            return shouldActivate;
+        });
+
+        var press = CreatePointerPress(Assert.IsType<Border>(button.Content), button, pointer, clickCount,
+            isLeftButtonPressed);
+        button.RaiseEvent(press);
+
+        Assert.Equal(expected, activated == 1);
+    }
+
+    [Fact]
+    public void CtrlPressHitTestsTheRememberedPointerAgainstCurrentWorkspaceBounds()
+    {
+        var firstWorkspace = Guid.NewGuid();
+        var secondWorkspace = Guid.NewGuid();
+        var locations = new Dictionary<Guid, Point>
+        {
+            [firstWorkspace] = new(20, 30),
+            [secondWorkspace] = new(200, 30)
+        };
+
+        Assert.Equal(firstWorkspace,
+            SwitcherInteractionPolicy.WorkspaceAt(new(80, 80), locations, new Size(141, 112)));
+        Assert.Equal(secondWorkspace,
+            SwitcherInteractionPolicy.WorkspaceAt(new(250, 80), locations, new Size(141, 112)));
+        Assert.Null(SwitcherInteractionPolicy.WorkspaceAt(new(170, 80), locations, new Size(141, 112)));
+        Assert.Null(SwitcherInteractionPolicy.WorkspaceAt(new(-1, -1), locations, new Size(141, 112)));
+    }
+
     [Fact]
     public void CarouselBackgroundLeftPressDismissesButCardContentAndRightPressDoNot()
     {

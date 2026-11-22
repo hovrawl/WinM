@@ -37,6 +37,14 @@ internal sealed class WindowsSnapshotBackend : IDisposable
     public Task<OwnedPreviewFrame?> CaptureAsync(WindowPreviewTarget target, CancellationToken cancellationToken) =>
         Task.Run(() => Capture(target, cancellationToken), cancellationToken);
 
+    internal static Exception NormalizeCaptureError(Exception error, PreviewCaptureTimings timings) => error switch
+    {
+        PreviewCaptureException captureError =>
+            new PreviewCaptureException(captureError.FailureCode, timings, captureError.InnerException),
+        OperationCanceledException => error,
+        _ => new PreviewCaptureException("capture-error", timings, error)
+    };
+
     public void Dispose()
     {
         lock (deviceSync)
@@ -205,17 +213,9 @@ internal sealed class WindowsSnapshotBackend : IDisposable
                 ComRelease(item);
             }
         }
-        catch (PreviewCaptureException error)
-        {
-            throw new PreviewCaptureException(error.FailureCode, Timings(), error.InnerException);
-        }
-        catch (OperationCanceledException error)
-        {
-            throw new PreviewCaptureException("cancelled", Timings(), error);
-        }
         catch (Exception error)
         {
-            throw new PreviewCaptureException("capture-error", Timings(), error);
+            throw NormalizeCaptureError(error, Timings());
         }
     }
 
