@@ -40,8 +40,8 @@ internal sealed class CarouselScrollAccumulator(Action<Action> schedule, Action<
 internal sealed class CarouselScrollMotion
 {
     private const double InputAcceleration = 3.2;
-    private const double Friction = 5.5;
-    private const double MaximumVelocity = 2800;
+    private const double Friction = 3.5;
+    private const double MaximumVelocity = 4600;
     private const double MinimumVelocity = 5;
     private double velocity;
 
