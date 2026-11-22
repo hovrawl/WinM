@@ -66,7 +66,7 @@ internal sealed class SwitcherWindow : Window
         this.demoMode = demoMode;
         this.pipeName = pipeName;
         this.trayStatusChanged = trayStatusChanged;
-        currentWorkspaceWindow = new CurrentWorkspaceWindow(FocusWindowAsync, ShowWorkspaceSettingsWindow);
+        currentWorkspaceWindow = new CurrentWorkspaceWindow(FocusWindowAsync, QueryPreviewTargetsAsync);
         carouselWindow = new CarouselWindow(QueryPreviewTargetsAsync, FocusWindowAsync);
         scrollAccumulator = new CarouselScrollAccumulator(action => Dispatcher.UIThread.Post(action), delta =>
         {
@@ -130,7 +130,7 @@ internal sealed class SwitcherWindow : Window
     {
         var (placement, context) = CapturePopupContext();
         carouselWindow.Dismiss();
-        currentWorkspaceWindow.Hide();
+        currentWorkspaceWindow.Dismiss();
         PopupPlacement.Place(this, placement);
         ApplyPopupContext(context);
         windowSelectionMode = false;
@@ -184,7 +184,7 @@ internal sealed class SwitcherWindow : Window
 
         var (placement, context) = CapturePopupContext();
         Hide();
-        currentWorkspaceWindow.Hide();
+        currentWorkspaceWindow.Dismiss();
         await carouselWindow.ShowForContextAsync(snapshot, context, connected, placement);
     }
 
@@ -482,7 +482,7 @@ internal sealed class SwitcherWindow : Window
         settingsWindow?.UpdateSession(null);
         connected = false;
         carouselWindow.Dismiss();
-        currentWorkspaceWindow.Hide();
+        currentWorkspaceWindow.Dismiss();
         keyboardHook?.Dispose();
         keyboardHook = null;
         keyboardHookAttempted = false;
@@ -492,7 +492,7 @@ internal sealed class SwitcherWindow : Window
             : $"Connection lost · {failure.Message} · command outcome may be unknown.";
         status.Text = lastMessage;
         if (snapshot is not null)
-            currentWorkspaceWindow.UpdateSnapshot(snapshot, popupContext.WorkspaceId, popupContext.MonitorId, false);
+            currentWorkspaceWindow.UpdateSnapshot(snapshot, popupContext.WorkspaceId, false);
         UpdateActions();
         _ = source.DisposeAsync();
     }
@@ -526,7 +526,7 @@ internal sealed class SwitcherWindow : Window
         monitorTarget.SelectedItem = monitorTarget.Items.Cast<MonitorChoice>()
             .FirstOrDefault(choice => choice.Id == selectedMonitor?.Id);
         popupContext.SelectMonitor(selectedMonitor?.Id ?? context.MonitorId);
-        currentWorkspaceWindow.UpdateSnapshot(next, popupContext.WorkspaceId, popupContext.MonitorId, connected);
+        currentWorkspaceWindow.UpdateSnapshot(next, popupContext.WorkspaceId, connected);
         settingsWindow?.UpdateSnapshot(next);
         workspaceSettingsWindow?.UpdateSnapshot(next, connected && !demoMode && !commandBusy);
         if (carouselWindow.IsVisible) _ = carouselWindow.UpdateSnapshotAsync(next, connected);

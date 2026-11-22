@@ -4,6 +4,11 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
+using Avalonia.Threading;
+using System.Runtime.InteropServices;
+using HomeDesk.Client;
 using HomeDesk.Contracts;
 
 namespace HomeDeskManager;
@@ -15,38 +20,60 @@ internal sealed class CurrentWorkspaceWindow : Window
     private static readonly IBrush SelectedBrush = SwitcherTheme.AccentSoft;
     private static readonly IBrush CardBorderBrush = SwitcherTheme.Border;
     private static readonly IBrush AccentBrush = SwitcherTheme.Accent;
-    private static readonly IBrush TextBrush = SwitcherTheme.Text;
     private static readonly IBrush MutedBrush = SwitcherTheme.MutedText;
-    private static readonly IReadOnlyList<SolidColorBrush> ShapeBrushes = SwitcherTheme.WindowShapePalette;
 
     private readonly Func<Guid, Task<CommandResult>> focusWindow;
-    private readonly Action<Guid?> openWorkspaceSettings;
-    private readonly StackPanel activeCards = new() { Orientation = Orientation.Horizontal, Spacing = 12 };
+    private readonly Func<IReadOnlyList<Guid>, CancellationToken, Task<PreviewTargetsResult>> queryPreviewTargets;
+
+    private readonly StackPanel activeCards = new()
+    {
+        Orientation = Orientation.Horizontal,
+        Spacing = 12,
+        VerticalAlignment = VerticalAlignment.Center
+    };
+
     private readonly StackPanel inactiveCards = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
-    private readonly TextBlock workspaceTitle = new();
-    private readonly TextBlock activeHeading = new();
-    private readonly TextBlock inactiveHeading = new();
-    private readonly TextBlock status = new();
-    private Button focusButton = null!;
-    private Button workspaceSettingsButton = null!;
+    private readonly ScrollViewer activeScroll = new();
+    private readonly ScrollViewer inactiveScroll = new();
+
+    private readonly Border inactiveDivider = new()
+    {
+        Height = 1,
+        Background = SwitcherTheme.Border,
+        IsVisible = false
+    };
+
+    private readonly TextBlock emptyState = new();
+    private readonly TextBlock feedback = new();
+    private readonly Dictionary<Guid, WindowCardVisual> cards = [];
+    private readonly Dictionary<Guid, WindowPreviewTarget> previewTargets = [];
+    private readonly Dictionary<Guid, OwnedPreviewFrame> previewFrames = [];
+    private readonly Dictionary<Guid, string> previewFailures = [];
+    private readonly WindowRailSelectionState railSelection = new();
     private ManagerSnapshot? snapshot;
     private WorkspaceInfo? workspace;
     private WorkspaceWindowGroups groups = new([], []);
-    private Guid? monitorId;
+    private WindowPreviewCapture? previewCapture;
+    private CancellationTokenSource? previewLookupCancellation;
+    private WindowInfo[] requestedPreviewCandidates = [];
     private Guid? selectedWindowId;
     private bool connected;
     private bool commandBusy;
+    private bool previewLookupPending;
     private bool allowClose;
+    private Guid[] renderedActiveIds = [];
+    private Guid[] renderedInactiveIds = [];
 
-    public CurrentWorkspaceWindow(Func<Guid, Task<CommandResult>> focusWindow, Action<Guid?> openWorkspaceSettings)
+    public CurrentWorkspaceWindow(Func<Guid, Task<CommandResult>> focusWindow,
+        Func<IReadOnlyList<Guid>, CancellationToken, Task<PreviewTargetsResult>> queryPreviewTargets)
     {
         this.focusWindow = focusWindow;
-        this.openWorkspaceSettings = openWorkspaceSettings;
-        Title = "Current workspace · One desk";
-        Width = 790;
-        Height = 620;
+        this.queryPreviewTargets = queryPreviewTargets;
+        Title = "Window switcher · One desk";
+        Width = 980;
+        Height = 520;
         MinWidth = 620;
-        MinHeight = 540;
+        MinHeight = 390;
         CanResize = false;
         ShowInTaskbar = false;
         WindowDecorations = Avalonia.Controls.WindowDecorations.None;
@@ -57,58 +84,82 @@ internal sealed class CurrentWorkspaceWindow : Window
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
         Deactivated += (_, _) =>
         {
-            if (IsVisible) Hide();
+            if (IsVisible) Dismiss();
         };
         Closing += (_, args) =>
         {
             if (allowClose) return;
             args.Cancel = true;
-            Hide();
+            Dismiss();
         };
+        Closed += (_, _) => ReleasePreviewCapture();
     }
 
     public void PrepareForShutdown()
     {
         allowClose = true;
         if (IsVisible) Close();
+        else ReleasePreviewCapture();
+    }
+
+    public void Dismiss()
+    {
+        CancelPreviewLookup();
+        previewCapture?.SetTargets([]);
+        previewCapture?.Pause();
+        requestedPreviewCandidates = [];
+        ClearPreviewPresentation();
+        if (IsVisible) Hide();
     }
 
     public void ShowForContext(ManagerSnapshot? nextSnapshot, SwitcherContext context, bool managerConnected,
         PopupMonitor? placement, bool cycleWindow, bool previous = false)
     {
+        CancelPreviewLookup();
+        feedback.IsVisible = false;
+        StartPreviewCapture();
         PopupPlacement.Place(this, placement);
-        UpdateSnapshot(nextSnapshot, context.WorkspaceId, context.MonitorId, managerConnected);
+        UpdateSnapshot(nextSnapshot, context.WorkspaceId, managerConnected);
         Topmost = false;
         Show();
         Topmost = true;
         Activate();
         if (cycleWindow) CycleWindow(previous);
+        RefreshPreviewTargetsIfNeeded();
     }
 
-    public void UpdateSnapshot(ManagerSnapshot? nextSnapshot, Guid? workspaceId, Guid? targetMonitorId,
-        bool managerConnected)
+    public void UpdateSnapshot(ManagerSnapshot? nextSnapshot, Guid? workspaceId, bool managerConnected)
     {
         var previousSelection = selectedWindowId;
         snapshot = nextSnapshot;
-        monitorId = targetMonitorId;
         connected = managerConnected;
         workspace = snapshot?.Workspaces?.FirstOrDefault(candidate => candidate.Id == workspaceId);
         groups = SpatialSwitcherPresentation.WindowGroupsForWorkspace(workspace, snapshot?.Desktop.Windows ?? []);
+        railSelection.UpdateGroups(groups);
         var candidates = Candidates();
         selectedWindowId = previousSelection is { } selected && candidates.Any(window => window.Id == selected)
             ? selected
             : snapshot?.Desktop.FocusedWindowId is { } focused && candidates.Any(window => window.Id == focused)
                 ? focused
                 : candidates.FirstOrDefault()?.Id;
+        railSelection.ObserveSelection(selectedWindowId, groups);
         RenderWindows();
+        if (IsVisible) RefreshPreviewTargetsIfNeeded();
     }
 
     public void CycleWindow(bool previous)
     {
-        var candidates = Candidates();
-        selectedWindowId = SpatialSwitcherPresentation.CycleWindow(selectedWindowId, candidates, previous);
-        RenderWindows();
+        selectedWindowId = railSelection.CycleWindow(selectedWindowId, groups, previous);
+        UpdateSelection();
     }
+
+    private void SwitchWindowRail()
+    {
+        selectedWindowId = railSelection.SwitchRail(selectedWindowId, groups);
+        UpdateSelection();
+    }
+
+    internal Guid? SelectedWindowId => selectedWindowId;
 
     private Control BuildContent()
     {
@@ -118,119 +169,45 @@ internal sealed class CurrentWorkspaceWindow : Window
             BorderBrush = CardBorderBrush,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(22)
+            Padding = new Thickness(18)
         };
         var layout = new Grid
         {
             RowDefinitions = new RowDefinitions
             {
-                new(GridLength.Auto), new(GridLength.Auto), new(GridLength.Auto),
-                new(new GridLength(1, GridUnitType.Star)), new(GridLength.Auto), new(GridLength.Auto)
+                new(new GridLength(1, GridUnitType.Star)), new(GridLength.Auto),
+                new(GridLength.Auto), new(GridLength.Auto)
             },
-            RowSpacing = 11
+            RowSpacing = 10
         };
 
-        var header = new Grid
-        {
-            ColumnDefinitions = new ColumnDefinitions
-                { new(new GridLength(1, GridUnitType.Star)), new(GridLength.Auto) }
-        };
-        var eyebrow = Label("CURRENT WORKSPACE", 10, MutedBrush, FontWeight.SemiBold);
-        header.Children.Add(eyebrow);
-        var close = new Button
-        {
-            Content = "×",
-            Width = 30,
-            Height = 30,
-            Padding = new Thickness(0),
-            Background = SurfaceBrush,
-            Foreground = TextBrush,
-            BorderBrush = CardBorderBrush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8)
-        };
-        close.Click += (_, _) => Hide();
-        Grid.SetColumn(close, 1);
-        header.Children.Add(close);
-        Grid.SetRow(header, 0);
-        layout.Children.Add(header);
-
-        workspaceTitle.FontSize = 21;
-        workspaceTitle.FontWeight = FontWeight.SemiBold;
-        workspaceTitle.Foreground = TextBrush;
-        Grid.SetRow(workspaceTitle, 1);
-        layout.Children.Add(workspaceTitle);
-
-        workspaceSettingsButton = SwitcherTheme.Action("Workflow settings");
-        workspaceSettingsButton.Click += (_, _) => openWorkspaceSettings(workspace?.Id);
-        Grid.SetRow(workspaceSettingsButton, 2);
-        layout.Children.Add(workspaceSettingsButton);
-
-        var activeArea = new Grid
-        {
-            RowDefinitions = new RowDefinitions { new(GridLength.Auto), new(new GridLength(1, GridUnitType.Star)) },
-            RowSpacing = 8
-        };
-        activeHeading.Foreground = MutedBrush;
-        activeHeading.FontSize = 10;
-        activeHeading.FontWeight = FontWeight.SemiBold;
-        activeArea.Children.Add(activeHeading);
-        var activeScroll = new ScrollViewer
-        {
-            Content = activeCards,
-            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled
-        };
-        Grid.SetRow(activeScroll, 1);
+        var activeArea = new Grid();
+        activeScroll.Content = activeCards;
+        activeScroll.HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto;
+        activeScroll.VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled;
         activeArea.Children.Add(activeScroll);
-        Grid.SetRow(activeArea, 3);
+        emptyState.Foreground = MutedBrush;
+        emptyState.HorizontalAlignment = HorizontalAlignment.Center;
+        emptyState.VerticalAlignment = VerticalAlignment.Center;
+        emptyState.IsVisible = false;
+        activeArea.Children.Add(emptyState);
         layout.Children.Add(activeArea);
 
-        var inactiveBar = new Grid
-        {
-            RowDefinitions = new RowDefinitions { new(GridLength.Auto), new(GridLength.Auto) },
-            RowSpacing = 7
-        };
-        inactiveHeading.Foreground = MutedBrush;
-        inactiveHeading.FontSize = 10;
-        inactiveHeading.FontWeight = FontWeight.SemiBold;
-        inactiveBar.Children.Add(inactiveHeading);
-        var inactiveScroll = new ScrollViewer
-        {
-            Content = inactiveCards,
-            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled
-        };
-        Grid.SetRow(inactiveScroll, 1);
-        inactiveBar.Children.Add(inactiveScroll);
-        Grid.SetRow(inactiveBar, 4);
-        layout.Children.Add(inactiveBar);
+        Grid.SetRow(inactiveDivider, 1);
+        layout.Children.Add(inactiveDivider);
+        inactiveScroll.Content = inactiveCards;
+        inactiveScroll.HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto;
+        inactiveScroll.VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled;
+        inactiveScroll.Height = 72;
+        inactiveScroll.IsVisible = false;
+        Grid.SetRow(inactiveScroll, 2);
+        layout.Children.Add(inactiveScroll);
 
-        var footer = new Grid
-        {
-            ColumnDefinitions = new ColumnDefinitions
-                { new(new GridLength(1, GridUnitType.Star)), new(GridLength.Auto) },
-            ColumnSpacing = 12
-        };
-        status.Foreground = MutedBrush;
-        status.VerticalAlignment = VerticalAlignment.Center;
-        status.TextTrimming = TextTrimming.CharacterEllipsis;
-        footer.Children.Add(status);
-        focusButton = new Button
-        {
-            Content = "Focus selected",
-            Padding = new Thickness(17, 9),
-            Background = AccentBrush,
-            Foreground = SwitcherTheme.AccentText,
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(8),
-            FontWeight = FontWeight.SemiBold
-        };
-        focusButton.Click += async (_, _) => await FocusSelectedWindowAsync();
-        Grid.SetColumn(focusButton, 1);
-        footer.Children.Add(focusButton);
-        Grid.SetRow(footer, 5);
-        layout.Children.Add(footer);
+        feedback.Foreground = MutedBrush;
+        feedback.TextTrimming = TextTrimming.CharacterEllipsis;
+        feedback.IsVisible = false;
+        Grid.SetRow(feedback, 3);
+        layout.Children.Add(feedback);
 
         root.Child = layout;
         return root;
@@ -238,155 +215,200 @@ internal sealed class CurrentWorkspaceWindow : Window
 
     private void RenderWindows()
     {
-        activeCards.Children.Clear();
-        inactiveCards.Children.Clear();
-
-        if (workspace is null)
+        var activeIds = groups.Active.Select(window => window.Id).ToArray();
+        var inactiveIds = groups.Inactive.Select(window => window.Id).ToArray();
+        if (!activeIds.SequenceEqual(renderedActiveIds) || !inactiveIds.SequenceEqual(renderedInactiveIds))
         {
-            workspaceTitle.Text = "Waiting for workspace state";
-            activeHeading.Text = "ACTIVE WINDOWS";
-            inactiveHeading.Text = "INACTIVE WINDOWS";
-            status.Text = snapshot is null
-                ? "Waiting for a manager snapshot…"
-                : "No workspace is assigned to this monitor.";
-            focusButton.IsEnabled = false;
-            workspaceSettingsButton.IsEnabled = false;
-            return;
+            foreach (var card in cards.Values) card.Dispose();
+            cards.Clear();
+            activeCards.Children.Clear();
+            inactiveCards.Children.Clear();
+            foreach (var window in groups.Active)
+            {
+                var card = CreateCard(window, inactive: false);
+                cards.Add(window.Id, card);
+                activeCards.Children.Add(card.Button);
+            }
+
+            foreach (var window in groups.Inactive)
+            {
+                var card = CreateCard(window, inactive: true);
+                cards.Add(window.Id, card);
+                inactiveCards.Children.Add(card.Button);
+            }
+
+            renderedActiveIds = activeIds;
+            renderedInactiveIds = inactiveIds;
         }
 
-        workspaceSettingsButton.IsEnabled = true;
-
-        var targetMonitor = snapshot?.Desktop.Monitors.FirstOrDefault(candidate => candidate.Id == monitorId);
-        workspaceTitle.Text =
-            targetMonitor is null ? workspace.Name : $"{workspace.Name}  ·  {targetMonitor.DeviceName}";
-        activeHeading.Text = $"ACTIVE WINDOWS  ·  {groups.Active.Count}";
-        inactiveHeading.Text = $"INACTIVE WINDOWS  ·  {groups.Inactive.Count}";
-        foreach (var window in groups.Active) activeCards.Children.Add(CreateActiveCard(window));
-        foreach (var window in groups.Inactive) inactiveCards.Children.Add(CreateInactiveCard(window));
-        if (groups.Active.Count == 0)
-            activeCards.Children.Add(Label("No visible windows in this workspace", 13, MutedBrush));
-        if (groups.Inactive.Count == 0)
-            inactiveCards.Children.Add(Label("No inactive windows", 12, MutedBrush));
-
-        var selected = Candidates().FirstOrDefault(window => window.Id == selectedWindowId);
-        status.Text = selected is null
-            ? connected ? "No switchable windows" : "Manager disconnected · focus unavailable"
-            : connected
-                ? $"{selected.Title}  ·  {ModeLabel(selected)}  ·  Alt+Tab to cycle · Enter / Space to focus · Esc to close"
-                : "Manager disconnected · focus unavailable";
-        focusButton.IsEnabled = connected && !commandBusy && selected is not null;
+        activeScroll.IsVisible = groups.Active.Count > 0;
+        emptyState.IsVisible = groups.Active.Count == 0;
+        emptyState.Text = workspace is null
+            ? snapshot is null ? "Waiting for workspace state" : "No workspace on this display"
+            : groups.Inactive.Count == 0
+                ? "No windows in this workspace"
+                : "No active windows";
+        inactiveScroll.IsVisible = WindowSwitcherPresentation.HasInactiveWindows(groups.Inactive.Count);
+        inactiveDivider.IsVisible = inactiveScroll.IsVisible;
+        foreach (var window in Candidates())
+        {
+            if (!cards.TryGetValue(window.Id, out var card)) continue;
+            card.UpdateWindow(window, window.Id == selectedWindowId, previewFrames.GetValueOrDefault(window.Id),
+                PreviewMessage(window));
+        }
     }
 
-    private Button CreateActiveCard(WindowInfo window)
+    private WindowCardVisual CreateCard(WindowInfo window, bool inactive)
     {
-        var selected = window.Id == selectedWindowId;
-        var content = new StackPanel { Spacing = 8 };
-        content.Children.Add(CreateWindowShape(window, 172, 94));
-        content.Children.Add(new TextBlock
+        var preview = new Image
         {
-            Text = window.Title,
-            FontSize = 13,
-            FontWeight = FontWeight.SemiBold,
-            Foreground = TextBrush,
-            TextTrimming = TextTrimming.CharacterEllipsis
-        });
-        var card = WindowCard(content, selected, 190, 151);
-        card.Click += (_, _) => SelectWindow(window.Id);
-        return card;
-    }
-
-    private Button CreateInactiveCard(WindowInfo window)
-    {
-        var selected = window.Id == selectedWindowId;
-        var detail = new TextBlock
+            Stretch = Stretch.UniformToFill,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var placeholder = new TextBlock
         {
-            Text = ModeLabel(window),
-            FontSize = 9,
             Foreground = MutedBrush,
-            TextTrimming = TextTrimming.CharacterEllipsis
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            TextAlignment = TextAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center
         };
-        var content = new StackPanel { Spacing = 3 };
-        content.Children.Add(new TextBlock
+        var previewContent = new Grid
         {
-            Text = window.Title,
-            FontSize = 12,
-            Foreground = TextBrush,
-            TextTrimming = TextTrimming.CharacterEllipsis
-        });
-        content.Children.Add(detail);
-        var card = WindowCard(content, selected, 166, 56);
-        card.Click += (_, _) => SelectWindow(window.Id);
-        return card;
-    }
-
-    private Border CreateWindowShape(WindowInfo window, double width, double height)
-    {
-        var canvas = new Canvas { Width = width, Height = height, ClipToBounds = true };
-        var area = snapshot?.Desktop.Monitors.FirstOrDefault(monitor => monitor.Id == window.MonitorId)?.WorkArea;
-        var areaWidth = Math.Max(1, area?.Width ?? window.Bounds.Width);
-        var areaHeight = Math.Max(1, area?.Height ?? window.Bounds.Height);
-        var shapeWidth = Math.Clamp(window.Bounds.Width / (double)areaWidth * width, 28, width - 8);
-        var shapeHeight = Math.Clamp(window.Bounds.Height / (double)areaHeight * height, 22, height - 8);
-        var left = area is null
-            ? (width - shapeWidth) / 2
-            : Math.Clamp((window.Bounds.X - area.X) / (double)areaWidth * width, 3, width - shapeWidth - 3);
-        var top = area is null
-            ? (height - shapeHeight) / 2
-            : Math.Clamp((window.Bounds.Y - area.Y) / (double)areaHeight * height, 3, height - shapeHeight - 3);
-        var fill = ShapeBrushes[(int)(Math.Abs((long)window.Id.GetHashCode()) % ShapeBrushes.Count)];
-        var shape = new Border
-        {
-            Width = shapeWidth,
-            Height = shapeHeight,
-            Background = fill,
-            BorderBrush = SwitcherTheme.ShapeBorder,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(4)
-        };
-        Canvas.SetLeft(shape, left);
-        Canvas.SetTop(shape, top);
-        canvas.Children.Add(shape);
-        return new Border
-        {
-            Width = width,
-            Height = height,
             Background = SwitcherTheme.ShapeCanvas,
+            ClipToBounds = true,
+            Children = { preview, placeholder }
+        };
+        var title = new TextBlock
+        {
+            Text = WindowTitle(window),
+            Foreground = SwitcherTheme.Text,
+            FontWeight = FontWeight.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Control content;
+        if (inactive)
+        {
+            var row = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions
+                    { new(GridLength.Auto), new(new GridLength(1, GridUnitType.Star)) },
+                ColumnSpacing = 10
+            };
+            var smallPreview = new Border
+            {
+                Width = 56,
+                Height = 40,
+                Background = SwitcherTheme.ShapeCanvas,
+                CornerRadius = new CornerRadius(5),
+                ClipToBounds = true,
+                Child = previewContent
+            };
+            row.Children.Add(smallPreview);
+            title.FontSize = 12;
+            Grid.SetColumn(title, 1);
+            row.Children.Add(title);
+            content = row;
+        }
+        else
+        {
+            var panel = new StackPanel { Spacing = 8 };
+            var largePreview = new Border
+            {
+                Height = 142,
+                Background = SwitcherTheme.ShapeCanvas,
+                BorderBrush = CardBorderBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(7),
+                ClipToBounds = true,
+                Child = previewContent
+            };
+            panel.Children.Add(largePreview);
+            title.FontSize = 14;
+            panel.Children.Add(title);
+            content = panel;
+        }
+
+        var button = new Button
+        {
+            Width =
+                inactive ? WindowSwitcherPresentation.InactiveCardWidth : WindowSwitcherPresentation.ActiveCardWidth,
+            Height = inactive
+                ? WindowSwitcherPresentation.InactiveCardHeight
+                : WindowSwitcherPresentation.ActiveCardHeight,
+            Padding = new Thickness(inactive ? 8 : 10),
+            Background = SurfaceBrush,
             BorderBrush = CardBorderBrush,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(7),
-            Child = canvas
+            CornerRadius = new CornerRadius(10),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
+            Content = content
         };
+        button.Click += (_, _) => SelectWindow(window.Id);
+        AttachCardPointerHandler(button, clickCount => HandleCardPointerPressed(window.Id, clickCount));
+        var visual = new WindowCardVisual(button, title, preview, placeholder);
+        visual.UpdateWindow(window, window.Id == selectedWindowId, previewFrames.GetValueOrDefault(window.Id),
+            PreviewMessage(window));
+        return visual;
     }
-
-    private static Button WindowCard(Control content, bool selected, double width, double height) => new()
-    {
-        Width = width,
-        Height = height,
-        Padding = new Thickness(8),
-        Background = selected ? SelectedBrush : SurfaceBrush,
-        BorderBrush = selected ? AccentBrush : CardBorderBrush,
-        BorderThickness = new Thickness(selected ? 2 : 1),
-        CornerRadius = new CornerRadius(10),
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        VerticalContentAlignment = VerticalAlignment.Stretch,
-        Content = content
-    };
 
     private void SelectWindow(Guid windowId)
     {
         selectedWindowId = windowId;
-        RenderWindows();
+        UpdateSelection();
+    }
+
+    internal bool HandleCardPointerPressed(Guid windowId, int clickCount)
+    {
+        if (!WindowSwitcherPresentation.IsDoubleClick(clickCount) ||
+            !Candidates().Any(window => window.Id == windowId)) return false;
+        selectedWindowId = windowId;
+        UpdateSelection();
+        _ = FocusSelectedWindowAsync();
+        return true;
+    }
+
+    internal static void AttachCardPointerHandler(Button button, Func<int, bool> handleCardPointerPressed)
+    {
+        button.AddHandler(InputElement.PointerPressedEvent, (_, args) =>
+        {
+            if (!args.Properties.IsLeftButtonPressed || !handleCardPointerPressed(args.ClickCount)) return;
+            args.Handled = true;
+        }, RoutingStrategies.Tunnel);
+    }
+
+    private void UpdateSelection()
+    {
+        railSelection.ObserveSelection(selectedWindowId, groups);
+        foreach (var window in Candidates())
+        {
+            if (cards.TryGetValue(window.Id, out var card))
+                card.SetSelected(window.Id == selectedWindowId);
+        }
+
+        if (selectedWindowId is { } selected && cards.TryGetValue(selected, out var selectedCard))
+            selectedCard.Button.BringIntoView();
     }
 
     private void OnKeyDown(object? sender, KeyEventArgs args)
     {
-        if (workspaceSettingsButton.IsFocused && args.Key != Key.Escape) return;
-        if (focusButton.IsFocused && args.Key != Key.Escape) return;
-
         if (args.Key == Key.Escape)
         {
             args.Handled = true;
-            Hide();
+            Dismiss();
+        }
+        else if (WindowSwitcherPresentation.IsRailSwitchKey(args.Key, args.KeyModifiers))
+        {
+            args.Handled = true;
+            SwitchWindowRail();
+        }
+        else if (WindowSwitcherPresentation.IsTabCycleKey(args.Key))
+        {
+            args.Handled = true;
+            CycleWindow(WindowSwitcherPresentation.IsPreviousTabCycle(args.Key, args.KeyModifiers));
         }
         else if (SwitcherAcceptKeyPolicy.IsAcceptKey(args.Key, args.KeyModifiers))
         {
@@ -409,26 +431,25 @@ internal sealed class CurrentWorkspaceWindow : Window
     {
         if (!connected || commandBusy || selectedWindowId is not { } targetId ||
             !Candidates().Any(window => window.Id == targetId)) return;
-        var target = Candidates().First(window => window.Id == targetId);
         commandBusy = true;
-        status.Text = $"Focusing {target.Title}…";
-        focusButton.IsEnabled = false;
+        feedback.IsVisible = false;
         try
         {
             var result = await focusWindow(targetId);
             if (result.Success)
             {
-                status.Text = $"Focused {target.Title} · revision {result.StateRevision}";
-                Hide();
+                Dismiss();
             }
             else
             {
-                status.Text = $"Focus failed · {result.ErrorCode}: {result.Message}";
+                feedback.Text = $"Focus failed · {result.ErrorCode}: {result.Message}";
+                feedback.IsVisible = true;
             }
         }
         catch (Exception error)
         {
-            status.Text = $"Focus failed · {error.Message}";
+            feedback.Text = $"Focus failed · {error.Message}";
+            feedback.IsVisible = true;
         }
         finally
         {
@@ -437,15 +458,187 @@ internal sealed class CurrentWorkspaceWindow : Window
         }
     }
 
+    private void RefreshPreviewTargetsIfNeeded()
+    {
+        WindowInfo[] candidates = connected && IsVisible
+            ? Candidates().Where(window => window.Visible && !window.Minimized).ToArray()
+            : [];
+        if (candidates.SequenceEqual(requestedPreviewCandidates)) return;
+
+        CancelPreviewLookup();
+        requestedPreviewCandidates = candidates;
+        var ids = candidates.Select(window => window.Id).Distinct().ToArray();
+        previewTargets.Clear();
+        previewFrames.Clear();
+        previewFailures.Clear();
+        previewCapture?.SetTargets([]);
+        if (!IsVisible || !connected || ids.Length == 0)
+        {
+            previewLookupPending = false;
+            previewCapture?.Pause();
+            RenderWindows();
+            return;
+        }
+
+        var cancellation = new CancellationTokenSource();
+        previewLookupCancellation = cancellation;
+        previewLookupPending = true;
+        RenderWindows();
+        _ = BindPreviewTargetsAsync(ids, cancellation);
+    }
+
+    private async Task BindPreviewTargetsAsync(IReadOnlyList<Guid> ids, CancellationTokenSource cancellation)
+    {
+        try
+        {
+            var targets = new List<WindowPreviewTarget>();
+            foreach (var chunk in ids.Chunk(PreviewTargetsRequestRules.MaximumWindowIds))
+            {
+                cancellation.Token.ThrowIfCancellationRequested();
+                var result = await queryPreviewTargets(chunk, cancellation.Token);
+                targets.AddRange(result.Targets);
+                foreach (var failure in result.Failures) previewFailures[failure.WindowId] = failure.Code;
+            }
+
+            if (cancellation.IsCancellationRequested || !ReferenceEquals(previewLookupCancellation, cancellation))
+                return;
+            previewTargets.Clear();
+            foreach (var target in targets) previewTargets[target.WindowId] = target;
+            previewCapture?.SetTargets(targets);
+            previewLookupPending = false;
+            previewLookupCancellation = null;
+            SyncPreviewCache();
+            previewCapture?.BeginSnapshotBatch(ids.Where(previewTargets.ContainsKey).ToArray());
+            RenderWindows();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception error) when (error is IOException or InvalidOperationException or
+                                          HomeDeskRemoteException or HomeDeskProtocolException)
+        {
+            if (!ReferenceEquals(previewLookupCancellation, cancellation)) return;
+            previewLookupPending = false;
+            previewLookupCancellation = null;
+            foreach (var id in ids) previewFailures[id] = error.Message;
+            RenderWindows();
+        }
+        finally
+        {
+            if (ReferenceEquals(previewLookupCancellation, cancellation)) previewLookupCancellation = null;
+            cancellation.Dispose();
+        }
+    }
+
+    private void SyncPreviewCache()
+    {
+        var targetIds = previewTargets.Keys.ToHashSet();
+        foreach (var pair in previewCapture?.LatestFrames ?? new Dictionary<Guid, OwnedPreviewFrame>())
+        {
+            if (targetIds.Contains(pair.Key)) previewFrames[pair.Key] = pair.Value;
+        }
+
+        foreach (var pair in previewCapture?.LatestFailures ?? new Dictionary<Guid, string>())
+        {
+            if (targetIds.Contains(pair.Key)) previewFailures[pair.Key] = pair.Value;
+        }
+    }
+
+    private void OnPreviewFrameChanged(object? sender, PreviewFrameChangedEventArgs args)
+    {
+        if (sender is not WindowPreviewCapture capture) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!IsVisible || !ReferenceEquals(previewCapture, capture) || !previewTargets.ContainsKey(args.WindowId))
+                return;
+            if (args.Frame is null)
+            {
+                previewFrames.Remove(args.WindowId);
+                if (args.Failure is null) previewFailures.Remove(args.WindowId);
+            }
+            else
+            {
+                previewFrames[args.WindowId] = args.Frame;
+                previewFailures.Remove(args.WindowId);
+            }
+
+            if (args.Failure is not null) previewFailures[args.WindowId] = args.Failure;
+            RenderWindows();
+        }, DispatcherPriority.Render);
+    }
+
+    private string PreviewMessage(WindowInfo window)
+    {
+        if (window.Minimized || !window.Visible) return "Preview unavailable";
+        if (!previewTargets.ContainsKey(window.Id))
+            return previewLookupPending ? "Finding preview…" : "Preview unavailable";
+        return previewFailures.TryGetValue(window.Id, out var failure)
+            ? $"Preview unavailable · {failure}"
+            : "Loading preview…";
+    }
+
+    private void StartPreviewCapture()
+    {
+        if (previewCapture is null)
+        {
+            previewCapture = new WindowPreviewCapture();
+            previewCapture.FrameChanged += OnPreviewFrameChanged;
+        }
+
+        previewCapture.Pause();
+        previewCapture.SetTargets([]);
+        requestedPreviewCandidates = [];
+        ClearPreviewPresentation();
+    }
+
+    private void CancelPreviewLookup()
+    {
+        if (previewLookupCancellation is not { } cancellation) return;
+        previewLookupCancellation = null;
+        cancellation.Cancel();
+    }
+
+    private void ClearPreviewPresentation()
+    {
+        foreach (var card in cards.Values) card.ClearPreview();
+        previewTargets.Clear();
+        previewFrames.Clear();
+        previewFailures.Clear();
+        previewLookupPending = false;
+    }
+
+    private void ReleasePreviewCapture()
+    {
+        CancelPreviewLookup();
+        if (previewCapture is { } capture)
+        {
+            previewCapture = null;
+            capture.FrameChanged -= OnPreviewFrameChanged;
+            capture.Dispose();
+        }
+
+        ClearPreviewPresentation();
+        foreach (var card in cards.Values) card.Dispose();
+        cards.Clear();
+    }
+
+    private static WriteableBitmap CreateAvaloniaBitmap(OwnedPreviewFrame frame)
+    {
+        var bitmap = new WriteableBitmap(new PixelSize(frame.Width, frame.Height), new Vector(96, 96),
+            PixelFormat.Bgra8888, AlphaFormat.Premul);
+        var pixels = frame.PixelBytes.ToArray();
+        var rowLength = checked(frame.Width * 4);
+        using var framebuffer = bitmap.Lock();
+        for (var row = 0; row < frame.Height; row++)
+            Marshal.Copy(pixels, row * rowLength, IntPtr.Add(framebuffer.Address, row * framebuffer.RowBytes),
+                rowLength);
+        return bitmap;
+    }
+
     private IReadOnlyList<WindowInfo> Candidates() => groups.Active.Concat(groups.Inactive).ToArray();
 
-    private static string ModeLabel(WindowInfo window) => window.LayoutOverflow
-        ? "Overflow · Enter / Space to restore"
-        : window.Minimized
-            ? "Minimized"
-            : !window.Visible
-                ? "Not visible"
-                : window.Mode.ToString();
+    private static string WindowTitle(WindowInfo window) =>
+        string.IsNullOrWhiteSpace(window.Title) ? window.ProcessName : window.Title;
 
     internal static TextBlock Label(string text, double size, IBrush foreground,
         FontWeight? weight = null) => new()
@@ -456,4 +649,136 @@ internal sealed class CurrentWorkspaceWindow : Window
         FontWeight = weight ?? FontWeight.Normal,
         VerticalAlignment = VerticalAlignment.Center
     };
+
+    private sealed class WindowCardVisual(Button button, TextBlock title, Image preview, TextBlock placeholder)
+        : IDisposable
+    {
+        private WriteableBitmap? bitmap;
+
+        public Button Button { get; } = button;
+
+        public void UpdateWindow(WindowInfo window, bool selected, OwnedPreviewFrame? frame, string? message)
+        {
+            title.Text = WindowTitle(window);
+            SetSelected(selected);
+            if (frame is not null && (bitmap is null || !ReferenceEquals(frame, currentFrame)))
+            {
+                var previous = bitmap;
+                bitmap = CreateAvaloniaBitmap(frame);
+                preview.Source = bitmap;
+                placeholder.IsVisible = false;
+                currentFrame = frame;
+                previous?.Dispose();
+            }
+
+            if (frame is null)
+            {
+                ClearPreview();
+                placeholder.Text = message ?? "Preview unavailable";
+            }
+        }
+
+        private OwnedPreviewFrame? currentFrame;
+
+        public void SetSelected(bool selected)
+        {
+            Button.Background = selected ? SelectedBrush : SurfaceBrush;
+            Button.BorderBrush = selected ? AccentBrush : CardBorderBrush;
+            Button.BorderThickness = new Thickness(selected ? 2 : 1);
+        }
+
+        public void ClearPreview()
+        {
+            var previous = bitmap;
+            bitmap = null;
+            currentFrame = null;
+            preview.Source = null;
+            placeholder.IsVisible = true;
+            previous?.Dispose();
+        }
+
+        public void Dispose() => ClearPreview();
+    }
+}
+
+internal static class WindowSwitcherPresentation
+{
+    public const double ActiveCardWidth = 264;
+    public const double ActiveCardHeight = 200;
+    public const double InactiveCardWidth = 220;
+    public const double InactiveCardHeight = 64;
+
+    public static bool HasInactiveWindows(int count) => count > 0;
+
+    public static bool IsTabCycleKey(Key key) => key == Key.Tab;
+
+    public static bool IsRailSwitchKey(Key key, KeyModifiers modifiers) =>
+        IsTabCycleKey(key) && modifiers.HasFlag(KeyModifiers.Control);
+
+    public static bool IsPreviousTabCycle(Key key, KeyModifiers modifiers) =>
+        IsTabCycleKey(key) && modifiers.HasFlag(KeyModifiers.Shift) &&
+        !modifiers.HasFlag(KeyModifiers.Control);
+
+    public static Guid? CycleWindow(Guid? selectedWindowId, WorkspaceWindowGroups groups, bool previous)
+    {
+        var candidates = SelectedRail(selectedWindowId, groups);
+        return SpatialSwitcherPresentation.CycleWindow(selectedWindowId, candidates, previous);
+    }
+
+    private static IReadOnlyList<WindowInfo> SelectedRail(Guid? selectedWindowId, WorkspaceWindowGroups groups)
+    {
+        if (selectedWindowId is { } selected && groups.Active.Any(window => window.Id == selected))
+            return groups.Active;
+        if (selectedWindowId is { } inactive && groups.Inactive.Any(window => window.Id == inactive))
+            return groups.Inactive;
+        return groups.Active.Count > 0 ? groups.Active : groups.Inactive;
+    }
+
+    public static bool IsDoubleClick(int clickCount) => clickCount >= 2;
+}
+
+internal sealed class WindowRailSelectionState
+{
+    private Guid? activeSelectionId;
+    private Guid? inactiveSelectionId;
+
+    public void UpdateGroups(WorkspaceWindowGroups groups)
+    {
+        if (activeSelectionId is { } active && !groups.Active.Any(window => window.Id == active))
+            activeSelectionId = null;
+        if (inactiveSelectionId is { } inactive && !groups.Inactive.Any(window => window.Id == inactive))
+            inactiveSelectionId = null;
+    }
+
+    public void ObserveSelection(Guid? selectedWindowId, WorkspaceWindowGroups groups)
+    {
+        if (selectedWindowId is not { } selected) return;
+        if (groups.Active.Any(window => window.Id == selected)) activeSelectionId = selected;
+        else if (groups.Inactive.Any(window => window.Id == selected)) inactiveSelectionId = selected;
+    }
+
+    public Guid? CycleWindow(Guid? selectedWindowId, WorkspaceWindowGroups groups, bool previous)
+    {
+        var selection = WindowSwitcherPresentation.CycleWindow(selectedWindowId, groups, previous);
+        ObserveSelection(selection, groups);
+        return selection;
+    }
+
+    public Guid? SwitchRail(Guid? selectedWindowId, WorkspaceWindowGroups groups)
+    {
+        var selectedIsActive = groups.Active.Any(window => window.Id == selectedWindowId);
+        var selectedIsInactive = groups.Inactive.Any(window => window.Id == selectedWindowId);
+        if (!selectedIsActive && !selectedIsInactive) selectedIsActive = groups.Active.Count > 0;
+        ObserveSelection(selectedWindowId, groups);
+
+        var targetRail = selectedIsActive ? groups.Inactive : groups.Active;
+        if (targetRail.Count == 0) return selectedWindowId;
+
+        var rememberedSelection = selectedIsActive ? inactiveSelectionId : activeSelectionId;
+        var selection = targetRail.Any(window => window.Id == rememberedSelection)
+            ? rememberedSelection
+            : targetRail[0].Id;
+        ObserveSelection(selection, groups);
+        return selection;
+    }
 }

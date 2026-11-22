@@ -805,6 +805,203 @@ public sealed class SpatialSwitcherTests
     }
 
     [Fact]
+    public void AltTabRailPolicyUsesCompactInactiveCardsAndHidesAnEmptyRail()
+    {
+        Assert.Equal(264, WindowSwitcherPresentation.ActiveCardWidth);
+        Assert.Equal(200, WindowSwitcherPresentation.ActiveCardHeight);
+        Assert.Equal(220, WindowSwitcherPresentation.InactiveCardWidth);
+        Assert.Equal(64, WindowSwitcherPresentation.InactiveCardHeight);
+        Assert.True(WindowSwitcherPresentation.HasInactiveWindows(2));
+        Assert.False(WindowSwitcherPresentation.HasInactiveWindows(0));
+        Assert.True(WindowSwitcherPresentation.InactiveCardHeight < WindowSwitcherPresentation.ActiveCardHeight);
+    }
+
+    [Theory]
+    [InlineData(KeyModifiers.None, false, false)]
+    [InlineData(KeyModifiers.Alt, false, false)]
+    [InlineData(KeyModifiers.Shift, false, true)]
+    [InlineData(KeyModifiers.Alt | KeyModifiers.Shift, false, true)]
+    [InlineData(KeyModifiers.Control, true, false)]
+    [InlineData(KeyModifiers.Control | KeyModifiers.Shift, true, false)]
+    [InlineData(KeyModifiers.Control | KeyModifiers.Alt, true, false)]
+    public void TabModifiersChooseRailSwitchOrDirection(KeyModifiers modifiers, bool switchRail, bool previous)
+    {
+        Assert.True(WindowSwitcherPresentation.IsTabCycleKey(Key.Tab));
+        Assert.Equal(previous, WindowSwitcherPresentation.IsPreviousTabCycle(Key.Tab, modifiers));
+        Assert.Equal(switchRail, WindowSwitcherPresentation.IsRailSwitchKey(Key.Tab, modifiers));
+        Assert.False(WindowSwitcherPresentation.IsTabCycleKey(Key.Left));
+        Assert.False(WindowSwitcherPresentation.IsRailSwitchKey(Key.Left, KeyModifiers.Control));
+        Assert.False(WindowSwitcherPresentation.IsPreviousTabCycle(Key.Left, KeyModifiers.Shift));
+    }
+
+    [Theory]
+    [InlineData(1, false)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    public void AltTabCardOnlyFocusesAfterASecondPointerPress(int clickCount, bool shouldFocus) =>
+        Assert.Equal(shouldFocus, WindowSwitcherPresentation.IsDoubleClick(clickCount));
+
+    [Fact]
+    public void AltTabCardHandlesLeftDoublePressBeforeButtonConsumesIt()
+    {
+        var child = new Border();
+        var button = new Button { Content = child };
+        var acceptedPresses = 0;
+        CurrentWorkspaceWindow.AttachCardPointerHandler(button, clickCount =>
+        {
+            if (!WindowSwitcherPresentation.IsDoubleClick(clickCount)) return false;
+            acceptedPresses++;
+            return true;
+        });
+
+        var pointer = new Pointer(1, PointerType.Mouse, true);
+        var press = CreatePointerPress(child, button, pointer, clickCount: 2, isLeftButtonPressed: true);
+        button.RaiseEvent(press);
+
+        Assert.Equal(1, acceptedPresses);
+        Assert.True(press.Handled);
+
+        button.RaiseEvent(CreatePointerPress(child, button, pointer, clickCount: 1, isLeftButtonPressed: true));
+        button.RaiseEvent(CreatePointerPress(child, button, pointer, clickCount: 2, isLeftButtonPressed: false));
+        Assert.Equal(1, acceptedPresses);
+    }
+
+    [Fact]
+    public void WindowCyclingWrapsInBothDirections()
+    {
+        var first = Window("First");
+        var second = Window("Second");
+        var windows = new[] { first, second };
+
+        Assert.Equal(second.Id, SpatialSwitcherPresentation.CycleWindow(first.Id, windows, false));
+        Assert.Equal(first.Id, SpatialSwitcherPresentation.CycleWindow(second.Id, windows, false));
+        Assert.Equal(second.Id, SpatialSwitcherPresentation.CycleWindow(first.Id, windows, true));
+    }
+
+    [Fact]
+    public void WindowCyclingWrapsWithinTheSelectedRail()
+    {
+        var firstActive = Window("Active one");
+        var secondActive = Window("Active two");
+        var firstInactive = Window("Inactive one");
+        var secondInactive = Window("Inactive two");
+        var groups = new WorkspaceWindowGroups([firstActive, secondActive], [firstInactive, secondInactive]);
+
+        Assert.Equal(secondActive.Id, WindowSwitcherPresentation.CycleWindow(firstActive.Id, groups, false));
+        Assert.Equal(firstActive.Id, WindowSwitcherPresentation.CycleWindow(secondActive.Id, groups, false));
+        Assert.Equal(secondActive.Id, WindowSwitcherPresentation.CycleWindow(firstActive.Id, groups, true));
+        Assert.Equal(firstActive.Id, WindowSwitcherPresentation.CycleWindow(secondActive.Id, groups, true));
+        Assert.Equal(secondInactive.Id, WindowSwitcherPresentation.CycleWindow(firstInactive.Id, groups, false));
+        Assert.Equal(firstInactive.Id, WindowSwitcherPresentation.CycleWindow(secondInactive.Id, groups, false));
+        Assert.Equal(secondInactive.Id, WindowSwitcherPresentation.CycleWindow(firstInactive.Id, groups, true));
+        Assert.Equal(firstInactive.Id, WindowSwitcherPresentation.CycleWindow(secondInactive.Id, groups, true));
+    }
+
+    [Fact]
+    public void SwitchingRailsRestoresEachRailsMostRecentlySelectedWindow()
+    {
+        var firstActive = Window("Active one");
+        var secondActive = Window("Active two");
+        var firstInactive = Window("Inactive one");
+        var secondInactive = Window("Inactive two");
+        var groups = new WorkspaceWindowGroups([firstActive, secondActive], [firstInactive, secondInactive]);
+        var selectionState = new WindowRailSelectionState();
+        selectionState.UpdateGroups(groups);
+        selectionState.ObserveSelection(firstActive.Id, groups);
+
+        var selected = selectionState.SwitchRail(firstActive.Id, groups);
+        Assert.Equal(firstInactive.Id, selected);
+        selected = selectionState.CycleWindow(selected, groups, previous: false);
+        Assert.Equal(secondInactive.Id, selected);
+        selected = selectionState.SwitchRail(selected, groups);
+        Assert.Equal(firstActive.Id, selected);
+
+        selectionState.ObserveSelection(secondActive.Id, groups);
+        selected = selectionState.SwitchRail(secondActive.Id, groups);
+        Assert.Equal(secondInactive.Id, selected);
+        selectionState.ObserveSelection(firstInactive.Id, groups);
+        selected = selectionState.SwitchRail(firstInactive.Id, groups);
+        Assert.Equal(secondActive.Id, selected);
+    }
+
+    [Fact]
+    public void WindowRailSwitchHandlesEmptyRailsAndMissingSelections()
+    {
+        var active = Window("Active");
+        var inactive = Window("Inactive");
+        var activeOnly = new WorkspaceWindowGroups([active], []);
+        var inactiveOnly = new WorkspaceWindowGroups([], [inactive]);
+        var both = new WorkspaceWindowGroups([active], [inactive]);
+        var missingId = Guid.NewGuid();
+        var activeState = new WindowRailSelectionState();
+        activeState.UpdateGroups(activeOnly);
+        activeState.ObserveSelection(active.Id, activeOnly);
+        var inactiveState = new WindowRailSelectionState();
+        inactiveState.UpdateGroups(inactiveOnly);
+        inactiveState.ObserveSelection(inactive.Id, inactiveOnly);
+        var emptyState = new WindowRailSelectionState();
+        emptyState.UpdateGroups(new WorkspaceWindowGroups([], []));
+        var bothState = new WindowRailSelectionState();
+        bothState.UpdateGroups(both);
+
+        Assert.Equal(active.Id, WindowSwitcherPresentation.CycleWindow(active.Id, activeOnly, false));
+        Assert.Equal(active.Id, activeState.SwitchRail(active.Id, activeOnly));
+        Assert.Equal(inactive.Id, WindowSwitcherPresentation.CycleWindow(inactive.Id, inactiveOnly, false));
+        Assert.Equal(inactive.Id, inactiveState.SwitchRail(inactive.Id, inactiveOnly));
+        Assert.Null(WindowSwitcherPresentation.CycleWindow(null, new WorkspaceWindowGroups([], []), false));
+        Assert.Null(emptyState.SwitchRail(null, new WorkspaceWindowGroups([], [])));
+
+        Assert.Equal(active.Id, WindowSwitcherPresentation.CycleWindow(null, both, false));
+        Assert.Equal(active.Id, WindowSwitcherPresentation.CycleWindow(missingId, both, false));
+        Assert.Equal(inactive.Id, bothState.SwitchRail(missingId, both));
+    }
+
+    [Fact]
+    public void RailSelectionFallsBackWhenRememberedWindowClosesOrMovesRails()
+    {
+        var firstActive = Window("Active one");
+        var secondActive = Window("Active two");
+        var firstInactive = Window("Inactive one");
+        var secondInactive = Window("Inactive two");
+        var initialGroups = new WorkspaceWindowGroups([firstActive, secondActive], [firstInactive, secondInactive]);
+        var selectionState = new WindowRailSelectionState();
+        selectionState.UpdateGroups(initialGroups);
+        selectionState.ObserveSelection(secondActive.Id, initialGroups);
+        selectionState.ObserveSelection(secondInactive.Id, initialGroups);
+
+        var updatedGroups = new WorkspaceWindowGroups([firstActive], [firstInactive, secondInactive, secondActive]);
+        selectionState.UpdateGroups(updatedGroups);
+        selectionState.ObserveSelection(firstActive.Id, updatedGroups);
+
+        var selected = selectionState.SwitchRail(firstActive.Id, updatedGroups);
+        Assert.Equal(secondInactive.Id, selected);
+        selected = selectionState.SwitchRail(selected, updatedGroups);
+        Assert.Equal(firstActive.Id, selected);
+
+        var closedGroups = new WorkspaceWindowGroups([firstActive], [firstInactive]);
+        selectionState.UpdateGroups(closedGroups);
+        selectionState.ObserveSelection(firstActive.Id, closedGroups);
+        Assert.Equal(firstInactive.Id, selectionState.SwitchRail(firstActive.Id, closedGroups));
+    }
+
+    [Fact]
+    public void CtrlTabAndCtrlShiftTabBothSwapRailsWithoutDirection()
+    {
+        var active = Window("Active");
+        var inactive = Window("Inactive");
+        var groups = new WorkspaceWindowGroups([active], [inactive]);
+        var selectionState = new WindowRailSelectionState();
+        selectionState.UpdateGroups(groups);
+        selectionState.ObserveSelection(active.Id, groups);
+
+        Assert.True(WindowSwitcherPresentation.IsRailSwitchKey(Key.Tab, KeyModifiers.Control));
+        Assert.True(WindowSwitcherPresentation.IsRailSwitchKey(Key.Tab, KeyModifiers.Control | KeyModifiers.Shift));
+        Assert.False(WindowSwitcherPresentation.IsPreviousTabCycle(Key.Tab,
+            KeyModifiers.Control | KeyModifiers.Shift));
+        Assert.Equal(inactive.Id, selectionState.SwitchRail(active.Id, groups));
+    }
+
+    [Fact]
     public void CarouselLayoutCentersFirstAndLastCardsAtScrollLimits()
     {
         var windows = new[] { Window("A"), Window("B"), Window("C"), Window("D") };
@@ -965,6 +1162,18 @@ public sealed class SpatialSwitcherTests
         bool overflow = false, bool ignored = false, WindowMode mode = WindowMode.Tiling) =>
         new(Guid.NewGuid(), Guid.NewGuid(), title, "process", "window", new(0, 0, 300, 200), visible,
             minimized, ignored, mode, LayoutOverflow: overflow);
+
+    private static PointerPressedEventArgs CreatePointerPress(Border source, Button root, Pointer pointer,
+        int clickCount, bool isLeftButtonPressed)
+    {
+        var rawModifiers = isLeftButtonPressed ? RawInputModifiers.LeftMouseButton : RawInputModifiers.RightMouseButton;
+        var updateKind = isLeftButtonPressed
+            ? PointerUpdateKind.LeftButtonPressed
+            : PointerUpdateKind.RightButtonPressed;
+        var properties = new PointerPointProperties(rawModifiers, updateKind);
+        return new PointerPressedEventArgs(source, pointer, root, new Point(0, 0), 1, properties,
+            KeyModifiers.None, clickCount);
+    }
 
     private static MonitorInfo Monitor(Guid id) =>
         new(id, id.ToString(), new(0, 0, 1920, 1080), new(0, 0, 1920, 1040), 96);
