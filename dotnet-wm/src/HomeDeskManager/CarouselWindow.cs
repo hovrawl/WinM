@@ -8,6 +8,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using HomeDesk.Client;
 using HomeDesk.Contracts;
 using System.Runtime.InteropServices;
@@ -25,7 +26,7 @@ internal sealed class CarouselWindow : Window
     private readonly Func<Guid, Task<CommandResult>> focusWindow;
     private readonly Func<Guid, Task<CommandResult>> minimizeWindow;
     private readonly Func<Guid, int, Task<CommandResult>> restoreWindow;
-    private readonly Canvas root = new() { ClipToBounds = true };
+    private readonly Canvas root = new() { ClipToBounds = true, Background = Brushes.Transparent };
     private readonly Canvas cardsHost = new() { ClipToBounds = true };
     private readonly Canvas minimizedCardsHost = new() { ClipToBounds = true };
     private readonly Border shade = new() { Background = OverlayShade, IsHitTestVisible = false };
@@ -90,6 +91,7 @@ internal sealed class CarouselWindow : Window
         root.Children.Add(status);
         root.Children.Add(minimizedRailLabel);
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
+        AttachBackgroundPointerHandler(root, cardsHost, minimizedCardsHost, HideCarousel);
         root.PointerMoved += OnPointerMoved;
         scrollAnimationTimer.Tick += OnScrollAnimationTick;
         Deactivated += (_, _) =>
@@ -858,6 +860,32 @@ internal sealed class CarouselWindow : Window
         }
 
         HideCarousel();
+    }
+
+    internal static void AttachBackgroundPointerHandler(Canvas root, Canvas cardsHost,
+        Canvas minimizedCardsHost, Action dismiss)
+    {
+        root.AddHandler(InputElement.PointerPressedEvent, (_, args) =>
+        {
+            if (!args.Properties.IsLeftButtonPressed ||
+                IsWithinCard(args.Source as Visual, root, cardsHost, minimizedCardsHost)) return;
+            args.Handled = true;
+            dismiss();
+        }, RoutingStrategies.Tunnel);
+    }
+
+    private static bool IsWithinCard(Visual? source, Canvas root, Canvas cardsHost, Canvas minimizedCardsHost)
+    {
+        var foundCard = false;
+        for (var current = source; current is not null; current = current.GetVisualParent())
+        {
+            if (ReferenceEquals(current, cardsHost) || ReferenceEquals(current, minimizedCardsHost))
+                return foundCard;
+            if (current is Button) foundCard = true;
+            if (ReferenceEquals(current, root)) return false;
+        }
+
+        return false;
     }
 
     private void HideCarousel()

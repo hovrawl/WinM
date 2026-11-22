@@ -1008,6 +1008,60 @@ public sealed class SpatialSwitcherTests
     }
 
     [Fact]
+    public void CarouselBackgroundLeftPressDismissesButCardContentAndRightPressDoNot()
+    {
+        var root = new Canvas();
+        var mainCardsHost = new Canvas();
+        var minimizedCardsHost = new Canvas();
+        var mainCardLabel = new TextBlock { Text = "Main card" };
+        var minimizedCardLabel = new TextBlock { Text = "Minimized card" };
+        var mainCard = new Button { Content = new Border { Child = mainCardLabel } };
+        var minimizedCard = new Button { Content = new Border { Child = minimizedCardLabel } };
+        var background = new Border();
+        var railGap = new Border();
+        var railLabel = new TextBlock { Text = "Minimized" };
+        root.Children.Add(mainCardsHost);
+        root.Children.Add(minimizedCardsHost);
+        root.Children.Add(background);
+        root.Children.Add(railLabel);
+        mainCardsHost.Children.Add(mainCard);
+        mainCardsHost.Children.Add(railGap);
+        minimizedCardsHost.Children.Add(minimizedCard);
+
+        var dismissals = 0;
+        CarouselWindow.AttachBackgroundPointerHandler(root, mainCardsHost, minimizedCardsHost,
+            () => dismissals++);
+        var pointer = new Pointer(1, PointerType.Mouse, true);
+
+        var backgroundPress = CreatePointerPress(background, root, pointer, clickCount: 1,
+            isLeftButtonPressed: true);
+        background.RaiseEvent(backgroundPress);
+        Assert.True(backgroundPress.Handled);
+        Assert.Equal(1, dismissals);
+
+        var gapPress = CreatePointerPress(railGap, root, pointer, clickCount: 1, isLeftButtonPressed: true);
+        railGap.RaiseEvent(gapPress);
+        Assert.True(gapPress.Handled);
+        Assert.Equal(2, dismissals);
+
+        var labelPress = CreatePointerPress(railLabel, root, pointer, clickCount: 1, isLeftButtonPressed: true);
+        railLabel.RaiseEvent(labelPress);
+        Assert.True(labelPress.Handled);
+        Assert.Equal(3, dismissals);
+
+        mainCardLabel.RaiseEvent(CreatePointerPress(mainCardLabel, root, pointer, clickCount: 1,
+            isLeftButtonPressed: true));
+        minimizedCardLabel.RaiseEvent(CreatePointerPress(minimizedCardLabel, root, pointer, clickCount: 1,
+            isLeftButtonPressed: true));
+        var rightPress = CreatePointerPress(background, root, pointer, clickCount: 1,
+            isLeftButtonPressed: false);
+        background.RaiseEvent(rightPress);
+
+        Assert.False(rightPress.Handled);
+        Assert.Equal(3, dismissals);
+    }
+
+    [Fact]
     public void WindowCyclingWrapsInBothDirections()
     {
         var first = Window("First");
@@ -1344,7 +1398,8 @@ public sealed class SpatialSwitcherTests
         return node;
     }
 
-    private static PointerPressedEventArgs CreatePointerPress(Border source, Button root, Pointer pointer,
+    private static PointerPressedEventArgs CreatePointerPress(IInputElement source, Visual root,
+        Pointer pointer,
         int clickCount, bool isLeftButtonPressed)
     {
         var rawModifiers = isLeftButtonPressed ? RawInputModifiers.LeftMouseButton : RawInputModifiers.RightMouseButton;
